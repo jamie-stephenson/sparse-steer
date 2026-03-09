@@ -1,0 +1,45 @@
+model_name: HuggingFaceTB/SmolLM2-135M-Instruct
+seed: 42
+
+# Pipeline stages to run: extract, train, eval
+stages: [extract, train, eval]
+
+# Data
+extraction_fraction: 0.5
+
+# Activation extraction
+extract_batch_size: 8
+token_position: last
+targets: [attention]
+
+# Gate training
+l0_schedule: exponential_decay
+learning_rate: 5.0e-3
+num_epochs: 5
+train_batch_size: 8
+weight_decay: 0.01
+logging_steps: 10
+save_strategy: "no"
+
+# Evaluation
+eval_batch_size: 32
+
+# Wandb
+use_wandb: false
+
+# Checkpoint IO
+input_steering_vectors_path: null
+input_sparse_steering_path: null
+
+# Device
+device: mps
+
+
+# Hard concrete gate config
+gate_config:
+  temperature: 0.33
+  stretch_limits: [-0.1, 1.1]
+  eps: 1.0e-6
+  eval_threshold: 1.0e-2
+  init_log_alpha: 0.0
+  init_log_scale: 0.0
