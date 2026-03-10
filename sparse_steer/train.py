@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import math
 import os
 from pathlib import Path
@@ -11,11 +9,11 @@ from datasets import Dataset, DatasetDict
 from transformers import DataCollatorForLanguageModeling, PreTrainedTokenizerBase, Trainer, TrainingArguments
 import wandb
 
-from ..models.base import SparseSteeringLM
+from .models.base import SparseSteeringLM
 from .hardconcrete import HardConcreteGateMixin
 
 if TYPE_CHECKING:
-    from ..experiment import ExperimentConfig
+    from .experiment import ExperimentConfig
 
 L0Schedule = Callable[[int, int], float]
 
@@ -107,7 +105,7 @@ def train_gates(
     model: SparseSteeringLM,
     tokenizer: PreTrainedTokenizerBase,
     dataset: Dataset | DatasetDict,
-    config: ExperimentConfig,
+    config: "ExperimentConfig",
     output_dir: Path,
 ) -> SparseSteeringTrainer:
     """Freeze base weights, train only HardConcrete gate parameters."""

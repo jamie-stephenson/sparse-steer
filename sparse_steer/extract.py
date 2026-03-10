@@ -11,8 +11,8 @@ from datasets import Dataset
 from tqdm import tqdm
 from transformers import PreTrainedTokenizerBase
 
-from ..models.base import SparseSteeringLM
-from .tokenize import tokenize
+from .models.base import SparseSteeringLM
+from .utils.tokenize import tokenize
 
 
 class ActivationTarget(Enum):

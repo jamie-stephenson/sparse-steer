@@ -31,15 +31,15 @@ uv run run.py <task> --config <config_path>
 ├── run.py                      # entrypoint
 ├── config.yaml                 # default experiment config
 ├── output/                     # run artifacts created at runtime
-└── sparse_steer/               # main package
+└── sparse_steer
     ├── experiment.py           # shared extract/train/eval experiment pipeline 
+    ├── extract.py              # activation collection + steering vector extraction
+    ├── hardconcrete.py         # Hard-Concrete gate config and mixin
     ├── models/                 # sparse-steering model abstractions and backends
     ├── tasks/                  # task-specific datasets/evaluation/experiment wiring
+    ├── train.py                # gate training loop (HF Trainer + L0 penalty)
     └── utils/                  
         ├── eval.py             # answer log-prob scoring utilities
-        ├── extract.py          # activation collection + steering vector extraction
-        ├── hardconcrete.py     # Hard-Concrete gate config and mixin
-        ├── tokenize.py         # chat-template text formatting and tokenization
-        └── train.py            # gate training loop (HF Trainer + L0 penalty)
+        └── tokenize.py         # chat-template text formatting and tokenization
 ```
 

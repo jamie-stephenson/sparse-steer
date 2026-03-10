@@ -6,7 +6,7 @@ from typing import Any, Literal
 import torch
 from torch import Tensor, nn
 
-from ..utils.hardconcrete import HardConcreteConfig, HardConcreteGateMixin
+from ..hardconcrete import HardConcreteConfig, HardConcreteGateMixin
 
 Component = Literal["attention", "mlp"]
 
@@ -74,14 +74,61 @@ class SparseSteeringAttention(HardConcreteGateMixin):
         return (attn_output + correction, *inputs[1:])
 
 
-class SparseSteeringMLP:
-    steering_enabled: bool
+class SparseSteeringMLP(HardConcreteGateMixin):
+    """Base class for sparse-steered MLP modules.
+
+    Subclasses must implement ``_mlp_dim`` and ``output_proj``, and call
+    ``_register_steering_hook`` at the end of their ``__init__``.
+    """
+
+    @property
+    @abstractmethod
+    def _mlp_dim(self) -> int: ...
 
     @abstractmethod
     def output_proj(self) -> nn.Module: ...
 
-    @abstractmethod
-    def set_steering_vectors(self, vectors: Tensor) -> None: ...
+    def _register_steering_hook(self) -> None:
+        self.steering_enabled = True
+        self.register_buffer(
+            "steering_vectors",
+            torch.zeros(self._mlp_dim),
+            persistent=True,
+        )
+        self._hook_handle = self.output_proj().register_forward_pre_hook(self._apply_steering)
+
+    def set_steering_vectors(self, vectors: Tensor) -> None:
+        expected = self.steering_vectors.shape
+        if vectors.shape != expected:
+            raise ValueError(
+                f"Steering vectors must have shape {tuple(expected)}, "
+                f"got {tuple(vectors.shape)}."
+            )
+        self.steering_vectors.copy_(
+            vectors.to(device=self.steering_vectors.device, dtype=self.steering_vectors.dtype)
+        )
+
+    def _apply_steering(
+        self, _module: nn.Module, inputs: tuple[Any, ...]
+    ) -> Any:
+        if not self.steering_enabled or not inputs:
+            return None
+
+        # (batch, seq, mlp_dim)
+        mlp_hidden = inputs[0]
+        assert isinstance(mlp_hidden, torch.Tensor), "steering hook saw a non-tensor input"
+        assert mlp_hidden.shape[-1] == self._mlp_dim, "steering hook received unexpected shape"
+
+        # (mlp_dim,)
+        gate = self._scaled_gate(dtype=mlp_hidden.dtype, device=mlp_hidden.device)
+
+        # (mlp_dim,)
+        steering = self.steering_vectors.to(device=mlp_hidden.device, dtype=mlp_hidden.dtype)
+
+        # (1, 1, mlp_dim)
+        correction = (steering * gate).reshape(*([1] * (mlp_hidden.ndim - 1)), self._mlp_dim)
+
+        return (mlp_hidden + correction, *inputs[1:])
 
 
 # ── Module upgrade ────────────────────────────────────────────
@@ -225,6 +272,21 @@ class SparseSteeringLM:
 
     def set_all_steering(self, vectors: dict[str, Tensor]) -> None:
         """Apply steering vectors for each component present in *vectors*."""
+        expected_components = set(getattr(self, "steering_components", []))
+        provided_components = set(vectors)
+
+        missing = sorted(expected_components - provided_components)
+        unexpected = sorted(provided_components - expected_components)
+        if missing or unexpected:
+            details = []
+            if missing:
+                details.append(f"missing expected components: {missing}")
+            if unexpected:
+                details.append(f"unexpected components: {unexpected}")
+            raise ValueError(
+                "Invalid steering vector components; " + "; ".join(details)
+            )
+
         layers = self.get_layers()
         for component, tensor in vectors.items():
             if component == "attention":

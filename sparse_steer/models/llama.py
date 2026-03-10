@@ -3,7 +3,7 @@ from typing import Any
 from torch import nn
 from transformers.models.llama.modeling_llama import LlamaAttention, LlamaForCausalLM, LlamaMLP
 
-from ..utils.hardconcrete import HardConcreteConfig
+from ..hardconcrete import HardConcreteConfig
 from .base import SparseSteeringAttention, SparseSteeringMLP, SparseSteeringLM
 
 
@@ -33,8 +33,25 @@ class LlamaSparseSteeringAttention(SparseSteeringAttention, LlamaAttention):
 
 
 class LlamaSparseSteeringMLP(SparseSteeringMLP, LlamaMLP):
+
+    @property
+    def _mlp_dim(self) -> int:
+        return self.config.intermediate_size
+
     def output_proj(self) -> nn.Module:
         return self.down_proj
+
+    # TODO: avoid repeated inits on mlp and attention
+    def __init__(
+        self, config: Any, *args: Any, gate_config: HardConcreteConfig, **kwargs: Any
+    ) -> None:
+        super().__init__(
+            config, *args,
+            num_gates=config.intermediate_size,
+            gate_config=gate_config,
+            **kwargs,
+        )
+        self._register_steering_hook()
 
 
 class LlamaSparseSteeringLM(SparseSteeringLM, LlamaForCausalLM):
@@ -53,5 +70,6 @@ class LlamaSparseSteeringLM(SparseSteeringLM, LlamaForCausalLM):
 
 __all__ = [
     "LlamaSparseSteeringAttention",
+    "LlamaSparseSteeringMLP",
     "LlamaSparseSteeringLM",
 ]

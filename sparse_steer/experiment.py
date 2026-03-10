@@ -13,15 +13,15 @@ from dotenv import load_dotenv
 from huggingface_hub import login
 from transformers import AutoConfig, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 
-from .utils.extract import (
+from .extract import (
     collect_activations,
     extract_steering_vectors,
     load_steering_vectors,
     save_steering_vectors,
 )
 from .models import MODEL_REGISTRY
-from .utils.hardconcrete import HardConcreteConfig
-from .utils.train import train_gates
+from .hardconcrete import HardConcreteConfig
+from .train import train_gates
 
 Stage = Literal["extract", "train", "eval"]
 VALID_STAGES: frozenset[Stage] = frozenset({"extract", "train", "eval"})
