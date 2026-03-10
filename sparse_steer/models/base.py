@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal
@@ -9,9 +9,6 @@ from torch import Tensor, nn
 from ..utils.hardconcrete import HardConcreteConfig, HardConcreteGateMixin
 
 Component = Literal["attention", "mlp"]
-
-
-# ── Sparse steering attention ─────────────────────────────────────────
 
 
 class SparseSteeringAttention(HardConcreteGateMixin):
@@ -77,9 +74,6 @@ class SparseSteeringAttention(HardConcreteGateMixin):
         return (attn_output + correction, *inputs[1:])
 
 
-# ── Sparse steering MLP ───────────────────────────────────────────────
-
-
 class SparseSteeringMLP:
     steering_enabled: bool
 
@@ -90,7 +84,7 @@ class SparseSteeringMLP:
     def set_steering_vectors(self, vectors: Tensor) -> None: ...
 
 
-# ── Generic module upgrade ────────────────────────────────────────────
+# ── Module upgrade ────────────────────────────────────────────
 
 
 def _copy_module_state(source: nn.Module, target: nn.Module) -> None:
@@ -134,10 +128,7 @@ def _replace_child(parent: nn.Module, old: nn.Module, new: nn.Module) -> None:
     raise ValueError("Module not found as a direct child of parent")
 
 
-
-# ── Sparse steering mixin ────────────────────────────────────────────
-
-class SparseSteeringLM(ABC):
+class SparseSteeringLM:
     """Mixin that adds sparse-steering to a ``PreTrainedModel`` subclass.
 
     Concrete classes inherit from both this mixin and a HuggingFace model::
@@ -155,8 +146,6 @@ class SparseSteeringLM(ABC):
     attn_cls: type
     mlp_cls: type
 
-    # ── abstract accessors (subclass must define) ─────────────────
-
     @abstractmethod
     def get_layers(self) -> nn.ModuleList:
         """Return the decoder layer sequence."""
@@ -171,8 +160,6 @@ class SparseSteeringLM(ABC):
     def get_mlp(self, layer: nn.Module) -> nn.Module:
         """Return the MLP submodule of *layer* (upgrade target)."""
         ...
-
-    # ── steering setup ────────────────────────────────────────────
 
     def upgrade_for_steering(
         self,

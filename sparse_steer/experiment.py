@@ -19,7 +19,7 @@ from .utils.extract import (
     load_steering_vectors,
     save_steering_vectors,
 )
-from .models import MODEL_REGISTRY, SparseSteeringLM
+from .models import MODEL_REGISTRY
 from .utils.hardconcrete import HardConcreteConfig
 from .utils.train import train_gates
 
@@ -70,7 +70,7 @@ class ExperimentConfig:
 
 
 
-class SparseSteeringExperiment(abc.ABC):
+class SparseSteeringExperiment:
     def __init__(self, config: ExperimentConfig) -> None:
         self.config = config
 
