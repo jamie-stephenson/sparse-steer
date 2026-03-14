@@ -11,7 +11,7 @@ import wandb
 
 from .models.sparse import SparseSteeringLM
 from .hardconcrete import HardConcreteGateMixin
-from .gate_tracker import GateTracker, render_gate_heatmap, render_gate_animation
+from .utils.gate_tracker import GateTracker, render_gate_heatmap, render_gate_animation
 
 if TYPE_CHECKING:
     from .experiment import ExperimentConfig

@@ -34,7 +34,6 @@ uv run run.py <task> --config <config_path>
 └── sparse_steer
     ├── experiment.py           # shared extract/train/eval experiment pipeline
     ├── extract.py              # activation collection + steering vector extraction
-    ├── gate_tracker.py         # gate sparsification tracking and visualization
     ├── hardconcrete.py         # Hard-Concrete gate config and mixin
     ├── models/
     │   ├── base.py             # shared model abstractions
@@ -44,6 +43,7 @@ uv run run.py <task> --config <config_path>
     ├── train.py                # gate training loop (HF Trainer + L0 penalty)
     └── utils/
         ├── eval.py             # answer log-prob scoring utilities
+        ├── gate_tracker.py     # gate sparsification tracking and visualization
         └── tokenize.py         # chat-template text formatting and tokenization
 ```
 
