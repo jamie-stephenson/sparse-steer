@@ -3,16 +3,19 @@ from transformers import BatchEncoding, PreTrainedTokenizerBase
 def apply_template(
     tokenizer: PreTrainedTokenizerBase,
     question: str,
-    answer: str,
+    answer: str | None = None,
 ) -> str:
+    if answer is None:
+        messages = [{"role": "user", "content": question}]
+        return tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True,
+        )
     messages = [
         {"role": "user", "content": question},
         {"role": "assistant", "content": answer},
     ]
     return tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=False,
+        messages, tokenize=False, add_generation_prompt=False,
     )
 
 

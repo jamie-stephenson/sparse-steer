@@ -14,7 +14,7 @@ def answer_log_probs(
     full_texts = [apply_template(tokenizer, q, a) for q, a in zip(questions, answers)]
 
     # Note that usually the question will be the same for all items in the batch
-    question_texts = [apply_template(tokenizer, q, "") for q in questions]
+    question_texts = [apply_template(tokenizer, q) for q in questions]
 
     full_inputs = tokenizer(
         full_texts, return_tensors="pt", padding=True,

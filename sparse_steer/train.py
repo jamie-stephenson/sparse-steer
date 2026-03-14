@@ -9,8 +9,9 @@ from datasets import Dataset, DatasetDict
 from transformers import DataCollatorForLanguageModeling, PreTrainedTokenizerBase, Trainer, TrainingArguments
 import wandb
 
-from .models.base import SparseSteeringLM
+from .models.sparse import SparseSteeringLM
 from .hardconcrete import HardConcreteGateMixin
+from .gate_tracker import GateTracker, render_gate_heatmap, render_gate_animation
 
 if TYPE_CHECKING:
     from .experiment import ExperimentConfig
@@ -38,9 +39,29 @@ def _constant(step: int, max_steps: int) -> float:
     return 0.1
 
 
+def _linear_warmup(step: int, max_steps: int) -> float:
+    """L0 weight ramps from 0 to 0.1 over training — gates learn from CE first."""
+    progress = step / max(max_steps, 1)
+    return 0.1 * progress
+
+
+def _cosine_decay(step: int, max_steps: int) -> float:
+    """L0 weight follows cosine from 0.1 to 0 — strong early sparsity, gentle end."""
+    progress = step / max(max_steps, 1)
+    return 0.05 * (1.0 + math.cos(math.pi * progress))
+
+
+def _none(step: int, max_steps: int) -> float:
+    """No L0 penalty — gates learn purely from CE loss."""
+    return 0.0
+
+
 L0_SCHEDULES: dict[str, L0Schedule] = {
     "exponential_decay": _exponential_decay,
     "constant": _constant,
+    "linear_warmup": _linear_warmup,
+    "cosine_decay": _cosine_decay,
+    "none": _none,
 }
 
 
@@ -133,8 +154,15 @@ def train_gates(
         remove_unused_columns=False,
     )
 
-    model.freeze_base_model()
+    model.freeze_base_model(freeze_log_scale=config.freeze_log_scale)
     data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+
+    callbacks = []
+    tracker = None
+    if config.track_gates:
+        tracker = GateTracker(model, use_wandb=config.use_wandb)
+        callbacks.append(tracker)
+
     trainer = SparseSteeringTrainer(
         model=model,
         args=train_args,
@@ -143,8 +171,14 @@ def train_gates(
         data_collator=data_collator,
         processing_class=tokenizer,
         l0_schedule=get_l0_schedule(config.l0_schedule),
+        callbacks=callbacks,
     )
     trainer.train()
+
+    if tracker and tracker.snapshots.steps:
+        render_gate_heatmap(tracker.snapshots, output_dir / "gate_heatmap.png")
+        render_gate_animation(tracker.snapshots, output_dir / "gate_animation.gif")
+
     return trainer
 
 

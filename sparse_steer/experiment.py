@@ -19,7 +19,7 @@ from .extract import (
     load_steering_vectors,
     save_steering_vectors,
 )
-from .models import MODEL_REGISTRY
+from .models import MODEL_REGISTRY, DENSE_MODEL_REGISTRY
 from .hardconcrete import HardConcreteConfig
 from .train import train_gates
 
@@ -32,6 +32,10 @@ class ExperimentConfig:
     model_name: str
     seed: int = 42
 
+    # === Method ===
+    method: str = "sparse"  # "sparse" or "dense"
+    steering_strength: float = 1.0  # dense only: steering multiplier
+
     # === Pipeline ===
     stages: list[Stage] = field(default_factory=lambda: ["extract", "train", "eval"])
 
@@ -42,6 +46,7 @@ class ExperimentConfig:
     extract_batch_size: int = 8
     token_position: str = "last"
     targets: list[str] = field(default_factory=lambda: ["attention"])
+    normalize_steering_vectors: bool = False
 
     # === Gate training ===
     l0_schedule: str = "exponential_decay"
@@ -51,6 +56,8 @@ class ExperimentConfig:
     weight_decay: float = 0.01
     logging_steps: int = 10
     save_strategy: str = "no"
+    freeze_log_scale: bool = False  # if True, only learn gate selection (log_alpha), not magnitude
+    track_gates: bool = False  # if True, record gate norms during training and save heatmap + animation
 
     # === Evaluation ===
     eval_batch_size: int = 32
@@ -113,20 +120,28 @@ class SparseSteeringExperiment:
         # currently build all datasets even if not using all
         extraction_ds, gate_train_ds, eval_ds = self.build_datasets(tokenizer)
         n_extraction_q = len(set(extraction_ds["question_id"])) if "question_id" in extraction_ds.column_names else len(extraction_ds)
+        train_ds, val_ds = gate_train_ds["train"], gate_train_ds["val"]
+        n_train_q = len(set(train_ds["question_id"])) if "question_id" in train_ds.column_names else len(train_ds)
+        n_val_q = len(set(val_ds["question_id"])) if "question_id" in val_ds.column_names else len(val_ds)
         print(
-            f"  Extraction: {len(extraction_ds)} rows ({n_extraction_q} questions), "
-            f"Gate training: {len(gate_train_ds['train'])} train / {len(gate_train_ds['val'])} val questions, "
+            f"  Extraction: {len(extraction_ds)} examples ({n_extraction_q} questions), "
+            f"Gate training: {len(train_ds)} train ({n_train_q} qs) / {len(val_ds)} val ({n_val_q} qs), "
             f"Eval: {len(eval_ds)} questions"
         )
 
         hf_config = AutoConfig.from_pretrained(self.config.model_name)
         model_type = getattr(hf_config, "model_type", None)
 
-        model_cls = MODEL_REGISTRY.get(model_type)
+        if self.config.method == "dense":
+            registry = DENSE_MODEL_REGISTRY
+        else:
+            registry = MODEL_REGISTRY
+
+        model_cls = registry.get(model_type)
         if model_cls is None:
             raise ValueError(
                 f"Unsupported model_type '{model_type}' for '{self.config.model_name}'. "
-                f"Supported: {sorted(MODEL_REGISTRY)}"
+                f"Supported: {sorted(registry)}"
             )
 
         steering_vectors_path: str | None = None
@@ -139,14 +154,22 @@ class SparseSteeringExperiment:
             torch_dtype=torch.float16,
         ).to(self.config.device)
 
-        gate_config = HardConcreteConfig(**self.config.gate_config)
-        if self.config.input_sparse_steering_path is not None:
-            print(f"Loading sparse steering checkpoint: {self.config.input_sparse_steering_path}")
-            model.load_sparse_steering(Path(self.config.input_sparse_steering_path))
+        if self.config.method == "sparse":
+            gate_config = HardConcreteConfig(**self.config.gate_config)
+            if self.config.input_sparse_steering_path is not None:
+                print(f"Loading sparse steering checkpoint: {self.config.input_sparse_steering_path}")
+                model.load_steering(Path(self.config.input_sparse_steering_path))
+            else:
+                print("Initialising sparse-steering model...")
+                model.upgrade_for_steering(
+                    gate_config=gate_config,
+                    steering_layer_ids=list(range(len(model.get_layers()))),
+                    steering_components=self.config.targets,
+                )
         else:
-            print("Initialising sparse-steering model...")
+            print(f"Initialising dense-steering model (steering_strength={self.config.steering_strength})...")
             model.upgrade_for_steering(
-                gate_config=gate_config,
+                steering_strength=self.config.steering_strength,
                 steering_layer_ids=list(range(len(model.get_layers()))),
                 steering_components=self.config.targets,
             )
@@ -165,6 +188,7 @@ class SparseSteeringExperiment:
             steering_vectors = extract_steering_vectors(
                 extraction_with_activations,
                 component_names,
+                normalize=self.config.normalize_steering_vectors,
             )
             sv_path = save_steering_vectors(
                 steering_vectors,
@@ -173,19 +197,19 @@ class SparseSteeringExperiment:
             )
             steering_vectors_path = str(sv_path)
             print(f"Saved steering vectors to {sv_path}")
-            model.set_all_steering(steering_vectors)
+            model.set_all_vectors(steering_vectors)
         elif self.config.input_steering_vectors_path is not None:
             vectors_path = Path(self.config.input_steering_vectors_path)
             print(f"Loading steering vectors: {vectors_path}")
             steering_vectors, _ = load_steering_vectors(vectors_path)
-            model.set_all_steering(steering_vectors)
+            model.set_all_vectors(steering_vectors)
             steering_vectors_path = str(vectors_path)
 
         if "train" in stage_set:
             assert gate_train_ds is not None
             print("Training gates...")
             train_gates(model, tokenizer, gate_train_ds, self.config, output_dir=output_dir)
-            ss_path = model.save_sparse_steering(output_dir / "sparse_steering.pt")
+            ss_path = model.save_steering(output_dir / "sparse_steering.pt")
             sparse_steering_path = str(ss_path)
             print(f"Saved sparse steering to {ss_path}")
 
@@ -238,8 +262,21 @@ class SparseSteeringExperiment:
         if len(stages) != len(set(stages)):
             raise ValueError(f"Duplicate stages are not allowed: {stages}")
 
+        if self.config.method not in ("sparse", "dense"):
+            raise ValueError(
+                f"Unknown method '{self.config.method}'. Supported: 'sparse', 'dense'."
+            )
+
+        if self.config.method == "dense" and "train" in stages:
+            raise ValueError("Training is not supported with the 'dense' method.")
+
         has_input_vectors = self.config.input_steering_vectors_path is not None
         has_input_sparse = self.config.input_sparse_steering_path is not None
+
+        if self.config.method == "dense" and has_input_sparse:
+            raise ValueError(
+                "input_sparse_steering_path is not supported with the 'dense' method."
+            )
 
         if has_input_vectors and has_input_sparse:
             raise ValueError(

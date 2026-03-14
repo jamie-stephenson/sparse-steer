@@ -1,21 +1,21 @@
 from abc import abstractmethod
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Any, Literal
 
 import torch
 from torch import Tensor, nn
 
-from ..hardconcrete import HardConcreteConfig, HardConcreteGateMixin
-
 Component = Literal["attention", "mlp"]
 
 
-class SparseSteeringAttention(HardConcreteGateMixin):
-    """Base class for sparse-steered attention modules.
+# ── Base steering modules ────────────────────────────────────────────
 
-    Subclasses must implement ``_num_heads``, ``_head_dim``, and
-    ``output_proj``, and call ``_register_steering_hook`` at the end of
+
+class BaseSteeringAttention:
+    """Abstract base for steered attention modules.
+
+    Subclasses must implement ``_num_heads``, ``_head_dim``, ``output_proj``,
+    and ``_apply_steering``, and call ``_register_steering_hook`` at the end of
     their ``__init__``.
     """
 
@@ -29,6 +29,11 @@ class SparseSteeringAttention(HardConcreteGateMixin):
 
     @abstractmethod
     def output_proj(self) -> nn.Module: ...
+
+    @abstractmethod
+    def _apply_steering(
+        self, _module: nn.Module, inputs: tuple[Any, ...]
+    ) -> Any: ...
 
     def _register_steering_hook(self) -> None:
         self.steering_enabled = True
@@ -50,35 +55,13 @@ class SparseSteeringAttention(HardConcreteGateMixin):
             vectors.to(device=self.steering_vectors.device, dtype=self.steering_vectors.dtype)
         )
 
-    def _apply_steering(
-        self, _module: nn.Module, inputs: tuple[Any, ...]
-    ) -> Any:
-        if not self.steering_enabled or not inputs:
-            return None
 
-        # (batch, seq, hidden)
-        attn_output = inputs[0]
-        expected_hidden_size = self._num_heads * self._head_dim
-        assert isinstance(attn_output, torch.Tensor), "steering hook saw a non-tensor input"
-        assert attn_output.shape[-1] == expected_hidden_size, "steering hook received unexpected shape"
+class BaseSteeringMLP:
+    """Abstract base for steered MLP modules.
 
-        # (num_heads,)
-        gate = self._scaled_gate(dtype=attn_output.dtype, device=attn_output.device)
-
-        # (num_heads, head_dim)
-        steering = self.steering_vectors.to(device=attn_output.device, dtype=attn_output.dtype)
-
-        # (1, 1, hidden)
-        correction = (steering * gate.unsqueeze(-1)).reshape(1, 1, expected_hidden_size)
-
-        return (attn_output + correction, *inputs[1:])
-
-
-class SparseSteeringMLP(HardConcreteGateMixin):
-    """Base class for sparse-steered MLP modules.
-
-    Subclasses must implement ``_mlp_dim`` and ``output_proj``, and call
-    ``_register_steering_hook`` at the end of their ``__init__``.
+    Subclasses must implement ``_mlp_dim``, ``output_proj``, and
+    ``_apply_steering``, and call ``_register_steering_hook`` at the end of
+    their ``__init__``.
     """
 
     @property
@@ -87,6 +70,11 @@ class SparseSteeringMLP(HardConcreteGateMixin):
 
     @abstractmethod
     def output_proj(self) -> nn.Module: ...
+
+    @abstractmethod
+    def _apply_steering(
+        self, _module: nn.Module, inputs: tuple[Any, ...]
+    ) -> Any: ...
 
     def _register_steering_hook(self) -> None:
         self.steering_enabled = True
@@ -108,30 +96,8 @@ class SparseSteeringMLP(HardConcreteGateMixin):
             vectors.to(device=self.steering_vectors.device, dtype=self.steering_vectors.dtype)
         )
 
-    def _apply_steering(
-        self, _module: nn.Module, inputs: tuple[Any, ...]
-    ) -> Any:
-        if not self.steering_enabled or not inputs:
-            return None
 
-        # (batch, seq, mlp_dim)
-        mlp_hidden = inputs[0]
-        assert isinstance(mlp_hidden, torch.Tensor), "steering hook saw a non-tensor input"
-        assert mlp_hidden.shape[-1] == self._mlp_dim, "steering hook received unexpected shape"
-
-        # (mlp_dim,)
-        gate = self._scaled_gate(dtype=mlp_hidden.dtype, device=mlp_hidden.device)
-
-        # (mlp_dim,)
-        steering = self.steering_vectors.to(device=mlp_hidden.device, dtype=mlp_hidden.dtype)
-
-        # (1, 1, mlp_dim)
-        correction = (steering * gate).reshape(*([1] * (mlp_hidden.ndim - 1)), self._mlp_dim)
-
-        return (mlp_hidden + correction, *inputs[1:])
-
-
-# ── Module upgrade ────────────────────────────────────────────
+# ── Module upgrade helpers ────────────────────────────────────────────
 
 
 def _copy_module_state(source: nn.Module, target: nn.Module) -> None:
@@ -140,30 +106,6 @@ def _copy_module_state(source: nn.Module, target: nn.Module) -> None:
     if source_param is not None:
         target.to(device=source_param.device, dtype=source_param.dtype)
     target.load_state_dict(source.state_dict(), strict=False)
-
-
-def _upgrade_module(
-    source: nn.Module,
-    replacement_cls: type,
-    gate_config: HardConcreteConfig,
-) -> nn.Module:
-    """Replace *source* with an instance of *replacement_cls*, copying weights.
-
-    If *source* is already the right type, just update its gate config.
-    Automatically forwards ``layer_idx`` from the source when present.
-    """
-    if isinstance(source, replacement_cls):
-        source._set_gate_config(gate_config)
-        return source
-
-    config = getattr(source, "config", None)
-    kwargs: dict[str, Any] = {}
-    layer_idx = getattr(source, "layer_idx", None)
-    if layer_idx is not None:
-        kwargs["layer_idx"] = layer_idx
-    upgraded = replacement_cls(config, gate_config=gate_config, **kwargs)
-    _copy_module_state(source, upgraded)
-    return upgraded
 
 
 def _replace_child(parent: nn.Module, old: nn.Module, new: nn.Module) -> None:
@@ -175,50 +117,33 @@ def _replace_child(parent: nn.Module, old: nn.Module, new: nn.Module) -> None:
     raise ValueError("Module not found as a direct child of parent")
 
 
-class SparseSteeringLM:
-    """Mixin that adds sparse-steering to a ``PreTrainedModel`` subclass.
+# ── Base steering LM ─────────────────────────────────────────────────
 
-    Concrete classes inherit from both this mixin and a HuggingFace model::
 
-        class LlamaSparseSteeringLM(SparseSteeringLM, LlamaForCausalLM):
-            attn_cls = GatedAttention
-            ...
+class BaseSteeringLM:
+    """Base mixin that adds steering to a ``PreTrainedModel`` subclass.
 
-    The resulting object IS the HF model, so ``Trainer``, ``.generate()``,
-    and ``.forward()`` all work directly.  Load weights with HF's
-    ``from_pretrained``, then call ``upgrade_for_steering`` to swap in
-    gated modules.
+    Concrete classes inherit from both a steering LM mixin and a HuggingFace
+    model.  Subclasses must implement ``get_layers``, ``get_attention``,
+    ``get_mlp``, and ``_upgrade_single_module``.
     """
 
     attn_cls: type
     mlp_cls: type
 
     @abstractmethod
-    def get_layers(self) -> nn.ModuleList:
-        """Return the decoder layer sequence."""
-        ...
+    def get_layers(self) -> nn.ModuleList: ...
 
     @abstractmethod
-    def get_attention(self, layer: nn.Module) -> nn.Module:
-        """Return the attention submodule of *layer* (upgrade target)."""
-        ...
+    def get_attention(self, layer: nn.Module) -> nn.Module: ...
 
     @abstractmethod
-    def get_mlp(self, layer: nn.Module) -> nn.Module:
-        """Return the MLP submodule of *layer* (upgrade target)."""
-        ...
+    def get_mlp(self, layer: nn.Module) -> nn.Module: ...
 
-    def upgrade_for_steering(
-        self,
-        gate_config: HardConcreteConfig,
-        steering_layer_ids: list[int],
-        steering_components: list[Component],
-    ) -> None:
-        """Swap in sparse steering modules for the specified layers and components."""
-        self.gate_config = gate_config
-        self.steering_layer_ids = steering_layer_ids
-        self.steering_components = steering_components
-        self._upgrade_modules()
+    @abstractmethod
+    def _upgrade_single_module(
+        self, source: nn.Module, replacement_cls: type
+    ) -> nn.Module: ...
 
     def _upgrade_modules(self) -> None:
         for i, layer in enumerate(self.get_layers()):
@@ -236,31 +161,16 @@ class SparseSteeringLM:
                         f"Unsupported steering component: {component!r}. "
                         "Supported: 'attention', 'mlp'."
                     )
-                upgraded = _upgrade_module(source, replacement_cls, self.gate_config)
+                upgraded = self._upgrade_single_module(source, replacement_cls)
                 if upgraded is not source:
                     _replace_child(layer, source, upgraded)
-
-
-    def freeze_base_model(self) -> None:
-        """Freeze everything, then unfreeze HardConcrete gate parameters."""
-        for param in self.parameters():
-            param.requires_grad = False
-        for module in self.modules():
-            if isinstance(module, HardConcreteGateMixin):
-                log_alpha = getattr(module, "log_alpha", None)
-                if log_alpha is not None:
-                    log_alpha.requires_grad = True
-                log_scale = getattr(module, "log_scale", None)
-                if log_scale is not None:
-                    log_scale.requires_grad = True
-
 
     @contextmanager
     def steering_disabled(self):
         """Context manager that temporarily disables all steering hooks."""
         steered = [
             m for m in self.modules()
-            if isinstance(m, (SparseSteeringAttention, SparseSteeringMLP))
+            if isinstance(m, (BaseSteeringAttention, BaseSteeringMLP))
         ]
         for m in steered:
             m.steering_enabled = False
@@ -270,7 +180,7 @@ class SparseSteeringLM:
             for m in steered:
                 m.steering_enabled = True
 
-    def set_all_steering(self, vectors: dict[str, Tensor]) -> None:
+    def set_all_vectors(self, vectors: dict[str, Tensor]) -> None:
         """Apply steering vectors for each component present in *vectors*."""
         expected_components = set(getattr(self, "steering_components", []))
         provided_components = set(vectors)
@@ -292,82 +202,22 @@ class SparseSteeringLM:
             if component == "attention":
                 for i, layer in enumerate(layers):
                     module = self.get_attention(layer)
-                    if isinstance(module, SparseSteeringAttention):
+                    if isinstance(module, BaseSteeringAttention):
                         module.set_steering_vectors(tensor[i])
             elif component == "mlp":
                 for i, layer in enumerate(layers):
                     module = self.get_mlp(layer)
-                    if isinstance(module, SparseSteeringMLP):
+                    if isinstance(module, BaseSteeringMLP):
                         module.set_steering_vectors(tensor[i])
             else:
                 raise ValueError(f"Unknown steering component: {component!r}")
 
-    def sparse_steering_state_dict(self) -> dict[str, Tensor]:
-        steering_terms = ("log_alpha", "log_scale", "steering_vectors")
-        return {
-            k: v
-            for k, v in self.state_dict().items()
-            if any(term in k for term in steering_terms)
-        }
-
-    def save_sparse_steering(self, path: str | Path) -> Path:
-        path = Path(path)
-        if path.suffix:
-            output_path = path
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-        else:
-            path.mkdir(parents=True, exist_ok=True)
-            output_path = path / "sparse_steering.pt"
-        payload = {
-            "config": self.gate_config.to_dict(),
-            "steering_layer_ids": self.steering_layer_ids,
-            "steering_components": self.steering_components,
-            "state_dict": self.sparse_steering_state_dict(),
-        }
-        torch.save(payload, output_path)
-        return output_path
-
-    def load_sparse_steering(
-        self,
-        path: str | Path,
-        *,
-        active_layers_only: bool = True,
-    ) -> None:
-        """Load a saved sparse-steering checkpoint and upgrade modules."""
-        payload = torch.load(Path(path), map_location="cpu")
-        state_dict = payload["state_dict"]
-        gate_config = HardConcreteConfig(**payload["config"])
-
-        steering_layer_ids = payload.get("steering_layer_ids")
-        if steering_layer_ids is None:
-            if active_layers_only:
-                steering_layer_ids = sorted(gate_config.active_layer_indices(state_dict))
-            else:
-                steering_layer_ids = list(range(len(self.get_layers())))
-
-        steering_components = payload.get("steering_components", ["attention"])
-
-        self.upgrade_for_steering(
-            gate_config=gate_config,
-            steering_layer_ids=steering_layer_ids,
-            steering_components=steering_components,
-        )
-
-        load_info = self.load_state_dict(state_dict, strict=False)
-        missing = [
-            k for k in load_info.missing_keys
-            if any(term in k for term in ("log_alpha", "log_scale", "steering_vector"))
-        ]
-        if missing:
-            raise RuntimeError(
-                f"Sparse steering checkpoint mismatch. "
-                f"Missing steering keys: {missing}."
-            )
-
 
 __all__ = [
     "Component",
-    "SparseSteeringAttention",
-    "SparseSteeringMLP",
-    "SparseSteeringLM",
+    "BaseSteeringAttention",
+    "BaseSteeringMLP",
+    "BaseSteeringLM",
+    "_copy_module_state",
+    "_replace_child",
 ]

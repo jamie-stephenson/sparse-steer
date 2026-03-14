@@ -11,7 +11,7 @@ from datasets import Dataset
 from tqdm import tqdm
 from transformers import PreTrainedTokenizerBase
 
-from .models.base import SparseSteeringLM
+from .models.base import BaseSteeringLM
 from .utils.tokenize import tokenize
 
 
@@ -80,7 +80,7 @@ def _make_gather_fn(
 
 
 def _register_hooks(
-    model: SparseSteeringLM,
+    model: BaseSteeringLM,
     layers: nn.ModuleList,
     targets: frozenset[ActivationTarget],
     gather: Callable[[Tensor], Tensor],
@@ -117,7 +117,7 @@ def _register_hooks(
 
 
 def iter_activations(
-    model: SparseSteeringLM,
+    model: BaseSteeringLM,
     tokenizer: PreTrainedTokenizerBase,
     texts: list[str],
     *,
@@ -188,7 +188,7 @@ def iter_activations(
 
 def collect_activations(
     dataset: Dataset,
-    model: SparseSteeringLM,
+    model: BaseSteeringLM,
     tokenizer: PreTrainedTokenizerBase,
     *,
     targets: ActivationTarget | str | Iterable[ActivationTarget | str] = ALL_TARGETS,

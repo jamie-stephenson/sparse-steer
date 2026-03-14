@@ -1,6 +1,6 @@
 import torch
 
-from sparse_steer.utils.extract import ActivationTarget, _normalize_targets, last_token_positions
+from sparse_steer.extract import ActivationTarget, _normalize_targets, last_token_positions
 
 
 class TestLastTokenPositions:

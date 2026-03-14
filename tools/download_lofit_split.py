@@ -8,8 +8,6 @@ Downloads the fold CSVs from the LoFiT GitHub repo and checks that:
 4. Our get_truthfulqa_dataset() produces matching rows when given the same questions
 """
 
-from __future__ import annotations
-
 import argparse
 import csv
 import os
