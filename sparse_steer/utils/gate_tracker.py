@@ -14,7 +14,7 @@ from matplotlib.figure import Figure
 from numpy import ndarray
 from transformers import TrainerCallback
 
-from .models.sparse import SparseSteeringAttention, SparseSteeringMLP
+from ..models.sparse import SparseSteeringAttention, SparseSteeringMLP
 
 
 @dataclass

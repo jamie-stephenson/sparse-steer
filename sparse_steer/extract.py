@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 import torch
-import torch.nn.functional as F
 from torch import Tensor, nn
 from datasets import Dataset
 from tqdm import tqdm
@@ -223,8 +222,6 @@ def collect_activations(
 def extract_steering_vectors(
     dataset: Dataset,
     components: list[str],
-    *,
-    normalize: bool = False,
 ) -> dict[str, Tensor]:
     """Compute mean-difference steering vectors from a dataset with activation columns.
 
@@ -233,7 +230,6 @@ def extract_steering_vectors(
             component (e.g. ``"attention"``, ``"mlp"``, ``"residual"``).
         components: Component names to extract. Pass the list returned by
             ``collect_activations``, or a subset of it.
-        normalize: If ``True``, L2-normalise each steering vector.
     """
     missing = set(components) - set(dataset.column_names)
     if missing:
@@ -247,8 +243,6 @@ def extract_steering_vectors(
     for name in components:
         acts = torch.tensor(dataset[name])
         diff = acts[positive].float().mean(0) - acts[~positive].float().mean(0)
-        if normalize:
-            diff = F.normalize(diff, dim=-1)
         result[name] = diff
     return result
 

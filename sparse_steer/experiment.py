@@ -188,7 +188,6 @@ class SparseSteeringExperiment:
             steering_vectors = extract_steering_vectors(
                 extraction_with_activations,
                 component_names,
-                normalize=self.config.normalize_steering_vectors,
             )
             sv_path = save_steering_vectors(
                 steering_vectors,
@@ -197,12 +196,12 @@ class SparseSteeringExperiment:
             )
             steering_vectors_path = str(sv_path)
             print(f"Saved steering vectors to {sv_path}")
-            model.set_all_vectors(steering_vectors)
+            model.set_all_vectors(steering_vectors, normalize=self.config.normalize_steering_vectors)
         elif self.config.input_steering_vectors_path is not None:
             vectors_path = Path(self.config.input_steering_vectors_path)
             print(f"Loading steering vectors: {vectors_path}")
             steering_vectors, _ = load_steering_vectors(vectors_path)
-            model.set_all_vectors(steering_vectors)
+            model.set_all_vectors(steering_vectors, normalize=self.config.normalize_steering_vectors)
             steering_vectors_path = str(vectors_path)
 
         if "train" in stage_set:

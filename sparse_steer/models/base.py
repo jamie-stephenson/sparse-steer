@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from typing import Any, Literal
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor, nn
 
 Component = Literal["attention", "mlp"]
@@ -180,7 +181,9 @@ class BaseSteeringLM:
             for m in steered:
                 m.steering_enabled = True
 
-    def set_all_vectors(self, vectors: dict[str, Tensor]) -> None:
+    def set_all_vectors(
+        self, vectors: dict[str, Tensor], *, normalize: bool = False,
+    ) -> None:
         """Apply steering vectors for each component present in *vectors*."""
         expected_components = set(getattr(self, "steering_components", []))
         provided_components = set(vectors)
@@ -196,6 +199,9 @@ class BaseSteeringLM:
             raise ValueError(
                 "Invalid steering vector components; " + "; ".join(details)
             )
+
+        if normalize:
+            vectors = {k: F.normalize(v, dim=-1) for k, v in vectors.items()}
 
         layers = self.get_layers()
         for component, tensor in vectors.items():
