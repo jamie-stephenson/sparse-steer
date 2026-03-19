@@ -1,4 +1,4 @@
-model_name: HuggingFaceTB/SmolLM2-135M-Instruct
+model_name: Qwen/Qwen2.5-0.5B-Instruct
 seed: 42
 
 # Pipeline stages to run: extract, train, eval
@@ -13,13 +13,19 @@ token_position: last
 targets: [attention]
 
 # Gate training
-l0_schedule: exponential_decay
-learning_rate: 5.0e-3
-num_epochs: 5
+l0_scheduler_type: linear_increase
+l0_lambda: 0.005
+learning_rate: 1.5e-2
+num_epochs: 2
 train_batch_size: 8
 weight_decay: 0.01
-logging_steps: 10
+logging_steps: 1
 save_strategy: "no"
+track_gates: true
+
+# MCQ modes
+extraction_mcq_mode: mc1
+gate_train_mcq_mode: mc1
 
 # Evaluation
 eval_batch_size: 32
@@ -41,5 +47,5 @@ gate_config:
   stretch_limits: [-0.1, 1.1]
   eps: 1.0e-6
   eval_threshold: 1.0e-2
-  init_log_alpha: 0.0
-  init_log_scale: 0.0
+  init_log_alpha: 3.378546987500856
+  init_log_scale: 2.7913628431532307

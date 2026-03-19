@@ -28,14 +28,14 @@ def load_runs() -> list[dict]:
         # Label from model name and timestamp
         model_name = summary["config"]["model_name"].split("/")[-1]
         timestamp = summary_path.parent.name
-        l0_info = summary["config"].get("l0_schedule", summary["config"].get("l0_lambda", "?"))
+        l0_info = summary["config"].get("l0_scheduler_type", summary["config"].get("l0_lambda", "?"))
         summary["label"] = model_name
         summary["short_label"] = model_name
         summary["run_dir"] = str(summary_path.parent)
         runs.append(summary)
 
     # Only keep runs that used the exponential_decay schedule
-    runs = [r for r in runs if r["config"].get("l0_schedule") == "exponential_decay"]
+    runs = [r for r in runs if r["config"].get("l0_scheduler_type") == "exponential_decay"]
     return runs
 
 

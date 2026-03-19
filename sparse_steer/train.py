@@ -32,23 +32,23 @@ def compute_l0_penalty(model: nn.Module) -> Tensor:
 
 def _exponential_decay(step: int, max_steps: int) -> float:
     progress = step / max(max_steps, 1)
-    return 0.1 * math.exp(-3.0 * progress)
+    return math.exp(-3.0 * progress)
 
 
 def _constant(step: int, max_steps: int) -> float:
-    return 0.1
+    return 1.0
 
 
-def _linear_warmup(step: int, max_steps: int) -> float:
-    """L0 weight ramps from 0 to 0.1 over training — gates learn from CE first."""
+def _linear_increase(step: int, max_steps: int) -> float:
+    """Ramps from 0 to 1 over training — gates learn from CE first."""
     progress = step / max(max_steps, 1)
-    return 0.1 * progress
+    return progress
 
 
 def _cosine_decay(step: int, max_steps: int) -> float:
-    """L0 weight follows cosine from 0.1 to 0 — strong early sparsity, gentle end."""
+    """Cosine from 1 to 0 — strong early sparsity, gentle end."""
     progress = step / max(max_steps, 1)
-    return 0.05 * (1.0 + math.cos(math.pi * progress))
+    return 0.5 * (1.0 + math.cos(math.pi * progress))
 
 
 def _none(step: int, max_steps: int) -> float:
@@ -57,18 +57,18 @@ def _none(step: int, max_steps: int) -> float:
 
 
 L0_SCHEDULES: dict[str, L0Schedule] = {
+    "linear_increase": _linear_increase,
     "exponential_decay": _exponential_decay,
     "constant": _constant,
-    "linear_warmup": _linear_warmup,
     "cosine_decay": _cosine_decay,
     "none": _none,
 }
 
 
-def get_l0_schedule(name: str) -> L0Schedule:
+def get_l0_scheduler_type(name: str) -> L0Schedule:
     if name not in L0_SCHEDULES:
         raise ValueError(
-            f"Unknown l0_schedule '{name}'. Available: {sorted(L0_SCHEDULES)}"
+            f"Unknown l0_scheduler_type '{name}'. Available: {sorted(L0_SCHEDULES)}"
         )
     return L0_SCHEDULES[name]
 
@@ -78,12 +78,13 @@ def get_l0_schedule(name: str) -> L0Schedule:
 class SparseSteeringTrainer(Trainer):
     """HF Trainer that adds an L0 sparsity penalty to the CE loss."""
 
-    def __init__(self, *args, l0_schedule: L0Schedule, **kwargs) -> None:
+    def __init__(self, *args, l0_schedule: L0Schedule, l0_lambda: float = 0.1, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.l0_schedule = l0_schedule
+        self.l0_lambda = l0_lambda
 
     def _get_l0_lambda(self) -> float:
-        return self.l0_schedule(self.state.global_step, self.state.max_steps)
+        return self.l0_lambda * self.l0_schedule(self.state.global_step, self.state.max_steps)
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         outputs = model(**inputs)
@@ -128,6 +129,7 @@ def train_gates(
     dataset: Dataset | DatasetDict,
     config: "ExperimentConfig",
     output_dir: Path,
+    extra_callbacks: list | None = None,
 ) -> SparseSteeringTrainer:
     """Freeze base weights, train only HardConcrete gate parameters."""
     if config.use_wandb:
@@ -145,6 +147,8 @@ def train_gates(
         num_train_epochs=config.num_epochs,
         per_device_train_batch_size=config.train_batch_size,
         learning_rate=config.learning_rate,
+        lr_scheduler_type=config.lr_scheduler_type,
+        warmup_ratio=config.warmup_ratio,
         weight_decay=config.weight_decay,
         logging_steps=config.logging_steps,
         save_strategy=config.save_strategy,
@@ -157,7 +161,7 @@ def train_gates(
     model.freeze_base_model(freeze_log_scale=config.freeze_log_scale)
     data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
-    callbacks = []
+    callbacks = list(extra_callbacks or [])
     tracker = None
     if config.track_gates:
         tracker = GateTracker(model, use_wandb=config.use_wandb)
@@ -170,7 +174,8 @@ def train_gates(
         eval_dataset=eval_dataset,
         data_collator=data_collator,
         processing_class=tokenizer,
-        l0_schedule=get_l0_schedule(config.l0_schedule),
+        l0_schedule=get_l0_scheduler_type(config.l0_scheduler_type),
+        l0_lambda=config.l0_lambda,
         callbacks=callbacks,
     )
     trainer.train()
@@ -186,7 +191,7 @@ __all__ = [
     "L0Schedule",
     "L0_SCHEDULES",
     "compute_l0_penalty",
-    "get_l0_schedule",
+    "get_l0_scheduler_type",
     "SparseSteeringTrainer",
     "train_gates",
 ]

@@ -49,8 +49,11 @@ class ExperimentConfig:
     normalize_steering_vectors: bool = False
 
     # === Gate training ===
-    l0_schedule: str = "exponential_decay"
+    l0_scheduler_type: str = "linear_increase"
+    l0_lambda: float = 0.1
     learning_rate: float = 5e-3
+    lr_scheduler_type: str = "cosine"
+    warmup_ratio: float = 0.1
     num_epochs: int = 5
     train_batch_size: int = 8
     weight_decay: float = 0.01

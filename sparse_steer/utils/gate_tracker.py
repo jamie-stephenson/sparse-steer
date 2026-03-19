@@ -1,9 +1,8 @@
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+import numpy.ma as ma
 import torch
 
 import matplotlib
@@ -15,6 +14,13 @@ from numpy import ndarray
 from transformers import TrainerCallback
 
 from ..models.sparse import SparseSteeringAttention, SparseSteeringMLP
+
+
+def _masked_cmap(base: str = "viridis"):
+    """Return a colormap that renders masked (closed-gate) values as black."""
+    cmap = plt.get_cmap(base).copy()
+    cmap.set_bad(color="black")
+    return cmap
 
 
 @dataclass
@@ -128,10 +134,12 @@ def _build_heatmap_figure(
         fig, ax_mlp = plt.subplots(figsize=(3, max(4, n_layers * 0.3)))
         ax_attn = None
 
+    cmap = _masked_cmap()
+
     if has_attn:
-        data = snapshots.attn_norms[step_idx]
+        data = ma.masked_equal(snapshots.attn_norms[step_idx], 0.0)
         im = ax_attn.imshow(
-            data, aspect="auto", origin="lower", vmin=0, cmap="viridis"
+            data, aspect="auto", origin="lower", vmin=0, cmap=cmap
         )
         ax_attn.set_yticks(range(n_layers))
         ax_attn.set_yticklabels(snapshots.layer_ids)
@@ -141,9 +149,9 @@ def _build_heatmap_figure(
         fig.colorbar(im, ax=ax_attn, fraction=0.046, pad=0.04)
 
     if has_mlp:
-        data = snapshots.mlp_norms[step_idx].reshape(-1, 1)
+        data = ma.masked_equal(snapshots.mlp_norms[step_idx].reshape(-1, 1), 0.0)
         im = ax_mlp.imshow(
-            data, aspect="auto", origin="lower", vmin=0, cmap="viridis"
+            data, aspect="auto", origin="lower", vmin=0, cmap=cmap
         )
         ax_mlp.set_yticks(range(n_layers))
         if ax_attn is None:
@@ -183,6 +191,7 @@ def render_gate_animation(
     vmax_attn = max(a.max() for a in snapshots.attn_norms) if has_attn else 0
     vmax_mlp = max(m.max() for m in snapshots.mlp_norms) if has_mlp else 0
     vmax = max(vmax_attn, vmax_mlp, 1e-8)
+    cmap = _masked_cmap()
 
     if has_attn and has_mlp:
         num_heads = snapshots.attn_norms[0].shape[1]
@@ -201,8 +210,9 @@ def render_gate_animation(
     im_attn = im_mlp = None
     if has_attn:
         im_attn = ax_attn.imshow(
-            snapshots.attn_norms[0], aspect="auto", origin="lower",
-            vmin=0, vmax=vmax, cmap="viridis",
+            ma.masked_equal(snapshots.attn_norms[0], 0.0),
+            aspect="auto", origin="lower",
+            vmin=0, vmax=vmax, cmap=cmap,
         )
         ax_attn.set_yticks(range(n_layers))
         ax_attn.set_yticklabels(snapshots.layer_ids)
@@ -213,8 +223,9 @@ def render_gate_animation(
 
     if has_mlp:
         im_mlp = ax_mlp.imshow(
-            snapshots.mlp_norms[0].reshape(-1, 1), aspect="auto", origin="lower",
-            vmin=0, vmax=vmax, cmap="viridis",
+            ma.masked_equal(snapshots.mlp_norms[0].reshape(-1, 1), 0.0),
+            aspect="auto", origin="lower",
+            vmin=0, vmax=vmax, cmap=cmap,
         )
         ax_mlp.set_yticks(range(n_layers))
         if ax_attn is None:
@@ -231,9 +242,9 @@ def render_gate_animation(
 
     def _update(frame_idx):
         if im_attn is not None:
-            im_attn.set_data(snapshots.attn_norms[frame_idx])
+            im_attn.set_data(ma.masked_equal(snapshots.attn_norms[frame_idx], 0.0))
         if im_mlp is not None:
-            im_mlp.set_data(snapshots.mlp_norms[frame_idx].reshape(-1, 1))
+            im_mlp.set_data(ma.masked_equal(snapshots.mlp_norms[frame_idx].reshape(-1, 1), 0.0))
         title.set_text(
             f"Effective steering norm \u2014 step {snapshots.steps[frame_idx]}"
         )
