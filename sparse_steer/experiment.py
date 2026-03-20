@@ -1,5 +1,6 @@
 import abc
 import json
+import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,15 @@ from dotenv import load_dotenv
 from huggingface_hub import login
 from transformers import AutoConfig, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 
+from .utils.cache import (
+    ArtifactType,
+    CacheHit,
+    load_cached_json,
+    lookup as cache_lookup,
+    print_cache_warnings,
+    store as cache_store,
+    store_json as cache_store_json,
+)
 from .extract import (
     collect_activations,
     extract_steering_vectors,
@@ -24,7 +34,11 @@ from .hardconcrete import HardConcreteConfig
 from .train import train_gates
 
 Stage = Literal["extract", "train", "eval"]
-VALID_STAGES: frozenset[Stage] = frozenset({"extract", "train", "eval"})
+
+_METHOD_STAGES: dict[str, list[Stage]] = {
+    "sparse": ["extract", "train", "eval"],
+    "dense": ["extract", "eval"],
+}
 
 
 @dataclass
@@ -36,9 +50,6 @@ class ExperimentConfig:
     method: str = "sparse"  # "sparse" or "dense"
     steering_strength: float = 1.0  # dense only: steering multiplier
 
-    # === Pipeline ===
-    stages: list[Stage] = field(default_factory=lambda: ["extract", "train", "eval"])
-
     # === Data ===
     extraction_fraction: float = 0.5
 
@@ -49,11 +60,12 @@ class ExperimentConfig:
     normalize_steering_vectors: bool = False
 
     # === Gate training ===
-    l0_scheduler_type: str = "linear_increase"
+    l0_scheduler_type: str = "warmup"
+    l0_warmup_ratio: float = 0.1  # fraction of training steps to ramp L0 penalty
     l0_lambda: float = 0.1
     learning_rate: float = 5e-3
     lr_scheduler_type: str = "cosine"
-    warmup_ratio: float = 0.1
+    lr_warmup_ratio: float = 0.1
     num_epochs: int = 5
     train_batch_size: int = 8
     weight_decay: float = 0.01
@@ -68,9 +80,8 @@ class ExperimentConfig:
     # === wandb ===
     use_wandb: bool = False
 
-    # === Checkpoint IO ===
-    input_steering_vectors_path: str | None = None
-    input_sparse_steering_path: str | None = None
+    # === Cache ===
+    use_cache: bool = True
 
     # === Device ===
     device: str = "cpu"
@@ -104,9 +115,64 @@ class SparseSteeringExperiment:
     ) -> dict[str, float]:
         ...
 
+    # ── Cache hooks (override in task subclasses) ─────────────────
+
+    def extra_cache_fields(self, artifact_type: ArtifactType) -> dict[str, Any]:
+        """Task-specific config fields to include in the cache key."""
+        return {}
+
+    def cache_source_files(self, artifact_type: ArtifactType) -> list[str]:
+        """Task-specific source files for staleness detection."""
+        return []
+
+    # ── Cache helpers ─────────────────────────────────────────────
+
+    def _cache_kwargs(self, artifact_type: ArtifactType) -> dict[str, Any]:
+        return dict(
+            extra_fields=self.extra_cache_fields(artifact_type),
+            extra_sources=self.cache_source_files(artifact_type),
+        )
+
+    def _try_cache_lookup(self, artifact_type: ArtifactType) -> CacheHit | None:
+        if not self.config.use_cache:
+            return None
+        hit = cache_lookup(
+            artifact_type, self.config, self.task_name,
+            **self._cache_kwargs(artifact_type),
+        )
+        if hit is not None:
+            print_cache_warnings(artifact_type.value, hit.warnings)
+            print(f"  Cache hit: {artifact_type.value} ({hit.artifact_path})")
+        return hit
+
+    def _cache_store(
+        self,
+        artifact_type: ArtifactType,
+        artifact_path: Path,
+        extra_files: list[Path] | None = None,
+    ) -> Path:
+        if not self.config.use_cache:
+            return artifact_path
+        return cache_store(
+            artifact_type, self.config, self.task_name, artifact_path,
+            extra_files=extra_files,
+            **self._cache_kwargs(artifact_type),
+        )
+
+    def _cache_store_json(self, artifact_type: ArtifactType, data: dict[str, Any]) -> Path:
+        if not self.config.use_cache:
+            return Path("/dev/null")
+        return cache_store_json(
+            artifact_type, self.config, self.task_name, data,
+            **self._cache_kwargs(artifact_type),
+        )
+
+    # ── Main pipeline ─────────────────────────────────────────────
+
     def run(self) -> dict[str, Any]:
         self._validate_lifecycle()
-        stage_set = set(self.config.stages)
+        stages = _METHOD_STAGES[self.config.method]
+        stage_set = set(stages)
 
         load_dotenv()
         if token := os.getenv("HF_API_KEY"):
@@ -120,7 +186,6 @@ class SparseSteeringExperiment:
             tokenizer.pad_token = tokenizer.eos_token
 
         print("Preparing datasets...")
-        # currently build all datasets even if not using all
         extraction_ds, gate_train_ds, eval_ds = self.build_datasets(tokenizer)
         n_extraction_q = len(set(extraction_ds["question_id"])) if "question_id" in extraction_ds.column_names else len(extraction_ds)
         train_ds, val_ds = gate_train_ds["train"], gate_train_ds["val"]
@@ -151,6 +216,7 @@ class SparseSteeringExperiment:
         sparse_steering_path: str | None = None
         metrics: dict[str, float] = {}
         baseline_metrics: dict[str, float] = {}
+        cache_info: dict[str, Any] = {}
 
         model = model_cls.from_pretrained(
             self.config.model_name,
@@ -159,16 +225,12 @@ class SparseSteeringExperiment:
 
         if self.config.method == "sparse":
             gate_config = HardConcreteConfig(**self.config.gate_config)
-            if self.config.input_sparse_steering_path is not None:
-                print(f"Loading sparse steering checkpoint: {self.config.input_sparse_steering_path}")
-                model.load_steering(Path(self.config.input_sparse_steering_path))
-            else:
-                print("Initialising sparse-steering model...")
-                model.upgrade_for_steering(
-                    gate_config=gate_config,
-                    steering_layer_ids=list(range(len(model.get_layers()))),
-                    steering_components=self.config.targets,
-                )
+            print("Initialising sparse-steering model...")
+            model.upgrade_for_steering(
+                gate_config=gate_config,
+                steering_layer_ids=list(range(len(model.get_layers()))),
+                steering_components=self.config.targets,
+            )
         else:
             print(f"Initialising dense-steering model (steering_strength={self.config.steering_strength})...")
             model.upgrade_for_steering(
@@ -177,66 +239,113 @@ class SparseSteeringExperiment:
                 steering_components=self.config.targets,
             )
 
-        if "extract" in stage_set:
-            extraction_with_activations, component_names = collect_activations(
-                extraction_ds,
-                model,
-                tokenizer,
-                targets=self.config.targets,
-                batch_size=self.config.extract_batch_size,
-                token_position=self.config.token_position,
-            )
+        # ── Train (check cache first — includes vectors) ─────────
+        ss_hit = self._try_cache_lookup(ArtifactType.SPARSE_STEERING) if "train" in stage_set else None
+        if ss_hit is not None:
+            model.load_steering(ss_hit.artifact_path)
+            sparse_steering_path = str(ss_hit.artifact_path)
+            cache_info["sparse_steering"] = {"status": "hit", "path": sparse_steering_path}
+            # restore cached gate plots
+            for name in ("gate_heatmap.png", "gate_animation.gif"):
+                cached = ss_hit.artifact_path.parent / name
+                if cached.is_file():
+                    shutil.copy2(cached, output_dir / name)
+        else:
+            # ── Extract ───────────────────────────────────────────
+            sv_hit = self._try_cache_lookup(ArtifactType.STEERING_VECTORS)
+            if sv_hit is not None:
+                steering_vectors, _ = load_steering_vectors(sv_hit.artifact_path)
+                steering_vectors_path = str(sv_hit.artifact_path)
+                cache_info["steering_vectors"] = {"status": "hit", "path": steering_vectors_path}
+            elif "extract" in stage_set:
+                extraction_with_activations, component_names = collect_activations(
+                    extraction_ds,
+                    model,
+                    tokenizer,
+                    targets=self.config.targets,
+                    batch_size=self.config.extract_batch_size,
+                    token_position=self.config.token_position,
+                )
+                print("Computing steering vectors...")
+                steering_vectors = extract_steering_vectors(
+                    extraction_with_activations,
+                    component_names,
+                )
+                sv_path = save_steering_vectors(
+                    steering_vectors,
+                    output_dir / "steering_vectors.pt",
+                    metadata=asdict(self.config),
+                )
+                steering_vectors_path = str(
+                    self._cache_store(ArtifactType.STEERING_VECTORS, sv_path)
+                )
+                print(f"Saved steering vectors to {steering_vectors_path}")
+                cache_info["steering_vectors"] = {"status": "miss"}
 
-            print("Computing steering vectors...")
-            steering_vectors = extract_steering_vectors(
-                extraction_with_activations,
-                component_names,
-            )
-            sv_path = save_steering_vectors(
-                steering_vectors,
-                output_dir / "steering_vectors.pt",
-                metadata=asdict(self.config),
-            )
-            steering_vectors_path = str(sv_path)
-            print(f"Saved steering vectors to {sv_path}")
-            model.set_all_vectors(steering_vectors, normalize=self.config.normalize_steering_vectors)
-        elif self.config.input_steering_vectors_path is not None:
-            vectors_path = Path(self.config.input_steering_vectors_path)
-            print(f"Loading steering vectors: {vectors_path}")
-            steering_vectors, _ = load_steering_vectors(vectors_path)
-            model.set_all_vectors(steering_vectors, normalize=self.config.normalize_steering_vectors)
-            steering_vectors_path = str(vectors_path)
+            if steering_vectors_path is not None:
+                model.set_all_vectors(steering_vectors, normalize=self.config.normalize_steering_vectors)
 
-        if "train" in stage_set:
-            assert gate_train_ds is not None
-            print("Training gates...")
-            train_gates(model, tokenizer, gate_train_ds, self.config, output_dir=output_dir)
-            ss_path = model.save_steering(output_dir / "sparse_steering.pt")
-            sparse_steering_path = str(ss_path)
-            print(f"Saved sparse steering to {ss_path}")
+            # ── Train ─────────────────────────────────────────────
+            if "train" in stage_set:
+                assert gate_train_ds is not None
+                print("Training gates...")
+                train_gates(model, tokenizer, gate_train_ds, self.config, output_dir=output_dir)
+                ss_path = model.save_steering(output_dir / "sparse_steering.pt")
+                sparse_steering_path = str(
+                    self._cache_store(
+                        ArtifactType.SPARSE_STEERING, ss_path,
+                        extra_files=[
+                            output_dir / "gate_heatmap.png",
+                            output_dir / "gate_animation.gif",
+                        ],
+                    )
+                )
+                print(f"Saved sparse steering to {sparse_steering_path}")
+                cache_info["sparse_steering"] = {"status": "miss"}
 
+        # ── Eval ──────────────────────────────────────────────────
         if "eval" in stage_set:
             assert eval_ds is not None
-            print("Evaluating baseline (steering disabled)...")
-            with model.steering_disabled():
-                baseline_metrics = self.run_task_evaluation(model, tokenizer, eval_ds)
+
+            # Baseline eval
+            baseline_hit = self._try_cache_lookup(ArtifactType.BASELINE_EVAL)
+            if baseline_hit is not None:
+                baseline_metrics = load_cached_json(baseline_hit.artifact_path)
+                cache_info["baseline_eval"] = {"status": "hit", "path": str(baseline_hit.artifact_path)}
+            else:
+                print("Evaluating baseline (steering disabled)...")
+                with model.steering_disabled():
+                    baseline_metrics = self.run_task_evaluation(model, tokenizer, eval_ds)
+                self._cache_store_json(ArtifactType.BASELINE_EVAL, baseline_metrics)
+                cache_info["baseline_eval"] = {"status": "miss"}
             for mode, score in baseline_metrics.items():
                 print(f"  Baseline {mode.upper()}: {score:.4f}")
 
-            print("Evaluating with steering...")
-            metrics = self.run_task_evaluation(model, tokenizer, eval_ds)
+            # Steered eval
+            steered_hit = self._try_cache_lookup(ArtifactType.STEERED_EVAL)
+            if steered_hit is not None:
+                metrics = load_cached_json(steered_hit.artifact_path)
+                cache_info["steered_eval"] = {"status": "hit", "path": str(steered_hit.artifact_path)}
+            else:
+                print("Evaluating with steering...")
+                metrics = self.run_task_evaluation(model, tokenizer, eval_ds)
+                self._cache_store_json(ArtifactType.STEERED_EVAL, metrics)
+                cache_info["steered_eval"] = {"status": "miss"}
             for mode, score in metrics.items():
                 print(f"  Steered {mode.upper()}: {score:.4f}")
 
+        # ── Summary ───────────────────────────────────────────────
         summary: dict[str, Any] = {
             "task": self.task_name,
-            "stages": list(self.config.stages),
-            "metrics": metrics,
+            "method": self.config.method,
+            "stages": stages,
             "baseline_metrics": baseline_metrics if "eval" in stage_set else {},
+            "steered_metrics": metrics if "eval" in stage_set else {},
             "artifacts": {
                 "steering_vectors_path": steering_vectors_path,
                 "sparse_steering_path": sparse_steering_path,
             },
+            "cache_info": cache_info,
             "config": asdict(self.config),
         }
 
@@ -244,55 +353,13 @@ class SparseSteeringExperiment:
         summary_path.write_text(json.dumps(summary, indent=2))
         print(f"Run summary saved to {summary_path}")
 
-        if metrics or baseline_metrics:
-            results_path = output_dir / "results.json"
-            results = {"baseline": baseline_metrics, "steered": metrics}
-            results_path.write_text(json.dumps(results, indent=2))
-            print(f"Results saved to {results_path}")
-
         return summary
 
     def _validate_lifecycle(self) -> None:
-        stages = self.config.stages
-        if not stages:
-            raise ValueError("config.stages must include at least one stage.")
-
-        unknown = set(stages) - VALID_STAGES
-        if unknown:
-            raise ValueError(f"Unknown pipeline stages: {sorted(unknown)}")
-
-        if len(stages) != len(set(stages)):
-            raise ValueError(f"Duplicate stages are not allowed: {stages}")
-
-        if self.config.method not in ("sparse", "dense"):
+        if self.config.method not in _METHOD_STAGES:
             raise ValueError(
-                f"Unknown method '{self.config.method}'. Supported: 'sparse', 'dense'."
-            )
-
-        if self.config.method == "dense" and "train" in stages:
-            raise ValueError("Training is not supported with the 'dense' method.")
-
-        has_input_vectors = self.config.input_steering_vectors_path is not None
-        has_input_sparse = self.config.input_sparse_steering_path is not None
-
-        if self.config.method == "dense" and has_input_sparse:
-            raise ValueError(
-                "input_sparse_steering_path is not supported with the 'dense' method."
-            )
-
-        if has_input_vectors and has_input_sparse:
-            raise ValueError(
-                "Set at most one of input_steering_vectors_path or "
-                "input_sparse_steering_path."
-            )
-
-        needs_preexisting_artifact = "extract" not in stages and (
-            "train" in stages or "eval" in stages
-        )
-        if needs_preexisting_artifact and not (has_input_vectors or has_input_sparse):
-            raise ValueError(
-                "Running train/eval without extract requires either "
-                "input_steering_vectors_path or input_sparse_steering_path."
+                f"Unknown method '{self.config.method}'. "
+                f"Supported: {sorted(_METHOD_STAGES)}"
             )
 
 

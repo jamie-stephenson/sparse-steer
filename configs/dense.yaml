@@ -1,0 +1,27 @@
+model_name: Qwen/Qwen2.5-0.5B-Instruct
+seed: 42
+method: dense
+steering_strength: 8.0
+
+# Data
+extraction_fraction: 0.5
+
+# Activation extraction
+extract_batch_size: 8
+token_position: last
+targets: [attention]
+
+# MCQ modes
+extraction_mcq_mode: mc1
+
+# Evaluation
+eval_batch_size: 32
+
+# Wandb
+use_wandb: false
+
+# Cache
+use_cache: true
+
+# Device
+device: mps

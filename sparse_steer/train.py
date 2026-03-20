@@ -1,5 +1,6 @@
 import math
 import os
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
@@ -39,16 +40,18 @@ def _constant(step: int, max_steps: int) -> float:
     return 1.0
 
 
-def _linear_increase(step: int, max_steps: int) -> float:
-    """Ramps from 0 to 1 over training — gates learn from CE first."""
-    progress = step / max(max_steps, 1)
-    return progress
-
-
 def _cosine_decay(step: int, max_steps: int) -> float:
     """Cosine from 1 to 0 — strong early sparsity, gentle end."""
     progress = step / max(max_steps, 1)
     return 0.5 * (1.0 + math.cos(math.pi * progress))
+
+
+def _warmup(step: int, max_steps: int, *, warmup_fraction: float = 0.1) -> float:
+    """Ramps from 0 to 1 over warmup_fraction of training, then stays at 1."""
+    warmup_steps = int(max_steps * warmup_fraction)
+    if warmup_steps <= 0:
+        return 1.0
+    return min(step / warmup_steps, 1.0)
 
 
 def _none(step: int, max_steps: int) -> float:
@@ -57,20 +60,23 @@ def _none(step: int, max_steps: int) -> float:
 
 
 L0_SCHEDULES: dict[str, L0Schedule] = {
-    "linear_increase": _linear_increase,
     "exponential_decay": _exponential_decay,
     "constant": _constant,
     "cosine_decay": _cosine_decay,
+    "warmup": _warmup,
     "none": _none,
 }
 
 
-def get_l0_scheduler_type(name: str) -> L0Schedule:
+def get_l0_scheduler_type(name: str, config: "ExperimentConfig | None" = None) -> L0Schedule:
     if name not in L0_SCHEDULES:
         raise ValueError(
             f"Unknown l0_scheduler_type '{name}'. Available: {sorted(L0_SCHEDULES)}"
         )
-    return L0_SCHEDULES[name]
+    fn = L0_SCHEDULES[name]
+    if name == "warmup" and config is not None:
+        fn = partial(fn, warmup_fraction=config.l0_warmup_ratio)
+    return fn
 
 
 # ── Trainer ───────────────────────────────────────────────────────────
@@ -148,7 +154,7 @@ def train_gates(
         per_device_train_batch_size=config.train_batch_size,
         learning_rate=config.learning_rate,
         lr_scheduler_type=config.lr_scheduler_type,
-        warmup_ratio=config.warmup_ratio,
+        warmup_ratio=config.lr_warmup_ratio,
         weight_decay=config.weight_decay,
         logging_steps=config.logging_steps,
         save_strategy=config.save_strategy,
@@ -174,7 +180,7 @@ def train_gates(
         eval_dataset=eval_dataset,
         data_collator=data_collator,
         processing_class=tokenizer,
-        l0_schedule=get_l0_scheduler_type(config.l0_scheduler_type),
+        l0_schedule=get_l0_scheduler_type(config.l0_scheduler_type, config),
         l0_lambda=config.l0_lambda,
         callbacks=callbacks,
     )

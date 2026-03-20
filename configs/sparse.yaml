@@ -1,8 +1,6 @@
 model_name: Qwen/Qwen2.5-0.5B-Instruct
 seed: 42
-
-# Pipeline stages to run: extract, train, eval
-stages: [extract, train, eval]
+method: sparse
 
 # Data
 extraction_fraction: 0.5
@@ -13,14 +11,15 @@ token_position: last
 targets: [attention]
 
 # Gate training
-l0_scheduler_type: linear_increase
-l0_lambda: 0.005
+l0_scheduler_type: warmup
+l0_warmup_ratio: 0.1
+l0_lambda: 0.01
 learning_rate: 1.5e-2
 num_epochs: 2
 train_batch_size: 8
 weight_decay: 0.01
 logging_steps: 1
-save_strategy: "no"
+save_strategy: "no"  # HF Trainer intermediate checkpoints: "no", "epoch", or "steps"
 track_gates: true
 
 # MCQ modes
@@ -33,13 +32,11 @@ eval_batch_size: 32
 # Wandb
 use_wandb: false
 
-# Checkpoint IO
-input_steering_vectors_path: null
-input_sparse_steering_path: null
+# Cache
+use_cache: true
 
 # Device
 device: mps
-
 
 # Hard concrete gate config
 gate_config:
@@ -47,5 +44,5 @@ gate_config:
   stretch_limits: [-0.1, 1.1]
   eps: 1.0e-6
   eval_threshold: 1.0e-2
-  init_log_alpha: 3.378546987500856
-  init_log_scale: 2.7913628431532307
+  init_log_alpha: -0.79
+  init_log_scale: 2.79

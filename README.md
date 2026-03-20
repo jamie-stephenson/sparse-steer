@@ -42,6 +42,7 @@ uv run run.py <task> --config <config_path>
     ├── tasks/                  # task-specific datasets/evaluation/experiment wiring
     ├── train.py                # gate training loop (HF Trainer + L0 penalty)
     └── utils/
+        ├── cache.py            # artifact caching with staleness detection
         ├── eval.py             # answer log-prob scoring utilities
         ├── gate_tracker.py     # gate sparsification tracking and visualization
         └── tokenize.py         # chat-template text formatting and tokenization
