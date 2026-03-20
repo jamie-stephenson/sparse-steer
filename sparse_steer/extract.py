@@ -89,14 +89,14 @@ def _register_hooks(
     hooks = []
     for layer in layers:
         if ActivationTarget.ATTENTION in targets:
-            hook_mod = model.get_attention(layer).output_proj()
+            hook_mod = model._get_output_proj(model.get_attention(layer))
             def make_input_hook(n: str):
                 def hook(_mod, inp, _output):
                     saved[n].append(gather(inp[0]).detach())
                 return hook
             hooks.append(hook_mod.register_forward_hook(make_input_hook("attention")))
         if ActivationTarget.MLP in targets:
-            hook_mod = model.get_mlp(layer).output_proj()
+            hook_mod = model._get_output_proj(model.get_mlp(layer))
             def make_input_hook(n: str):
                 def hook(_mod, inp, _output):
                     saved[n].append(gather(inp[0]).detach())

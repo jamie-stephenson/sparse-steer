@@ -46,9 +46,8 @@ def _cosine_decay(step: int, max_steps: int) -> float:
     return 0.5 * (1.0 + math.cos(math.pi * progress))
 
 
-def _warmup(step: int, max_steps: int, *, warmup_fraction: float = 0.1) -> float:
-    """Ramps from 0 to 1 over warmup_fraction of training, then stays at 1."""
-    warmup_steps = int(max_steps * warmup_fraction)
+def _warmup(step: int, max_steps: int, *, warmup_steps: int = 0) -> float:
+    """Ramps from 0 to 1 over warmup_steps, then stays at 1."""
     if warmup_steps <= 0:
         return 1.0
     return min(step / warmup_steps, 1.0)
@@ -75,7 +74,7 @@ def get_l0_scheduler_type(name: str, config: "ExperimentConfig | None" = None) -
         )
     fn = L0_SCHEDULES[name]
     if name == "warmup" and config is not None:
-        fn = partial(fn, warmup_fraction=config.l0_warmup_ratio)
+        fn = partial(fn, warmup_steps=config.l0_warmup_steps)
     return fn
 
 
@@ -154,7 +153,7 @@ def train_gates(
         per_device_train_batch_size=config.train_batch_size,
         learning_rate=config.learning_rate,
         lr_scheduler_type=config.lr_scheduler_type,
-        warmup_ratio=config.lr_warmup_ratio,
+        warmup_steps=config.lr_warmup_steps,
         weight_decay=config.weight_decay,
         logging_steps=config.logging_steps,
         save_strategy=config.save_strategy,

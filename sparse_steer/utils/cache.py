@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
@@ -54,11 +53,11 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         # training-specific
         "normalize_steering_vectors",
         "l0_scheduler_type",
-        "l0_warmup_ratio",
+        "l0_warmup_steps",
         "l0_lambda",
         "learning_rate",
         "lr_scheduler_type",
-        "lr_warmup_ratio",
+        "lr_warmup_steps",
         "num_epochs",
         "train_batch_size",
         "weight_decay",
@@ -82,11 +81,11 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "targets",
         "normalize_steering_vectors",
         "l0_scheduler_type",
-        "l0_warmup_ratio",
+        "l0_warmup_steps",
         "l0_lambda",
         "learning_rate",
         "lr_scheduler_type",
-        "lr_warmup_ratio",
+        "lr_warmup_steps",
         "num_epochs",
         "train_batch_size",
         "weight_decay",
@@ -363,17 +362,29 @@ def lookup(
     )
 
 
-def store(
+def prepare_cache_path(
     artifact_type: ArtifactType,
     config: "ExperimentConfig",
     task_name: str,
-    artifact_path: Path,
     *,
-    extra_files: list[Path] | None = None,
+    extra_fields: dict[str, Any] | None = None,
+) -> Path:
+    """Return the path where an artifact should be saved. Creates parent dirs."""
+    config_hash, _ = compute_config_hash(config, artifact_type, task_name, extra_fields)
+    cache_path = _cache_dir(artifact_type, task_name, config_hash)
+    cache_path.mkdir(parents=True, exist_ok=True)
+    return cache_path / _ARTIFACT_FILENAMES[artifact_type]
+
+
+def finalize(
+    artifact_type: ArtifactType,
+    config: "ExperimentConfig",
+    task_name: str,
+    *,
     extra_fields: dict[str, Any] | None = None,
     extra_sources: list[str] | None = None,
 ) -> Path:
-    """Copy an artifact into the cache and write its manifest. Returns the cache path."""
+    """Write the cache manifest after the artifact has been saved. Returns artifact path."""
     config_hash, config_fields = compute_config_hash(
         config, artifact_type, task_name, extra_fields,
     )
@@ -382,14 +393,7 @@ def store(
     )
 
     cache_path = _cache_dir(artifact_type, task_name, config_hash)
-    cache_path.mkdir(parents=True, exist_ok=True)
-
     dest = cache_path / _ARTIFACT_FILENAMES[artifact_type]
-    shutil.copy2(artifact_path, dest)
-
-    for f in extra_files or []:
-        if f.is_file():
-            shutil.copy2(f, cache_path / f.name)
 
     manifest = CacheManifest(
         artifact_type=artifact_type.value,
@@ -415,31 +419,9 @@ def store_json(
     extra_sources: list[str] | None = None,
 ) -> Path:
     """Store a JSON-serialisable dict (eval results) in the cache."""
-    config_hash, config_fields = compute_config_hash(
-        config, artifact_type, task_name, extra_fields,
-    )
-    source_hash, per_file_hashes, source_files = compute_source_hash(
-        artifact_type, extra_sources,
-    )
-
-    cache_path = _cache_dir(artifact_type, task_name, config_hash)
-    cache_path.mkdir(parents=True, exist_ok=True)
-
-    dest = cache_path / _ARTIFACT_FILENAMES[artifact_type]
+    dest = prepare_cache_path(artifact_type, config, task_name, extra_fields=extra_fields)
     dest.write_text(json.dumps(data, indent=2))
-
-    manifest = CacheManifest(
-        artifact_type=artifact_type.value,
-        config_hash=config_hash,
-        source_hash=source_hash,
-        git_commit=current_git_commit(),
-        created_at=datetime.now(timezone.utc).isoformat(),
-        config_fields=config_fields,
-        source_files=source_files,
-        per_file_hashes=per_file_hashes,
-    )
-    manifest.save(cache_path / "manifest.json")
-    return dest
+    return finalize(artifact_type, config, task_name, extra_fields=extra_fields, extra_sources=extra_sources)
 
 
 def load_cached_json(path: Path) -> dict[str, Any]:
@@ -455,9 +437,10 @@ __all__ = [
     "compute_config_hash",
     "compute_source_hash",
     "current_git_commit",
+    "finalize",
     "load_cached_json",
     "lookup",
+    "prepare_cache_path",
     "print_cache_warnings",
-    "store",
     "store_json",
 ]

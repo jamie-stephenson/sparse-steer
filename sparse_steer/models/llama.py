@@ -1,45 +1,19 @@
-from typing import Any
-
 from torch import nn
-from transformers.models.llama.modeling_llama import LlamaAttention, LlamaForCausalLM, LlamaMLP
+from transformers.models.llama.modeling_llama import LlamaForCausalLM
 
-from ..hardconcrete import HardConcreteConfig
-from .sparse import SparseSteeringAttention, SparseSteeringMLP, SparseSteeringLM
-from .dense import DenseSteeringAttention, DenseSteeringMLP, DenseSteeringLM
+from .base import Component
+from .sparse import SparseSteeringLM
+from .dense import DenseSteeringLM
 
 
-# ── Shared layout mixins ──────────────────────────────────────────────
-# These map base.py's abstract interface to HuggingFace attribute names.
+# ── Layout mixin ─────────────────────────────────────────────────────
+# Maps base.py's abstract interface to HuggingFace attribute names.
 # Llama and Qwen2 expose identical attribute names (o_proj, down_proj,
-# head_dim, model.layers, etc.) so these mixins are shared, but the
-# underlying HF base classes differ: Qwen2 uses grouped-query attention
-# with separate num_key_value_heads, SiLU-gated MLPs with an explicit
-# gate_proj, and its own RoPE implementation with different defaults.
+# head_dim, model.layers, etc.) so this mixin is shared, but the
+# underlying HF base classes differ.
 
 
-class LlamaAttentionLayout:
-    @property
-    def _num_heads(self) -> int:
-        return self.config.num_attention_heads
-
-    @property
-    def _head_dim(self) -> int:
-        return self.head_dim
-
-    def output_proj(self) -> nn.Module:
-        return self.o_proj
-
-
-class LlamaMLPLayout:
-    @property
-    def _mlp_dim(self) -> int:
-        return self.config.intermediate_size
-
-    def output_proj(self) -> nn.Module:
-        return self.down_proj
-
-
-class LlamaLMLayout:
+class LlamaLayout:
     def get_layers(self) -> nn.ModuleList:
         return self.model.layers
 
@@ -49,73 +23,41 @@ class LlamaLMLayout:
     def get_mlp(self, layer: nn.Module) -> nn.Module:
         return layer.mlp
 
-
-# ── Sparse + Llama ───────────────────────────────────────────────────
-
-
-class LlamaSparseSteeringAttention(LlamaAttentionLayout, SparseSteeringAttention, LlamaAttention):
-    def __init__(
-        self, config: Any, *args: Any, gate_config: HardConcreteConfig, **kwargs: Any
-    ) -> None:
-        super().__init__(
-            config, *args,
-            num_gates=config.num_attention_heads,
-            gate_config=gate_config,
-            **kwargs,
+    def _get_output_proj(self, module: nn.Module) -> nn.Module:
+        if hasattr(module, "o_proj"):
+            return module.o_proj
+        if hasattr(module, "down_proj"):
+            return module.down_proj
+        raise AttributeError(
+            f"Cannot find output projection on {type(module).__name__}. "
+            "Expected 'o_proj' (attention) or 'down_proj' (MLP)."
         )
-        self._register_steering_hook()
+
+    def _get_vector_shape(self, component: Component, layer: nn.Module) -> tuple[int, ...]:
+        if component == "attention":
+            attn = self.get_attention(layer)
+            return (attn.config.num_attention_heads, attn.head_dim)
+        elif component == "mlp":
+            mlp = self.get_mlp(layer)
+            return (mlp.config.intermediate_size,)
+        elif component == "residual":
+            return (self.config.hidden_size,)
+        raise ValueError(f"Unknown component: {component!r}")
 
 
-class LlamaSparseSteeringMLP(LlamaMLPLayout, SparseSteeringMLP, LlamaMLP):
-    def __init__(
-        self, config: Any, *args: Any, gate_config: HardConcreteConfig, **kwargs: Any
-    ) -> None:
-        super().__init__(
-            config, *args,
-            num_gates=config.intermediate_size,
-            gate_config=gate_config,
-            **kwargs,
-        )
-        self._register_steering_hook()
+# ── Concrete LM classes ──────────────────────────────────────────────
 
 
-class LlamaSparseSteeringLM(LlamaLMLayout, SparseSteeringLM, LlamaForCausalLM):
-    attn_cls = LlamaSparseSteeringAttention
-    mlp_cls = LlamaSparseSteeringMLP
+class LlamaSparseSteeringLM(LlamaLayout, SparseSteeringLM, LlamaForCausalLM):
+    pass
 
 
-# ── Dense + Llama ────────────────────────────────────────────────────
-
-
-class LlamaDenseSteeringAttention(LlamaAttentionLayout, DenseSteeringAttention, LlamaAttention):
-    def __init__(
-        self, config: Any, *args: Any, steering_strength: float = 1.0, **kwargs: Any
-    ) -> None:
-        super().__init__(config, *args, steering_strength=steering_strength, **kwargs)
-        self._register_steering_hook()
-
-
-class LlamaDenseSteeringMLP(LlamaMLPLayout, DenseSteeringMLP, LlamaMLP):
-    def __init__(
-        self, config: Any, *args: Any, steering_strength: float = 1.0, **kwargs: Any
-    ) -> None:
-        super().__init__(config, *args, steering_strength=steering_strength, **kwargs)
-        self._register_steering_hook()
-
-
-class LlamaDenseSteeringLM(LlamaLMLayout, DenseSteeringLM, LlamaForCausalLM):
-    attn_cls = LlamaDenseSteeringAttention
-    mlp_cls = LlamaDenseSteeringMLP
+class LlamaDenseSteeringLM(LlamaLayout, DenseSteeringLM, LlamaForCausalLM):
+    pass
 
 
 __all__ = [
-    "LlamaAttentionLayout",
-    "LlamaMLPLayout",
-    "LlamaLMLayout",
-    "LlamaSparseSteeringAttention",
-    "LlamaSparseSteeringMLP",
+    "LlamaLayout",
     "LlamaSparseSteeringLM",
-    "LlamaDenseSteeringAttention",
-    "LlamaDenseSteeringMLP",
     "LlamaDenseSteeringLM",
 ]

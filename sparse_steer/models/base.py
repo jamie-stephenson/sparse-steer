@@ -6,44 +6,44 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
-Component = Literal["attention", "mlp"]
+Component = Literal["attention", "mlp", "residual"]
 
 
-# ── Base steering modules ────────────────────────────────────────────
+# ── Steering hooks ───────────────────────────────────────────────────
 
 
-class BaseSteeringAttention:
-    """Abstract base for steered attention modules.
+class SteeringHook(nn.Module):
+    """Lightweight module that stores a steering vector and computes a correction.
 
-    Subclasses must implement ``_num_heads``, ``_head_dim``, ``output_proj``,
-    and ``_apply_steering``, and call ``_register_steering_hook`` at the end of
-    their ``__init__``.
+    Attached to a target module via a forward hook — no module replacement needed.
+    Subclasses implement ``_compute_correction`` to define how the vector is applied.
     """
 
-    @property
-    @abstractmethod
-    def _num_heads(self) -> int: ...
-
-    @property
-    @abstractmethod
-    def _head_dim(self) -> int: ...
-
-    @abstractmethod
-    def output_proj(self) -> nn.Module: ...
-
-    @abstractmethod
-    def _apply_steering(
-        self, _module: nn.Module, inputs: tuple[Any, ...]
-    ) -> Any: ...
-
-    def _register_steering_hook(self) -> None:
+    def __init__(self, vector_shape: tuple[int, ...]) -> None:
+        super().__init__()
         self.steering_enabled = True
-        self.register_buffer(
-            "steering_vectors",
-            torch.zeros(self._num_heads, self._head_dim),
-            persistent=True,
-        )
-        self._hook_handle = self.output_proj().register_forward_pre_hook(self._apply_steering)
+        self.register_buffer("steering_vectors", torch.zeros(vector_shape))
+
+    @abstractmethod
+    def _compute_correction(self, hidden: Tensor) -> Tensor: ...
+
+    def pre_hook(self, _module: nn.Module, inputs: tuple[Any, ...]) -> tuple[Any, ...] | None:
+        """Forward pre-hook for attention/MLP output projections."""
+        if not self.steering_enabled or not inputs:
+            return None
+        hidden = inputs[0]
+        correction = self._compute_correction(hidden)
+        return (hidden + correction, *inputs[1:])
+
+    def post_hook(self, _module: nn.Module, _inputs: Any, output: Any) -> Any:
+        """Forward hook for residual stream (layer output)."""
+        if not self.steering_enabled:
+            return output
+        hidden = output[0] if isinstance(output, tuple) else output
+        corrected = hidden + self._compute_correction(hidden)
+        if isinstance(output, tuple):
+            return (corrected, *output[1:])
+        return corrected
 
     def set_steering_vectors(self, vectors: Tensor) -> None:
         expected = self.steering_vectors.shape
@@ -55,82 +55,21 @@ class BaseSteeringAttention:
         self.steering_vectors.copy_(
             vectors.to(device=self.steering_vectors.device, dtype=self.steering_vectors.dtype)
         )
-
-
-class BaseSteeringMLP:
-    """Abstract base for steered MLP modules.
-
-    Subclasses must implement ``_mlp_dim``, ``output_proj``, and
-    ``_apply_steering``, and call ``_register_steering_hook`` at the end of
-    their ``__init__``.
-    """
-
-    @property
-    @abstractmethod
-    def _mlp_dim(self) -> int: ...
-
-    @abstractmethod
-    def output_proj(self) -> nn.Module: ...
-
-    @abstractmethod
-    def _apply_steering(
-        self, _module: nn.Module, inputs: tuple[Any, ...]
-    ) -> Any: ...
-
-    def _register_steering_hook(self) -> None:
-        self.steering_enabled = True
-        self.register_buffer(
-            "steering_vectors",
-            torch.zeros(self._mlp_dim),
-            persistent=True,
-        )
-        self._hook_handle = self.output_proj().register_forward_pre_hook(self._apply_steering)
-
-    def set_steering_vectors(self, vectors: Tensor) -> None:
-        expected = self.steering_vectors.shape
-        if vectors.shape != expected:
-            raise ValueError(
-                f"Steering vectors must have shape {tuple(expected)}, "
-                f"got {tuple(vectors.shape)}."
-            )
-        self.steering_vectors.copy_(
-            vectors.to(device=self.steering_vectors.device, dtype=self.steering_vectors.dtype)
-        )
-
-
-# ── Module upgrade helpers ────────────────────────────────────────────
-
-
-def _copy_module_state(source: nn.Module, target: nn.Module) -> None:
-    """Copy parameters and buffers from *source* into *target*."""
-    source_param = next(source.parameters(), None)
-    if source_param is not None:
-        target.to(device=source_param.device, dtype=source_param.dtype)
-    target.load_state_dict(source.state_dict(), strict=False)
-
-
-def _replace_child(parent: nn.Module, old: nn.Module, new: nn.Module) -> None:
-    """Replace *old* with *new* as a direct child of *parent*."""
-    for name, child in parent.named_children():
-        if child is old:
-            setattr(parent, name, new)
-            return
-    raise ValueError("Module not found as a direct child of parent")
 
 
 # ── Base steering LM ─────────────────────────────────────────────────
+
+# Hook attachment mode: pre-hook on output proj, or post-hook on layer
+_PRE_HOOK_COMPONENTS = frozenset({"attention", "mlp"})
+_POST_HOOK_COMPONENTS = frozenset({"residual"})
 
 
 class BaseSteeringLM:
     """Base mixin that adds steering to a ``PreTrainedModel`` subclass.
 
-    Concrete classes inherit from both a steering LM mixin and a HuggingFace
-    model.  Subclasses must implement ``get_layers``, ``get_attention``,
-    ``get_mlp``, and ``_upgrade_single_module``.
+    Subclasses must implement layout methods (``get_layers``, ``get_attention``,
+    ``get_mlp``) and ``_create_hook`` to build the appropriate SteeringHook.
     """
-
-    attn_cls: type
-    mlp_cls: type
 
     @abstractmethod
     def get_layers(self) -> nn.ModuleList: ...
@@ -142,44 +81,69 @@ class BaseSteeringLM:
     def get_mlp(self, layer: nn.Module) -> nn.Module: ...
 
     @abstractmethod
-    def _upgrade_single_module(
-        self, source: nn.Module, replacement_cls: type
-    ) -> nn.Module: ...
+    def _get_vector_shape(self, component: Component, layer: nn.Module) -> tuple[int, ...]:
+        """Return the shape of the steering vector for the given component."""
+        ...
 
-    def _upgrade_modules(self) -> None:
+    @abstractmethod
+    def _create_hook(self, component: Component, layer: nn.Module) -> SteeringHook:
+        """Create a SteeringHook for the given component and layer."""
+        ...
+
+    def _get_hook_target(self, component: Component, layer: nn.Module) -> nn.Module:
+        """Return the module to attach the hook to."""
+        if component == "attention":
+            return self._get_output_proj(self.get_attention(layer))
+        elif component == "mlp":
+            return self._get_output_proj(self.get_mlp(layer))
+        elif component == "residual":
+            return layer
+        raise ValueError(f"Unknown component: {component!r}")
+
+    @abstractmethod
+    def _get_output_proj(self, module: nn.Module) -> nn.Module:
+        """Return the output projection submodule (e.g. o_proj, down_proj)."""
+        ...
+
+    def _validate_components(self, components: list[Component]) -> None:
+        if "residual" in components and len(components) > 1:
+            raise ValueError(
+                "Residual steering is mutually exclusive with attention/mlp steering. "
+                f"Got: {components}"
+            )
+
+    def _attach_steering_hooks(self) -> None:
+        self._validate_components(self.steering_components)
         for i, layer in enumerate(self.get_layers()):
             if i not in self.steering_layer_ids:
                 continue
             for component in self.steering_components:
-                if component == "attention":
-                    source = self.get_attention(layer)
-                    replacement_cls = self.attn_cls
-                elif component == "mlp":
-                    source = self.get_mlp(layer)
-                    replacement_cls = self.mlp_cls
+                hook = self._create_hook(component, layer)
+                # move to same device/dtype as the layer
+                param = next(layer.parameters(), None)
+                if param is not None:
+                    hook.to(device=param.device, dtype=param.dtype)
+                # store as submodule so it's in the state dict
+                attr = f"_steering_{component}_{i}"
+                layer.add_module(attr, hook)
+                # register the hook
+                target = self._get_hook_target(component, layer)
+                if component in _PRE_HOOK_COMPONENTS:
+                    target.register_forward_pre_hook(hook.pre_hook)
                 else:
-                    raise ValueError(
-                        f"Unsupported steering component: {component!r}. "
-                        "Supported: 'attention', 'mlp'."
-                    )
-                upgraded = self._upgrade_single_module(source, replacement_cls)
-                if upgraded is not source:
-                    _replace_child(layer, source, upgraded)
+                    target.register_forward_hook(hook.post_hook)
 
     @contextmanager
     def steering_disabled(self):
         """Context manager that temporarily disables all steering hooks."""
-        steered = [
-            m for m in self.modules()
-            if isinstance(m, (BaseSteeringAttention, BaseSteeringMLP))
-        ]
-        for m in steered:
-            m.steering_enabled = False
+        hooks = [m for m in self.modules() if isinstance(m, SteeringHook)]
+        for h in hooks:
+            h.steering_enabled = False
         try:
             yield
         finally:
-            for m in steered:
-                m.steering_enabled = True
+            for h in hooks:
+                h.steering_enabled = True
 
     def set_all_vectors(
         self, vectors: dict[str, Tensor], *, normalize: bool = False,
@@ -205,25 +169,14 @@ class BaseSteeringLM:
 
         layers = self.get_layers()
         for component, tensor in vectors.items():
-            if component == "attention":
-                for i, layer in enumerate(layers):
-                    module = self.get_attention(layer)
-                    if isinstance(module, BaseSteeringAttention):
-                        module.set_steering_vectors(tensor[i])
-            elif component == "mlp":
-                for i, layer in enumerate(layers):
-                    module = self.get_mlp(layer)
-                    if isinstance(module, BaseSteeringMLP):
-                        module.set_steering_vectors(tensor[i])
-            else:
-                raise ValueError(f"Unknown steering component: {component!r}")
+            for i, layer in enumerate(layers):
+                hook = getattr(layer, f"_steering_{component}_{i}", None)
+                if isinstance(hook, SteeringHook):
+                    hook.set_steering_vectors(tensor[i])
 
 
 __all__ = [
     "Component",
-    "BaseSteeringAttention",
-    "BaseSteeringMLP",
+    "SteeringHook",
     "BaseSteeringLM",
-    "_copy_module_state",
-    "_replace_child",
 ]

@@ -12,10 +12,11 @@ targets: [attention]
 
 # Gate training
 l0_scheduler_type: warmup
-l0_warmup_ratio: 0.1
-l0_lambda: 0.01
+l0_warmup_steps: 100  # ramp over nearly all of training (~105 total steps)
+lr_warmup_steps: 5
+l0_lambda: 0.1
 learning_rate: 1.5e-2
-num_epochs: 2
+num_epochs: 5
 train_batch_size: 8
 weight_decay: 0.01
 logging_steps: 1
@@ -44,5 +45,5 @@ gate_config:
   stretch_limits: [-0.1, 1.1]
   eps: 1.0e-6
   eval_threshold: 1.0e-2
-  init_log_alpha: -0.79
+  init_log_alpha: 3.38
   init_log_scale: 2.79

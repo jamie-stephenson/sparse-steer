@@ -17,10 +17,11 @@ from transformers import AutoConfig, AutoTokenizer, PreTrainedModel, PreTrainedT
 from .utils.cache import (
     ArtifactType,
     CacheHit,
+    finalize as cache_finalize,
     load_cached_json,
     lookup as cache_lookup,
+    prepare_cache_path,
     print_cache_warnings,
-    store as cache_store,
     store_json as cache_store_json,
 )
 from .extract import (
@@ -61,11 +62,11 @@ class ExperimentConfig:
 
     # === Gate training ===
     l0_scheduler_type: str = "warmup"
-    l0_warmup_ratio: float = 0.1  # fraction of training steps to ramp L0 penalty
+    l0_warmup_steps: int = 0  # steps to ramp L0 penalty (warmup schedule only)
     l0_lambda: float = 0.1
     learning_rate: float = 5e-3
     lr_scheduler_type: str = "cosine"
-    lr_warmup_ratio: float = 0.1
+    lr_warmup_steps: int = 0
     num_epochs: int = 5
     train_batch_size: int = 8
     weight_decay: float = 0.01
@@ -142,20 +143,24 @@ class SparseSteeringExperiment:
         )
         if hit is not None:
             print_cache_warnings(artifact_type.value, hit.warnings)
-            print(f"  Cache hit: {artifact_type.value} ({hit.artifact_path})")
+            try:
+                rel = hit.artifact_path.relative_to(Path.cwd())
+            except ValueError:
+                rel = hit.artifact_path
+            print(f"  Cache hit: {artifact_type.value} ({rel})")
         return hit
 
-    def _cache_store(
-        self,
-        artifact_type: ArtifactType,
-        artifact_path: Path,
-        extra_files: list[Path] | None = None,
-    ) -> Path:
-        if not self.config.use_cache:
-            return artifact_path
-        return cache_store(
-            artifact_type, self.config, self.task_name, artifact_path,
-            extra_files=extra_files,
+    def _prepare_cache_path(self, artifact_type: ArtifactType) -> Path:
+        """Return the cache path where an artifact should be saved directly."""
+        return prepare_cache_path(
+            artifact_type, self.config, self.task_name,
+            extra_fields=self.extra_cache_fields(artifact_type),
+        )
+
+    def _finalize_cache(self, artifact_type: ArtifactType) -> Path:
+        """Write the cache manifest after the artifact has been saved."""
+        return cache_finalize(
+            artifact_type, self.config, self.task_name,
             **self._cache_kwargs(artifact_type),
         )
 
@@ -271,14 +276,9 @@ class SparseSteeringExperiment:
                     extraction_with_activations,
                     component_names,
                 )
-                sv_path = save_steering_vectors(
-                    steering_vectors,
-                    output_dir / "steering_vectors.pt",
-                    metadata=asdict(self.config),
-                )
-                steering_vectors_path = str(
-                    self._cache_store(ArtifactType.STEERING_VECTORS, sv_path)
-                )
+                sv_dest = self._prepare_cache_path(ArtifactType.STEERING_VECTORS)
+                save_steering_vectors(steering_vectors, sv_dest, metadata=asdict(self.config))
+                steering_vectors_path = str(self._finalize_cache(ArtifactType.STEERING_VECTORS))
                 print(f"Saved steering vectors to {steering_vectors_path}")
                 cache_info["steering_vectors"] = {"status": "miss"}
 
@@ -290,16 +290,14 @@ class SparseSteeringExperiment:
                 assert gate_train_ds is not None
                 print("Training gates...")
                 train_gates(model, tokenizer, gate_train_ds, self.config, output_dir=output_dir)
-                ss_path = model.save_steering(output_dir / "sparse_steering.pt")
-                sparse_steering_path = str(
-                    self._cache_store(
-                        ArtifactType.SPARSE_STEERING, ss_path,
-                        extra_files=[
-                            output_dir / "gate_heatmap.png",
-                            output_dir / "gate_animation.gif",
-                        ],
-                    )
-                )
+                ss_dest = self._prepare_cache_path(ArtifactType.SPARSE_STEERING)
+                model.save_steering(ss_dest)
+                # copy gate plots into cache alongside the checkpoint
+                for name in ("gate_heatmap.png", "gate_animation.gif"):
+                    src = output_dir / name
+                    if src.is_file():
+                        shutil.copy2(src, ss_dest.parent / name)
+                sparse_steering_path = str(self._finalize_cache(ArtifactType.SPARSE_STEERING))
                 print(f"Saved sparse steering to {sparse_steering_path}")
                 cache_info["sparse_steering"] = {"status": "miss"}
 

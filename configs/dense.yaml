@@ -9,7 +9,7 @@ extraction_fraction: 0.5
 # Activation extraction
 extract_batch_size: 8
 token_position: last
-targets: [attention]
+targets: [residual]
 
 # MCQ modes
 extraction_mcq_mode: mc1
