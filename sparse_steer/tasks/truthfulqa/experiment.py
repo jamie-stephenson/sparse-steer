@@ -55,7 +55,7 @@ class TruthfulQAExperiment(SparseSteeringExperiment):
         tokenizer: PreTrainedTokenizerBase,
         dataset: Dataset,
     ) -> dict[str, float]:
-        return evaluate(model, tokenizer, dataset)
+        return evaluate(model, tokenizer, dataset, batch_size=self.config.eval_batch_size)
 
 
 __all__ = [
