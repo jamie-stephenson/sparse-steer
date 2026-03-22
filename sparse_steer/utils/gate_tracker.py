@@ -126,7 +126,7 @@ def _make_layout(
     ratios.append(0.4)  # colorbar
 
     fig, all_axes = plt.subplots(
-        1, len(ratios), sharey=True,
+        1, len(ratios),
         gridspec_kw={"width_ratios": ratios},
         figsize=(sum(ratios) * 0.7 + 2, height),
     )
