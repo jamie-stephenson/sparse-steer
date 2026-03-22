@@ -50,6 +50,7 @@ class ExperimentConfig:
     # === Method ===
     method: str = "sparse"  # "sparse" or "dense"
     steering_strength: float = 1.0  # dense only: steering multiplier
+    steering_layer_ids: list[int] | None = None  # None = all layers
 
     # === Data ===
     extraction_fraction: float = 0.5
@@ -228,19 +229,21 @@ class SparseSteeringExperiment:
             torch_dtype=torch.float16,
         ).to(self.config.device)
 
+        layer_ids = self.config.steering_layer_ids or list(range(len(model.get_layers())))
+
         if self.config.method == "sparse":
             gate_config = HardConcreteConfig(**self.config.gate_config)
             print("Initialising sparse-steering model...")
             model.upgrade_for_steering(
                 gate_config=gate_config,
-                steering_layer_ids=list(range(len(model.get_layers()))),
+                steering_layer_ids=layer_ids,
                 steering_components=self.config.targets,
             )
         else:
             print(f"Initialising dense-steering model (steering_strength={self.config.steering_strength})...")
             model.upgrade_for_steering(
                 steering_strength=self.config.steering_strength,
-                steering_layer_ids=list(range(len(model.get_layers()))),
+                steering_layer_ids=layer_ids,
                 steering_components=self.config.targets,
             )
 

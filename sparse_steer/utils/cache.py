@@ -50,6 +50,7 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "extract_batch_size",
         "token_position",
         "targets",
+        "steering_layer_ids",
         # training-specific
         "normalize_steering_vectors",
         "l0_scheduler_type",
@@ -79,6 +80,7 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "extract_batch_size",
         "token_position",
         "targets",
+        "steering_layer_ids",
         "normalize_steering_vectors",
         "l0_scheduler_type",
         "l0_warmup_steps",
