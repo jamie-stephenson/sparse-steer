@@ -7,7 +7,12 @@ from typing import TYPE_CHECKING, Callable
 from dotenv import load_dotenv
 from torch import Tensor, nn
 from datasets import Dataset, DatasetDict
-from transformers import DataCollatorForLanguageModeling, PreTrainedTokenizerBase, Trainer, TrainingArguments
+from transformers import (
+    DataCollatorForLanguageModeling,
+    PreTrainedTokenizerBase,
+    Trainer,
+    TrainingArguments,
+)
 import wandb
 
 from .models.sparse import SparseSteeringLM
@@ -30,6 +35,7 @@ def compute_l0_penalty(model: nn.Module) -> Tensor:
 
 
 # ── L0 schedule registry ─────────────────────────────────────────────
+
 
 def _exponential_decay(step: int, max_steps: int) -> float:
     progress = step / max(max_steps, 1)
@@ -67,7 +73,9 @@ L0_SCHEDULES: dict[str, L0Schedule] = {
 }
 
 
-def get_l0_scheduler_type(name: str, config: "ExperimentConfig | None" = None) -> L0Schedule:
+def get_l0_scheduler_type(
+    name: str, config: "ExperimentConfig | None" = None
+) -> L0Schedule:
     if name not in L0_SCHEDULES:
         raise ValueError(
             f"Unknown l0_scheduler_type '{name}'. Available: {sorted(L0_SCHEDULES)}"
@@ -80,16 +88,21 @@ def get_l0_scheduler_type(name: str, config: "ExperimentConfig | None" = None) -
 
 # ── Trainer ───────────────────────────────────────────────────────────
 
+
 class SparseSteeringTrainer(Trainer):
     """HF Trainer that adds an L0 sparsity penalty to the CE loss."""
 
-    def __init__(self, *args, l0_schedule: L0Schedule, l0_lambda: float = 0.1, **kwargs) -> None:
+    def __init__(
+        self, *args, l0_schedule: L0Schedule, l0_lambda: float = 0.1, **kwargs
+    ) -> None:
         super().__init__(*args, **kwargs)
         self.l0_schedule = l0_schedule
         self.l0_lambda = l0_lambda
 
     def _get_l0_lambda(self) -> float:
-        return self.l0_lambda * self.l0_schedule(self.state.global_step, self.state.max_steps)
+        return self.l0_lambda * self.l0_schedule(
+            self.state.global_step, self.state.max_steps
+        )
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         outputs = model(**inputs)
@@ -114,12 +127,14 @@ def _init_wandb() -> None:
         entity=os.environ.get("WANDB_ENTITY") or None,
     )
 
+
 def _prepare_dataset(
     dataset: Dataset,
     tokenizer: PreTrainedTokenizerBase,
 ) -> Dataset:
     remove_columns = [
-        name for name in ("text", "positive", "question_id")
+        name
+        for name in ("text", "positive", "question_id")
         if name in dataset.column_names
     ]
     return dataset.map(

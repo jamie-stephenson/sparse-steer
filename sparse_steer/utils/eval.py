@@ -4,6 +4,7 @@ from torch import Tensor
 
 from .tokenize import apply_template
 
+
 def answer_log_probs(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizerBase,
@@ -17,7 +18,9 @@ def answer_log_probs(
     question_texts = [apply_template(tokenizer, q) for q in questions]
 
     full_inputs = tokenizer(
-        full_texts, return_tensors="pt", padding=True,
+        full_texts,
+        return_tensors="pt",
+        padding=True,
     ).to(model.device)
 
     # Each question may have a different prefix length
@@ -39,5 +42,3 @@ def answer_log_probs(
     answer_mask = answer_mask * (seq_indices >= prefix_lens_t - 1)
 
     return (token_log_probs * answer_mask).sum(dim=-1)  # (batch,)
-
-

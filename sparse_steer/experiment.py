@@ -12,7 +12,12 @@ import torch
 from datasets import Dataset, DatasetDict
 from dotenv import load_dotenv
 from huggingface_hub import login
-from transformers import AutoConfig, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
+from transformers import (
+    AutoConfig,
+    AutoTokenizer,
+    PreTrainedModel,
+    PreTrainedTokenizerBase,
+)
 
 from .utils.cache import (
     ArtifactType,
@@ -73,8 +78,12 @@ class ExperimentConfig:
     weight_decay: float = 0.01
     logging_steps: int = 10
     save_strategy: str = "no"
-    freeze_log_scale: bool = False  # if True, only learn gate selection (log_alpha), not magnitude
-    track_gates: bool = False  # if True, record gate norms during training and save heatmap + animation
+    freeze_log_scale: bool = (
+        False  # if True, only learn gate selection (log_alpha), not magnitude
+    )
+    track_gates: bool = (
+        False  # if True, record gate norms during training and save heatmap + animation
+    )
 
     # === Evaluation ===
     eval_batch_size: int = 32
@@ -92,21 +101,18 @@ class ExperimentConfig:
     gate_config: dict[str, Any] = field(default_factory=dict)
 
 
-
 class SparseSteeringExperiment:
     def __init__(self, config: ExperimentConfig) -> None:
         self.config = config
 
     @property
     @abc.abstractmethod
-    def task_name(self) -> str:
-        ...
+    def task_name(self) -> str: ...
 
     @abc.abstractmethod
     def build_datasets(
         self, tokenizer: PreTrainedTokenizerBase
-    ) -> tuple[Dataset, DatasetDict, Dataset]:
-        ...
+    ) -> tuple[Dataset, DatasetDict, Dataset]: ...
 
     @abc.abstractmethod
     def run_task_evaluation(
@@ -114,8 +120,7 @@ class SparseSteeringExperiment:
         model: PreTrainedModel,
         tokenizer: PreTrainedTokenizerBase,
         dataset: Dataset,
-    ) -> dict[str, float]:
-        ...
+    ) -> dict[str, float]: ...
 
     # ── Cache hooks (override in task subclasses) ─────────────────
 
@@ -139,7 +144,9 @@ class SparseSteeringExperiment:
         if not self.config.use_cache:
             return None
         hit = cache_lookup(
-            artifact_type, self.config, self.task_name,
+            artifact_type,
+            self.config,
+            self.task_name,
             **self._cache_kwargs(artifact_type),
         )
         if hit is not None:
@@ -154,22 +161,31 @@ class SparseSteeringExperiment:
     def _prepare_cache_path(self, artifact_type: ArtifactType) -> Path:
         """Return the cache path where an artifact should be saved directly."""
         return prepare_cache_path(
-            artifact_type, self.config, self.task_name,
+            artifact_type,
+            self.config,
+            self.task_name,
             extra_fields=self.extra_cache_fields(artifact_type),
         )
 
     def _finalize_cache(self, artifact_type: ArtifactType) -> Path:
         """Write the cache manifest after the artifact has been saved."""
         return cache_finalize(
-            artifact_type, self.config, self.task_name,
+            artifact_type,
+            self.config,
+            self.task_name,
             **self._cache_kwargs(artifact_type),
         )
 
-    def _cache_store_json(self, artifact_type: ArtifactType, data: dict[str, Any]) -> Path:
+    def _cache_store_json(
+        self, artifact_type: ArtifactType, data: dict[str, Any]
+    ) -> Path:
         if not self.config.use_cache:
             return Path("/dev/null")
         return cache_store_json(
-            artifact_type, self.config, self.task_name, data,
+            artifact_type,
+            self.config,
+            self.task_name,
+            data,
             **self._cache_kwargs(artifact_type),
         )
 
@@ -184,7 +200,12 @@ class SparseSteeringExperiment:
         if token := os.getenv("HF_API_KEY"):
             login(token=token)
         model_slug = self.config.model_name.split("/")[-1]
-        output_dir = Path("output") / self.task_name / model_slug / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        output_dir = (
+            Path("output")
+            / self.task_name
+            / model_slug
+            / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        )
         output_dir.mkdir(parents=True, exist_ok=True)
 
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_name)
@@ -193,10 +214,22 @@ class SparseSteeringExperiment:
 
         print("Preparing datasets...")
         extraction_ds, gate_train_ds, eval_ds = self.build_datasets(tokenizer)
-        n_extraction_q = len(set(extraction_ds["question_id"])) if "question_id" in extraction_ds.column_names else len(extraction_ds)
+        n_extraction_q = (
+            len(set(extraction_ds["question_id"]))
+            if "question_id" in extraction_ds.column_names
+            else len(extraction_ds)
+        )
         train_ds, val_ds = gate_train_ds["train"], gate_train_ds["val"]
-        n_train_q = len(set(train_ds["question_id"])) if "question_id" in train_ds.column_names else len(train_ds)
-        n_val_q = len(set(val_ds["question_id"])) if "question_id" in val_ds.column_names else len(val_ds)
+        n_train_q = (
+            len(set(train_ds["question_id"]))
+            if "question_id" in train_ds.column_names
+            else len(train_ds)
+        )
+        n_val_q = (
+            len(set(val_ds["question_id"]))
+            if "question_id" in val_ds.column_names
+            else len(val_ds)
+        )
         print(
             f"  Extraction: {len(extraction_ds)} examples ({n_extraction_q} questions), "
             f"Gate training: {len(train_ds)} train ({n_train_q} qs) / {len(val_ds)} val ({n_val_q} qs), "
@@ -229,7 +262,9 @@ class SparseSteeringExperiment:
             torch_dtype=torch.float16,
         ).to(self.config.device)
 
-        layer_ids = self.config.steering_layer_ids or list(range(len(model.get_layers())))
+        layer_ids = self.config.steering_layer_ids or list(
+            range(len(model.get_layers()))
+        )
 
         if self.config.method == "sparse":
             gate_config = HardConcreteConfig(**self.config.gate_config)
@@ -240,7 +275,9 @@ class SparseSteeringExperiment:
                 steering_components=self.config.targets,
             )
         else:
-            print(f"Initialising dense-steering model (steering_strength={self.config.steering_strength})...")
+            print(
+                f"Initialising dense-steering model (steering_strength={self.config.steering_strength})..."
+            )
             model.upgrade_for_steering(
                 steering_strength=self.config.steering_strength,
                 steering_layer_ids=layer_ids,
@@ -248,11 +285,18 @@ class SparseSteeringExperiment:
             )
 
         # ── Train (check cache first — includes vectors) ─────────
-        ss_hit = self._try_cache_lookup(ArtifactType.SPARSE_STEERING) if "train" in stage_set else None
+        ss_hit = (
+            self._try_cache_lookup(ArtifactType.SPARSE_STEERING)
+            if "train" in stage_set
+            else None
+        )
         if ss_hit is not None:
             model.load_steering(ss_hit.artifact_path)
             sparse_steering_path = str(ss_hit.artifact_path)
-            cache_info["sparse_steering"] = {"status": "hit", "path": sparse_steering_path}
+            cache_info["sparse_steering"] = {
+                "status": "hit",
+                "path": sparse_steering_path,
+            }
             # restore cached gate plots
             for name in ("gate_heatmap.png", "gate_animation.gif"):
                 cached = ss_hit.artifact_path.parent / name
@@ -264,7 +308,10 @@ class SparseSteeringExperiment:
             if sv_hit is not None:
                 steering_vectors, _ = load_steering_vectors(sv_hit.artifact_path)
                 steering_vectors_path = str(sv_hit.artifact_path)
-                cache_info["steering_vectors"] = {"status": "hit", "path": steering_vectors_path}
+                cache_info["steering_vectors"] = {
+                    "status": "hit",
+                    "path": steering_vectors_path,
+                }
             elif "extract" in stage_set:
                 extraction_with_activations, component_names = collect_activations(
                     extraction_ds,
@@ -280,19 +327,27 @@ class SparseSteeringExperiment:
                     component_names,
                 )
                 sv_dest = self._prepare_cache_path(ArtifactType.STEERING_VECTORS)
-                save_steering_vectors(steering_vectors, sv_dest, metadata=asdict(self.config))
-                steering_vectors_path = str(self._finalize_cache(ArtifactType.STEERING_VECTORS))
+                save_steering_vectors(
+                    steering_vectors, sv_dest, metadata=asdict(self.config)
+                )
+                steering_vectors_path = str(
+                    self._finalize_cache(ArtifactType.STEERING_VECTORS)
+                )
                 print(f"Saved steering vectors to {steering_vectors_path}")
                 cache_info["steering_vectors"] = {"status": "miss"}
 
             if steering_vectors_path is not None:
-                model.set_all_vectors(steering_vectors, normalize=self.config.normalize_steering_vectors)
+                model.set_all_vectors(
+                    steering_vectors, normalize=self.config.normalize_steering_vectors
+                )
 
             # ── Train ─────────────────────────────────────────────
             if "train" in stage_set:
                 assert gate_train_ds is not None
                 print("Training gates...")
-                train_gates(model, tokenizer, gate_train_ds, self.config, output_dir=output_dir)
+                train_gates(
+                    model, tokenizer, gate_train_ds, self.config, output_dir=output_dir
+                )
                 ss_dest = self._prepare_cache_path(ArtifactType.SPARSE_STEERING)
                 model.save_steering(ss_dest)
                 # copy gate plots into cache alongside the checkpoint
@@ -300,7 +355,9 @@ class SparseSteeringExperiment:
                     src = output_dir / name
                     if src.is_file():
                         shutil.copy2(src, ss_dest.parent / name)
-                sparse_steering_path = str(self._finalize_cache(ArtifactType.SPARSE_STEERING))
+                sparse_steering_path = str(
+                    self._finalize_cache(ArtifactType.SPARSE_STEERING)
+                )
                 print(f"Saved sparse steering to {sparse_steering_path}")
                 cache_info["sparse_steering"] = {"status": "miss"}
 
@@ -312,11 +369,16 @@ class SparseSteeringExperiment:
             baseline_hit = self._try_cache_lookup(ArtifactType.BASELINE_EVAL)
             if baseline_hit is not None:
                 baseline_metrics = load_cached_json(baseline_hit.artifact_path)
-                cache_info["baseline_eval"] = {"status": "hit", "path": str(baseline_hit.artifact_path)}
+                cache_info["baseline_eval"] = {
+                    "status": "hit",
+                    "path": str(baseline_hit.artifact_path),
+                }
             else:
                 print("Evaluating baseline (steering disabled)...")
                 with model.steering_disabled():
-                    baseline_metrics = self.run_task_evaluation(model, tokenizer, eval_ds)
+                    baseline_metrics = self.run_task_evaluation(
+                        model, tokenizer, eval_ds
+                    )
                 self._cache_store_json(ArtifactType.BASELINE_EVAL, baseline_metrics)
                 cache_info["baseline_eval"] = {"status": "miss"}
             for mode, score in baseline_metrics.items():
@@ -326,7 +388,10 @@ class SparseSteeringExperiment:
             steered_hit = self._try_cache_lookup(ArtifactType.STEERED_EVAL)
             if steered_hit is not None:
                 metrics = load_cached_json(steered_hit.artifact_path)
-                cache_info["steered_eval"] = {"status": "hit", "path": str(steered_hit.artifact_path)}
+                cache_info["steered_eval"] = {
+                    "status": "hit",
+                    "path": str(steered_hit.artifact_path),
+                }
             else:
                 print("Evaluating with steering...")
                 metrics = self.run_task_evaluation(model, tokenizer, eval_ds)

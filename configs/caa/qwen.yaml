@@ -3,34 +3,39 @@
 # Activation Addition"): mean-difference vector added to the residual stream
 # at a single middle layer.
 #
-# Paper uses layer 15/32 on Llama-2-7B (~47%). For Qwen2.5-0.5B (24 layers),
-# the equivalent is layer 12.
+# Paper uses layer 15/32 on Llama-2-7B (~47%). 
+# For Qwen2.5-0.5B (24 layers), the equivalent is layer 12.
 
 model_name: Qwen/Qwen2.5-0.5B-Instruct
 seed: 42
+
+# === Method ===
 method: dense
-steering_strength: 1.0
+steering_strength: 2.0
 steering_layer_ids: [12]
 
-# Data
+# === Data ===
 extraction_fraction: 0.5
 
-# Activation extraction
+# === Activation extraction ===
 extract_batch_size: 8
 token_position: last
 targets: [residual]
+normalize_steering_vectors: false
 
-# MCQ modes
-extraction_mcq_mode: mc1
+# === Evaluation ===
+eval_batch_size: 16
 
-# Evaluation
-eval_batch_size: 32
-
-# Wandb
+# === Wandb ===
 use_wandb: false
 
-# Cache
+# === Cache ===
 use_cache: true
 
-# Device
+# === Device ===
 device: mps
+
+# === Task specific ===
+# --- TruthfulQA ---
+extraction_mcq_mode: mc1
+

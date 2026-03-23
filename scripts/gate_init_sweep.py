@@ -77,6 +77,7 @@ def sweep_fn():
 
     # Prevent train.py's _init_wandb from clobbering the sweep run
     import sparse_steer.train as _train_mod
+
     _train_mod._init_wandb = lambda: None
 
     from sparse_steer.extract import load_steering_vectors
@@ -113,7 +114,8 @@ def sweep_fn():
         hf_config = AutoConfig.from_pretrained(model_name)
         model_cls = MODEL_REGISTRY[hf_config.model_type]
         model = model_cls.from_pretrained(
-            model_name, torch_dtype=torch.float16,
+            model_name,
+            torch_dtype=torch.float16,
         ).to("mps")
 
         gate_config = HardConcreteConfig(
@@ -149,11 +151,14 @@ def sweep_fn():
                     metrics = evaluate(model, tokenizer, eval_ds)
                 if was_training:
                     model.train()
-                wandb.log({
-                    "mc0_delta": metrics["mc0"] - baseline["mc0"],
-                    "mc1_delta": metrics["mc1"] - baseline["mc1"],
-                    "mc2_delta": metrics["mc2"] - baseline["mc2"],
-                }, step=state.global_step)
+                wandb.log(
+                    {
+                        "mc0_delta": metrics["mc0"] - baseline["mc0"],
+                        "mc1_delta": metrics["mc1"] - baseline["mc1"],
+                        "mc2_delta": metrics["mc2"] - baseline["mc2"],
+                    },
+                    step=state.global_step,
+                )
 
         # ── Train ──
         config = TruthfulQAConfig(
@@ -183,13 +188,18 @@ def sweep_fn():
 
         model_slug = model_name.split("/")[-1]
         output_dir = (
-            OUTPUT_DIR / "truthfulqa" / model_slug
+            OUTPUT_DIR
+            / "truthfulqa"
+            / model_slug
             / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         )
         output_dir.mkdir(parents=True, exist_ok=True)
 
         train_gates(
-            model, tokenizer, gate_train_ds, config,
+            model,
+            tokenizer,
+            gate_train_ds,
+            config,
             output_dir=output_dir,
             extra_callbacks=[EpochEvalCallback()],
         )
@@ -199,21 +209,24 @@ def sweep_fn():
         with torch.no_grad():
             final = evaluate(model, tokenizer, eval_ds)
 
-        wandb.log({
-            "mc0": final["mc0"],
-            "mc1": final["mc1"],
-            "mc2": final["mc2"],
-            "baseline_mc0": baseline["mc0"],
-            "baseline_mc1": baseline["mc1"],
-            "baseline_mc2": baseline["mc2"],
-            "mc0_delta": final["mc0"] - baseline["mc0"],
-            "mc1_delta": final["mc1"] - baseline["mc1"],
-            "mc2_delta": final["mc2"] - baseline["mc2"],
-        })
+        wandb.log(
+            {
+                "mc0": final["mc0"],
+                "mc1": final["mc1"],
+                "mc2": final["mc2"],
+                "baseline_mc0": baseline["mc0"],
+                "baseline_mc1": baseline["mc1"],
+                "baseline_mc2": baseline["mc2"],
+                "mc0_delta": final["mc0"] - baseline["mc0"],
+                "mc1_delta": final["mc1"] - baseline["mc1"],
+                "mc2_delta": final["mc2"] - baseline["mc2"],
+            }
+        )
 
     except Exception as e:
         print(f"Run failed: {e}")
         import traceback
+
         traceback.print_exc()
     finally:
         wandb.finish()
@@ -249,8 +262,9 @@ def _compute_pareto(results: list[dict], objectives: list[str]) -> list[dict]:
         for j, b in enumerate(results):
             if i == j:
                 continue
-            if (all(b[o] >= a[o] for o in objectives) and
-                    any(b[o] > a[o] for o in objectives)):
+            if all(b[o] >= a[o] for o in objectives) and any(
+                b[o] > a[o] for o in objectives
+            ):
                 dominated = True
                 break
         if not dominated:
@@ -260,6 +274,7 @@ def _compute_pareto(results: list[dict], objectives: list[str]) -> list[dict]:
 
 def _plot_landscape(results: list[dict], slug: str) -> None:
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
@@ -270,8 +285,13 @@ def _plot_landscape(results: list[dict], slug: str) -> None:
         sc = ax.scatter(
             [r["init_log_alpha"] for r in results],
             [r["init_log_scale"] for r in results],
-            c=vals, cmap="RdYlGn", vmin=-vabs, vmax=vabs,
-            s=40, edgecolors="black", linewidths=0.3,
+            c=vals,
+            cmap="RdYlGn",
+            vmin=-vabs,
+            vmax=vabs,
+            s=40,
+            edgecolors="black",
+            linewidths=0.3,
         )
         ax.set_xlabel("init_log_alpha")
         ax.set_ylabel("init_log_scale")
@@ -287,12 +307,16 @@ def _plot_landscape(results: list[dict], slug: str) -> None:
 
 def _plot_pareto(results: list[dict], pareto: list[dict], slug: str) -> None:
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     pareto_keys = {(p["init_log_alpha"], p["init_log_scale"]) for p in pareto}
-    non_pareto = [r for r in results
-                  if (r["init_log_alpha"], r["init_log_scale"]) not in pareto_keys]
+    non_pareto = [
+        r
+        for r in results
+        if (r["init_log_alpha"], r["init_log_scale"]) not in pareto_keys
+    ]
 
     fig, ax = plt.subplots(figsize=(8, 6))
 
@@ -300,7 +324,11 @@ def _plot_pareto(results: list[dict], pareto: list[dict], slug: str) -> None:
         ax.scatter(
             [r["mc1_delta"] for r in non_pareto],
             [r["mc2_delta"] for r in non_pareto],
-            c="#cccccc", s=15, alpha=0.5, label="dominated", zorder=1,
+            c="#cccccc",
+            s=15,
+            alpha=0.5,
+            label="dominated",
+            zorder=1,
         )
 
     if pareto:
@@ -308,8 +336,12 @@ def _plot_pareto(results: list[dict], pareto: list[dict], slug: str) -> None:
             [r["mc1_delta"] for r in pareto],
             [r["mc2_delta"] for r in pareto],
             c=[r["mc0_delta"] for r in pareto],
-            cmap="plasma", edgecolors="black", linewidths=0.8,
-            s=50, label="pareto", zorder=5,
+            cmap="plasma",
+            edgecolors="black",
+            linewidths=0.8,
+            s=50,
+            label="pareto",
+            zorder=5,
         )
         fig.colorbar(sc, ax=ax, label="MC0 delta")
 
@@ -317,7 +349,9 @@ def _plot_pareto(results: list[dict], pareto: list[dict], slug: str) -> None:
             ax.annotate(
                 f"(\u03b1={r['init_log_alpha']:.1f}, s={r['init_log_scale']:.1f})",
                 (r["mc1_delta"], r["mc2_delta"]),
-                fontsize=6, textcoords="offset points", xytext=(4, 4),
+                fontsize=6,
+                textcoords="offset points",
+                xytext=(4, 4),
             )
 
     ax.set_xlabel("MC1 delta")
@@ -346,40 +380,52 @@ def cmd_analyze(args):
         s = run.summary
         if "mc1_delta" not in s:
             continue
-        results.append({
-            "init_log_alpha": c.get("init_log_alpha", 0),
-            "init_log_scale": c.get("init_log_scale", 0),
-            "mc0": s.get("mc0", 0),
-            "mc1": s.get("mc1", 0),
-            "mc2": s.get("mc2", 0),
-            "mc0_delta": s.get("mc0_delta", 0),
-            "mc1_delta": s.get("mc1_delta", 0),
-            "mc2_delta": s.get("mc2_delta", 0),
-        })
+        results.append(
+            {
+                "init_log_alpha": c.get("init_log_alpha", 0),
+                "init_log_scale": c.get("init_log_scale", 0),
+                "mc0": s.get("mc0", 0),
+                "mc1": s.get("mc1", 0),
+                "mc2": s.get("mc2", 0),
+                "mc0_delta": s.get("mc0_delta", 0),
+                "mc1_delta": s.get("mc1_delta", 0),
+                "mc2_delta": s.get("mc2_delta", 0),
+            }
+        )
 
     print(f"Loaded {len(results)} completed runs")
     SWEEP_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     # Infer model slug from sweep name (gate-init-smol or gate-init-qwen)
     sweep_name = sweep.config.get("name", "")
-    slug = sweep_name.replace("gate-init-", "") if "gate-init-" in sweep_name else "model"
+    slug = (
+        sweep_name.replace("gate-init-", "") if "gate-init-" in sweep_name else "model"
+    )
 
-    (SWEEP_RESULTS_DIR / f"{slug}_sweep_raw.json").write_text(json.dumps(results, indent=2))
+    (SWEEP_RESULTS_DIR / f"{slug}_sweep_raw.json").write_text(
+        json.dumps(results, indent=2)
+    )
 
     objectives = ["mc0_delta", "mc1_delta", "mc2_delta"]
     pareto = _compute_pareto(results, objectives)
     pareto_sorted = sorted(pareto, key=lambda r: -r["mc1_delta"])
 
     print(f"\n{slug}: {len(results)} runs, {len(pareto)} pareto-optimal")
-    print(f"  {'alpha':>7} {'scale':>7} {'mc0\u0394':>8} {'mc1\u0394':>8} {'mc2\u0394':>8}")
+    print(
+        f"  {'alpha':>7} {'scale':>7} {'mc0\u0394':>8} {'mc1\u0394':>8} {'mc2\u0394':>8}"
+    )
     for p in pareto_sorted:
-        print(f"  {p['init_log_alpha']:7.2f} {p['init_log_scale']:7.2f} "
-              f"{p['mc0_delta']:+8.4f} {p['mc1_delta']:+8.4f} {p['mc2_delta']:+8.4f}")
+        print(
+            f"  {p['init_log_alpha']:7.2f} {p['init_log_scale']:7.2f} "
+            f"{p['mc0_delta']:+8.4f} {p['mc1_delta']:+8.4f} {p['mc2_delta']:+8.4f}"
+        )
 
     _plot_landscape(results, slug)
     _plot_pareto(results, pareto, slug)
 
-    (SWEEP_RESULTS_DIR / f"{slug}_pareto.json").write_text(json.dumps(pareto_sorted, indent=2))
+    (SWEEP_RESULTS_DIR / f"{slug}_pareto.json").write_text(
+        json.dumps(pareto_sorted, indent=2)
+    )
     print(f"\nAll results saved to {SWEEP_RESULTS_DIR}/")
 
 
@@ -393,8 +439,12 @@ def main():
     sub = parser.add_subparsers(dest="command")
 
     sp = sub.add_parser("sweep", help="Create and run wandb Bayesian sweep")
-    sp.add_argument("--model", required=True, choices=sorted(MODELS),
-                    help="Model to sweep (one sweep per model)")
+    sp.add_argument(
+        "--model",
+        required=True,
+        choices=sorted(MODELS),
+        help="Model to sweep (one sweep per model)",
+    )
     sp.add_argument("--sweep-id", type=str, default=None, help="Resume existing sweep")
     sp.add_argument("--count", type=int, default=None, help="Max runs for this agent")
 

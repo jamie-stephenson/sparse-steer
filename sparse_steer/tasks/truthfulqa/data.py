@@ -29,9 +29,7 @@ def _compute_lofit_question_splits(
 
     split_indices: dict[str, np.ndarray] | None = None
     for i in range(num_folds):
-        train_pool = np.concatenate(
-            [fold_idxs[j] for j in range(num_folds) if j != i]
-        )
+        train_pool = np.concatenate([fold_idxs[j] for j in range(num_folds) if j != i])
         test_idxs = fold_idxs[i]
         train_size = int(len(train_pool) * (1 - val_ratio))
         train_idxs = rng.choice(train_pool, size=train_size, replace=False)
@@ -48,9 +46,7 @@ def _compute_lofit_question_splits(
     if split_indices is None:
         raise RuntimeError("failed to compute split indices")
 
-    return {
-        split: set(indices.tolist()) for split, indices in split_indices.items()
-    }
+    return {split: set(indices.tolist()) for split, indices in split_indices.items()}
 
 
 def format_extraction_dataset(
@@ -67,7 +63,11 @@ def format_extraction_dataset(
     rows: list[dict[str, Any]] = []
     for question_id, record in records:
         question = record["question"].strip()
-        targets = record["mc1_targets"] if mcq_mode in {"mc0", "mc1"} else record["mc2_targets"]
+        targets = (
+            record["mc1_targets"]
+            if mcq_mode in {"mc0", "mc1"}
+            else record["mc2_targets"]
+        )
         choices, labels = targets["choices"], targets["labels"]
         positives = [c.strip() for c, l in zip(choices, labels) if l]
         negatives = [c.strip() for c, l in zip(choices, labels) if not l]
@@ -108,6 +108,7 @@ def format_train_dataset(
     Each row has: text (templated Q+A), question_id (int).
     """
     import warnings
+
     if mcq_mode == "mc0":
         warnings.warn(
             "mcq_mode='mc0' is identical to 'mc1' for gate training: both have "
@@ -119,21 +120,29 @@ def format_train_dataset(
     rows: list[dict[str, Any]] = []
     for question_id, record in records:
         question = record["question"].strip()
-        targets = record["mc1_targets"] if mcq_mode in {"mc0", "mc1"} else record["mc2_targets"]
+        targets = (
+            record["mc1_targets"]
+            if mcq_mode in {"mc0", "mc1"}
+            else record["mc2_targets"]
+        )
         choices, labels = targets["choices"], targets["labels"]
         positives = [c.strip() for c, l in zip(choices, labels) if l]
 
         if mcq_mode in {"mc0", "mc1"}:
-            rows.append({
-                "text": apply_template(tokenizer, question, positives[0]),
-                "question_id": question_id,
-            })
+            rows.append(
+                {
+                    "text": apply_template(tokenizer, question, positives[0]),
+                    "question_id": question_id,
+                }
+            )
         else:
             for pos in positives:
-                rows.append({
-                    "text": apply_template(tokenizer, question, pos),
-                    "question_id": question_id,
-                })
+                rows.append(
+                    {
+                        "text": apply_template(tokenizer, question, pos),
+                        "question_id": question_id,
+                    }
+                )
 
     if rows:
         return Dataset.from_list(rows)
@@ -158,15 +167,19 @@ def format_eval_dataset(
 
         mc2 = record["mc2_targets"]
         correct_answers = [c for c, l in zip(mc2["choices"], mc2["labels"]) if l]
-        mc2_incorrect_answers = [c for c, l in zip(mc2["choices"], mc2["labels"]) if not l]
+        mc2_incorrect_answers = [
+            c for c, l in zip(mc2["choices"], mc2["labels"]) if not l
+        ]
 
-        rows.append({
-            "question": question,
-            "best_answer": best_answer,
-            "incorrect_answers": incorrect_answers,
-            "correct_answers": correct_answers,
-            "mc2_incorrect_answers": mc2_incorrect_answers,
-        })
+        rows.append(
+            {
+                "question": question,
+                "best_answer": best_answer,
+                "incorrect_answers": incorrect_answers,
+                "correct_answers": correct_answers,
+                "mc2_incorrect_answers": mc2_incorrect_answers,
+            }
+        )
     return Dataset.from_list(rows)
 
 
@@ -188,7 +201,11 @@ def get_truthfulqa_datasets(
     """
     raw = load_dataset("truthful_qa", "multiple_choice", split="validation")
     splits = _compute_lofit_question_splits(
-        len(raw), seed=seed, fold=fold, num_folds=num_folds, val_ratio=val_ratio,
+        len(raw),
+        seed=seed,
+        fold=fold,
+        num_folds=num_folds,
+        val_ratio=val_ratio,
     )
 
     def records_for(qids: set[int]) -> list[tuple[int, dict[str, Any]]]:
@@ -198,14 +215,24 @@ def get_truthfulqa_datasets(
     train_qids = list(splits["train"])
     n_extraction = round(len(train_qids) * extraction_fraction)
     rng = np.random.RandomState(seed)
-    extraction_qids = set(rng.choice(train_qids, size=n_extraction, replace=False).tolist())
+    extraction_qids = set(
+        rng.choice(train_qids, size=n_extraction, replace=False).tolist()
+    )
     gate_train_qids = splits["train"] - extraction_qids
 
-    extraction_ds = format_extraction_dataset(records_for(extraction_qids), tokenizer, extraction_mcq_mode)
-    gate_train_ds = DatasetDict({
-        "train": format_train_dataset(records_for(gate_train_qids), tokenizer, gate_train_mcq_mode),
-        "val": format_train_dataset(records_for(splits["val"]), tokenizer, gate_train_mcq_mode),
-    })
+    extraction_ds = format_extraction_dataset(
+        records_for(extraction_qids), tokenizer, extraction_mcq_mode
+    )
+    gate_train_ds = DatasetDict(
+        {
+            "train": format_train_dataset(
+                records_for(gate_train_qids), tokenizer, gate_train_mcq_mode
+            ),
+            "val": format_train_dataset(
+                records_for(splits["val"]), tokenizer, gate_train_mcq_mode
+            ),
+        }
+    )
     eval_ds = format_eval_dataset(records_for(splits["test"]))
 
     return extraction_ds, gate_train_ds, eval_ds

@@ -56,14 +56,19 @@ def main():
     parser = argparse.ArgumentParser(description="Dense steering strength sweep")
     parser.add_argument("--model", required=True, choices=sorted(MODELS))
     parser.add_argument(
-        "--strengths", type=float, nargs="+", default=DEFAULT_STRENGTHS,
+        "--strengths",
+        type=float,
+        nargs="+",
+        default=DEFAULT_STRENGTHS,
         help="Steering strengths to evaluate",
     )
     parser.add_argument("--targets", nargs="+", default=["attention"])
     parser.add_argument("--device", default="mps")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
-        "--sv-path", type=str, default=None,
+        "--sv-path",
+        type=str,
+        default=None,
         help="Path to existing steering_vectors.pt (skips extraction)",
     )
     args = parser.parse_args()
@@ -71,7 +76,9 @@ def main():
     model_name = MODELS[args.model]
     model_slug = model_name.split("/")[-1]
     run_dir = (
-        OUTPUT_DIR / "truthfulqa" / model_slug
+        OUTPUT_DIR
+        / "truthfulqa"
+        / model_slug
         / f"dense_sweep_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
     )
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -93,7 +100,8 @@ def main():
     hf_config = AutoConfig.from_pretrained(model_name)
     model_cls = DENSE_MODEL_REGISTRY[hf_config.model_type]
     model = model_cls.from_pretrained(
-        model_name, torch_dtype=torch.float16,
+        model_name,
+        torch_dtype=torch.float16,
     ).to(args.device)
 
     model.upgrade_for_steering(
@@ -110,8 +118,12 @@ def main():
     else:
         print("Extracting steering vectors...")
         extraction_with_activations, component_names = collect_activations(
-            extraction_ds, model, tokenizer,
-            targets=args.targets, batch_size=8, token_position="last",
+            extraction_ds,
+            model,
+            tokenizer,
+            targets=args.targets,
+            batch_size=8,
+            token_position="last",
         )
         vectors = extract_steering_vectors(extraction_with_activations, component_names)
         sv_out = save_steering_vectors(vectors, run_dir / "steering_vectors.pt")
@@ -124,12 +136,16 @@ def main():
     print("Evaluating baseline (no steering)...")
     with model.steering_disabled(), torch.no_grad():
         baseline = evaluate(model, tokenizer, eval_ds)
-    print(f"  Baseline MC0={baseline['mc0']:.4f}  MC1={baseline['mc1']:.4f}  MC2={baseline['mc2']:.4f}")
+    print(
+        f"  Baseline MC0={baseline['mc0']:.4f}  MC1={baseline['mc1']:.4f}  MC2={baseline['mc2']:.4f}"
+    )
 
     # ── Sweep ──
     results = []
     print(f"\nSweeping {len(args.strengths)} strengths...")
-    print(f"  {'strength':>8}  {'MC0':>8}  {'MC1':>8}  {'MC2':>8}  {'MC0Δ':>8}  {'MC1Δ':>8}  {'MC2Δ':>8}")
+    print(
+        f"  {'strength':>8}  {'MC0':>8}  {'MC1':>8}  {'MC2':>8}  {'MC0Δ':>8}  {'MC1Δ':>8}  {'MC2Δ':>8}"
+    )
 
     for strength in args.strengths:
         _set_steering_strength(model, strength)

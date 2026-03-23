@@ -10,11 +10,15 @@ from .base import BaseSteeringLM, Component, SteeringHook
 class SparseSteeringHook(HardConcreteGateMixin, SteeringHook):
     """Steering hook with HardConcrete learned gates."""
 
-    def __init__(self, vector_shape: tuple[int, ...], gate_config: HardConcreteConfig) -> None:
+    def __init__(
+        self, vector_shape: tuple[int, ...], gate_config: HardConcreteConfig
+    ) -> None:
         # multi-dim (e.g. num_heads, head_dim): one gate per first dim
         # 1D (e.g. mlp_dim): single gate for the whole vector
         num_gates = vector_shape[0] if len(vector_shape) > 1 else 1
-        super().__init__(vector_shape=vector_shape, num_gates=num_gates, gate_config=gate_config)
+        super().__init__(
+            vector_shape=vector_shape, num_gates=num_gates, gate_config=gate_config
+        )
 
     def _compute_correction(self, hidden: Tensor) -> Tensor:
         gate = self._scaled_gate(dtype=hidden.dtype, device=hidden.device)
@@ -100,7 +104,9 @@ class SparseSteeringLM(BaseSteeringLM):
         steering_layer_ids = payload.get("steering_layer_ids")
         if steering_layer_ids is None:
             if active_layers_only:
-                steering_layer_ids = sorted(gate_config.active_layer_indices(state_dict))
+                steering_layer_ids = sorted(
+                    gate_config.active_layer_indices(state_dict)
+                )
             else:
                 steering_layer_ids = list(range(len(self.get_layers())))
 
@@ -114,7 +120,8 @@ class SparseSteeringLM(BaseSteeringLM):
 
         load_info = self.load_state_dict(state_dict, strict=False)
         missing = [
-            k for k in load_info.missing_keys
+            k
+            for k in load_info.missing_keys
             if any(term in k for term in ("log_alpha", "log_scale", "steering_vector"))
         ]
         if missing:

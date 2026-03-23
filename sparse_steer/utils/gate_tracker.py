@@ -6,6 +6,7 @@ import numpy.ma as ma
 import torch
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib import animation
@@ -26,8 +27,8 @@ def _masked_cmap(base: str = "viridis"):
 @dataclass
 class GateSnapshots:
     steps: list[int] = field(default_factory=list)
-    attn_norms: list[ndarray] | None = None   # each: (num_layers, num_heads)
-    mlp_norms: list[ndarray] | None = None     # each: (num_layers,)
+    attn_norms: list[ndarray] | None = None  # each: (num_layers, num_heads)
+    mlp_norms: list[ndarray] | None = None  # each: (num_layers,)
     layer_ids: list[int] = field(default_factory=list)
 
 
@@ -41,7 +42,7 @@ class GateTracker(TrainerCallback):
         self._attn_hooks: list[tuple[int, SparseSteeringHook]] = []
         self._mlp_hooks: list[tuple[int, SparseSteeringHook]] = []
         self._attn_sv_norms: list[torch.Tensor] = []  # each (num_heads,)
-        self._mlp_svs: list[torch.Tensor] = []         # each (mlp_dim,)
+        self._mlp_svs: list[torch.Tensor] = []  # each (mlp_dim,)
 
         layers = model.get_layers()
         layer_id_set: set[int] = set()
@@ -71,9 +72,7 @@ class GateTracker(TrainerCallback):
         with torch.no_grad():
             if self._attn_hooks:
                 rows = []
-                for (_, hook), sv_norm in zip(
-                    self._attn_hooks, self._attn_sv_norms
-                ):
+                for (_, hook), sv_norm in zip(self._attn_hooks, self._attn_sv_norms):
                     was_training = hook.training
                     hook.eval()
                     gate = hook._scaled_gate(
@@ -113,7 +112,10 @@ class GateTracker(TrainerCallback):
 
 
 def _make_layout(
-    has_attn: bool, has_mlp: bool, n_layers: int, num_heads: int = 1,
+    has_attn: bool,
+    has_mlp: bool,
+    n_layers: int,
+    num_heads: int = 1,
 ):
     """Create figure with data axes + a dedicated colorbar axis."""
     height = max(4, n_layers * 0.3)
@@ -126,7 +128,8 @@ def _make_layout(
     ratios.append(0.4)  # colorbar
 
     fig, all_axes = plt.subplots(
-        1, len(ratios),
+        1,
+        len(ratios),
         gridspec_kw={"width_ratios": ratios},
         figsize=(sum(ratios) * 0.7 + 2, height),
     )
@@ -138,19 +141,27 @@ def _make_layout(
     ax_attn = ax_mlp = None
     idx = 0
     if has_attn:
-        ax_attn = all_axes[idx]; idx += 1
+        ax_attn = all_axes[idx]
+        idx += 1
     if has_mlp:
-        ax_mlp = all_axes[idx]; idx += 1
+        ax_mlp = all_axes[idx]
+        idx += 1
     cbar_ax = all_axes[idx]
 
     return fig, ax_attn, ax_mlp, cbar_ax
 
 
 def _populate_axes(
-    ax_attn, ax_mlp, cbar_ax,
-    attn_data, mlp_data,
-    n_layers: int, layer_ids: list[int],
-    vmin: float, vmax: float, cmap,
+    ax_attn,
+    ax_mlp,
+    cbar_ax,
+    attn_data,
+    mlp_data,
+    n_layers: int,
+    layer_ids: list[int],
+    vmin: float,
+    vmax: float,
+    cmap,
 ):
     """Fill axes with data and add shared colorbar. Returns (im_attn, im_mlp)."""
     im_attn = im_mlp = None
@@ -159,7 +170,11 @@ def _populate_axes(
     if ax_attn is not None and attn_data is not None:
         im_attn = ax_attn.imshow(
             ma.masked_equal(attn_data, 0.0),
-            aspect="auto", origin="lower", vmin=vmin, vmax=vmax, cmap=cmap,
+            aspect="auto",
+            origin="lower",
+            vmin=vmin,
+            vmax=vmax,
+            cmap=cmap,
         )
         mappable = im_attn
         ax_attn.set_yticks(range(n_layers))
@@ -171,7 +186,11 @@ def _populate_axes(
     if ax_mlp is not None and mlp_data is not None:
         im_mlp = ax_mlp.imshow(
             ma.masked_equal(mlp_data.reshape(-1, 1), 0.0),
-            aspect="auto", origin="lower", vmin=vmin, vmax=vmax, cmap=cmap,
+            aspect="auto",
+            origin="lower",
+            vmin=vmin,
+            vmax=vmax,
+            cmap=cmap,
         )
         mappable = im_mlp
         ax_mlp.set_yticks(range(n_layers))
@@ -190,9 +209,7 @@ def _populate_axes(
     return im_attn, im_mlp
 
 
-def _build_heatmap_figure(
-    snapshots: GateSnapshots, step_idx: int = -1
-) -> Figure:
+def _build_heatmap_figure(snapshots: GateSnapshots, step_idx: int = -1) -> Figure:
     has_attn = snapshots.attn_norms is not None and len(snapshots.attn_norms) > 0
     has_mlp = snapshots.mlp_norms is not None and len(snapshots.mlp_norms) > 0
     step = snapshots.steps[step_idx] if snapshots.steps else 0
@@ -211,10 +228,16 @@ def _build_heatmap_figure(
 
     fig, ax_attn, ax_mlp, cbar_ax = _make_layout(has_attn, has_mlp, n_layers, num_heads)
     _populate_axes(
-        ax_attn, ax_mlp, cbar_ax,
-        attn_data, mlp_data,
-        n_layers, snapshots.layer_ids,
-        0, vmax, _masked_cmap(),
+        ax_attn,
+        ax_mlp,
+        cbar_ax,
+        attn_data,
+        mlp_data,
+        n_layers,
+        snapshots.layer_ids,
+        0,
+        vmax,
+        _masked_cmap(),
     )
     fig.suptitle(f"Effective steering norm \u2014 step {step}")
     fig.tight_layout()
@@ -249,11 +272,16 @@ def render_gate_animation(
 
     fig, ax_attn, ax_mlp, cbar_ax = _make_layout(has_attn, has_mlp, n_layers, num_heads)
     im_attn, im_mlp = _populate_axes(
-        ax_attn, ax_mlp, cbar_ax,
+        ax_attn,
+        ax_mlp,
+        cbar_ax,
         snapshots.attn_norms[0] if has_attn else None,
         snapshots.mlp_norms[0] if has_mlp else None,
-        n_layers, snapshots.layer_ids,
-        0, vmax, cmap,
+        n_layers,
+        snapshots.layer_ids,
+        0,
+        vmax,
+        cmap,
     )
     title = fig.suptitle(f"Effective steering norm \u2014 step {snapshots.steps[0]}")
     fig.tight_layout()
@@ -262,15 +290,20 @@ def render_gate_animation(
         if im_attn is not None:
             im_attn.set_data(ma.masked_equal(snapshots.attn_norms[frame_idx], 0.0))
         if im_mlp is not None:
-            im_mlp.set_data(ma.masked_equal(snapshots.mlp_norms[frame_idx].reshape(-1, 1), 0.0))
+            im_mlp.set_data(
+                ma.masked_equal(snapshots.mlp_norms[frame_idx].reshape(-1, 1), 0.0)
+            )
         title.set_text(
             f"Effective steering norm \u2014 step {snapshots.steps[frame_idx]}"
         )
         return []
 
     anim = animation.FuncAnimation(
-        fig, _update, frames=len(snapshots.steps),
-        interval=1000 // fps, blit=False,
+        fig,
+        _update,
+        frames=len(snapshots.steps),
+        interval=1000 // fps,
+        blit=False,
     )
     anim.save(str(output_path), writer=animation.PillowWriter(fps=fps))
     plt.close(fig)

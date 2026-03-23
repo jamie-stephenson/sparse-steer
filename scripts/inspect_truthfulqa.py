@@ -68,9 +68,7 @@ def print_mode_examples(
     print("Sample rows:")
     for i in range(min(num_examples, len(dataset))):
         row = dataset[i]
-        print(
-            f"[{i}] question_id={row['question_id']} positive={row['positive']}"
-        )
+        print(f"[{i}] question_id={row['question_id']} positive={row['positive']}")
         print(f"    text: {preview_text(row['text'])}")
 
 

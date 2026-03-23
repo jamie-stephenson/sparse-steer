@@ -6,7 +6,9 @@ from .base import BaseSteeringLM, Component, SteeringHook
 class DenseSteeringHook(SteeringHook):
     """Steering hook that scales the vector by a fixed strength."""
 
-    def __init__(self, vector_shape: tuple[int, ...], steering_strength: float = 1.0) -> None:
+    def __init__(
+        self, vector_shape: tuple[int, ...], steering_strength: float = 1.0
+    ) -> None:
         super().__init__(vector_shape)
         self.steering_strength = steering_strength
 

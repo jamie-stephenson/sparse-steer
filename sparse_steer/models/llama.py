@@ -33,7 +33,9 @@ class LlamaLayout:
             "Expected 'o_proj' (attention) or 'down_proj' (MLP)."
         )
 
-    def _get_vector_shape(self, component: Component, layer: nn.Module) -> tuple[int, ...]:
+    def _get_vector_shape(
+        self, component: Component, layer: nn.Module
+    ) -> tuple[int, ...]:
         if component == "attention":
             attn = self.get_attention(layer)
             return (attn.config.num_attention_heads, attn.head_dim)

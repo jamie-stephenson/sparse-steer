@@ -63,12 +63,8 @@ class HardConcreteGateMixin:
     ) -> None:
         super().__init__(*args, **kwargs)
         self._set_gate_config(gate_config)
-        self.log_alpha = nn.Parameter(
-            torch.full((num_gates,), self.init_log_alpha)
-        )
-        self.log_scale = nn.Parameter(
-            torch.full((num_gates,), self.init_log_scale)
-        )
+        self.log_alpha = nn.Parameter(torch.full((num_gates,), self.init_log_alpha))
+        self.log_scale = nn.Parameter(torch.full((num_gates,), self.init_log_scale))
 
     def _set_gate_config(self, cfg: HardConcreteConfig) -> None:
         self.temperature = cfg.temperature
@@ -112,7 +108,6 @@ class HardConcreteGateMixin:
             weights = torch.where(keep_mask, weights, torch.zeros_like(weights))
         scales = F.softplus(self.log_scale)
         return (weights * scales).to(device=device, dtype=dtype)
-
 
 
 __all__ = [

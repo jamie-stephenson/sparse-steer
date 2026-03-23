@@ -27,7 +27,9 @@ class SteeringHook(nn.Module):
     @abstractmethod
     def _compute_correction(self, hidden: Tensor) -> Tensor: ...
 
-    def pre_hook(self, _module: nn.Module, inputs: tuple[Any, ...]) -> tuple[Any, ...] | None:
+    def pre_hook(
+        self, _module: nn.Module, inputs: tuple[Any, ...]
+    ) -> tuple[Any, ...] | None:
         """Forward pre-hook for attention/MLP output projections."""
         if not self.steering_enabled or not inputs:
             return None
@@ -53,7 +55,9 @@ class SteeringHook(nn.Module):
                 f"got {tuple(vectors.shape)}."
             )
         self.steering_vectors.copy_(
-            vectors.to(device=self.steering_vectors.device, dtype=self.steering_vectors.dtype)
+            vectors.to(
+                device=self.steering_vectors.device, dtype=self.steering_vectors.dtype
+            )
         )
 
 
@@ -81,7 +85,9 @@ class BaseSteeringLM:
     def get_mlp(self, layer: nn.Module) -> nn.Module: ...
 
     @abstractmethod
-    def _get_vector_shape(self, component: Component, layer: nn.Module) -> tuple[int, ...]:
+    def _get_vector_shape(
+        self, component: Component, layer: nn.Module
+    ) -> tuple[int, ...]:
         """Return the shape of the steering vector for the given component."""
         ...
 
@@ -146,7 +152,10 @@ class BaseSteeringLM:
                 h.steering_enabled = True
 
     def set_all_vectors(
-        self, vectors: dict[str, Tensor], *, normalize: bool = False,
+        self,
+        vectors: dict[str, Tensor],
+        *,
+        normalize: bool = False,
     ) -> None:
         """Apply steering vectors for each component present in *vectors*."""
         expected_components = set(getattr(self, "steering_components", []))

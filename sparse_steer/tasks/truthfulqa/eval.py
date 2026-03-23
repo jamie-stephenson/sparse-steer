@@ -3,6 +3,7 @@
 All three metrics are computed from a single forward pass over the MC2
 answer set, since MC1 choices are always a subset of MC2 choices.
 """
+
 import torch
 from datasets import Dataset
 from tqdm import tqdm
@@ -49,13 +50,15 @@ def evaluate(
         correct_answers = record["correct_answers"]
         mc2_incorrect = record["mc2_incorrect_answers"]
         all_answers = correct_answers + mc2_incorrect
-        records.append({
-            "question": record["question"],
-            "all_answers": all_answers,
-            "n_correct": len(correct_answers),
-            "best_answer": record["best_answer"],
-            "incorrect_answers": record["incorrect_answers"],
-        })
+        records.append(
+            {
+                "question": record["question"],
+                "all_answers": all_answers,
+                "n_correct": len(correct_answers),
+                "best_answer": record["best_answer"],
+                "incorrect_answers": record["incorrect_answers"],
+            }
+        )
 
     # Greedily pack questions into batches
     batches: list[list[int]] = []
@@ -90,11 +93,14 @@ def evaluate(
         offset = 0
         for i, n in zip(batch_idxs, slices):
             rec = records[i]
-            lp = all_log_probs[offset:offset + n]
+            lp = all_log_probs[offset : offset + n]
             offset += n
             mc0, mc1, mc2 = _score_question(
-                lp, rec["n_correct"], rec["best_answer"],
-                rec["incorrect_answers"], rec["all_answers"],
+                lp,
+                rec["n_correct"],
+                rec["best_answer"],
+                rec["incorrect_answers"],
+                rec["all_answers"],
             )
             mc0_correct += mc0
             mc1_correct += mc1

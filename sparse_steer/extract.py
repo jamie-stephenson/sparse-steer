@@ -42,6 +42,7 @@ TokenPositionFn = Callable[[dict[str, Tensor]], Tensor]
 ``"attention_mask"``, etc.) and returns a ``(batch,)`` tensor of per-sequence
 position indices."""
 
+
 def last_token_positions(attention_mask: Tensor) -> Tensor:
     """Indices of the last non-padding token per sequence."""
     seq_len = attention_mask.shape[-1]
@@ -90,24 +91,33 @@ def _register_hooks(
     for layer in layers:
         if ActivationTarget.ATTENTION in targets:
             hook_mod = model._get_output_proj(model.get_attention(layer))
+
             def make_input_hook(n: str):
                 def hook(_mod, inp, _output):
                     saved[n].append(gather(inp[0]).detach())
+
                 return hook
+
             hooks.append(hook_mod.register_forward_hook(make_input_hook("attention")))
         if ActivationTarget.MLP in targets:
             hook_mod = model._get_output_proj(model.get_mlp(layer))
+
             def make_input_hook(n: str):
                 def hook(_mod, inp, _output):
                     saved[n].append(gather(inp[0]).detach())
+
                 return hook
+
             hooks.append(hook_mod.register_forward_hook(make_input_hook("mlp")))
         if ActivationTarget.RESIDUAL in targets:
+
             def make_output_hook(n: str):
                 def hook(_mod, _inp, output):
                     out = output[0] if isinstance(output, tuple) else output
                     saved[n].append(gather(out).detach())
+
                 return hook
+
             hooks.append(layer.register_forward_hook(make_output_hook("residual")))
     return saved, hooks
 
@@ -156,7 +166,9 @@ def iter_activations(
     device = next(model.parameters()).device
 
     model.eval()
-    for i in tqdm(range(0, len(texts), batch_size), desc="Extracting activations", unit="batch"):
+    for i in tqdm(
+        range(0, len(texts), batch_size), desc="Extracting activations", unit="batch"
+    ):
         tok = tokenize(tokenizer, list(texts[i : i + batch_size]), max_length)
         mask = tok["attention_mask"].to(device)
         inputs = {k: v.to(device) for k, v in tok.items()}
@@ -203,7 +215,9 @@ def collect_activations(
     """
     all_acts: dict[str, list[Tensor]] = {}
     for batch in iter_activations(
-        model, tokenizer, dataset["text"],
+        model,
+        tokenizer,
+        dataset["text"],
         targets=targets,
         batch_size=batch_size,
         max_length=max_length,

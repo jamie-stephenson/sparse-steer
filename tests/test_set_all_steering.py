@@ -61,7 +61,9 @@ class DummySteeringLM(SparseSteeringLM, nn.Module):
             return module.o_proj
         return module.down_proj
 
-    def _get_vector_shape(self, component: Component, layer: nn.Module) -> tuple[int, ...]:
+    def _get_vector_shape(
+        self, component: Component, layer: nn.Module
+    ) -> tuple[int, ...]:
         if component == "attention":
             return (NUM_HEADS, HEAD_DIM)
         elif component == "mlp":

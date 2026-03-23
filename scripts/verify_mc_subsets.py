@@ -43,11 +43,11 @@ for i, record in enumerate(ds):
 n = len(ds)
 print(f"Total questions: {n}")
 print()
-print(f"MC1 choices ⊆ MC2 choices: {mc1_is_subset}/{n} ({mc1_is_subset/n:.1%})")
-print(f"MC1 choices ⊄ MC2 choices: {mc1_not_subset}/{n} ({mc1_not_subset/n:.1%})")
+print(f"MC1 choices ⊆ MC2 choices: {mc1_is_subset}/{n} ({mc1_is_subset / n:.1%})")
+print(f"MC1 choices ⊄ MC2 choices: {mc1_not_subset}/{n} ({mc1_not_subset / n:.1%})")
 print()
-print(f"MC0 choices ⊆ MC2 choices: {mc0_is_subset}/{n} ({mc0_is_subset/n:.1%})")
-print(f"MC0 choices ⊄ MC2 choices: {mc0_not_subset}/{n} ({mc0_not_subset/n:.1%})")
+print(f"MC0 choices ⊆ MC2 choices: {mc0_is_subset}/{n} ({mc0_is_subset / n:.1%})")
+print(f"MC0 choices ⊄ MC2 choices: {mc0_not_subset}/{n} ({mc0_not_subset / n:.1%})")
 
 # Also check: are MC1 choices a subset of MC2 choices after stripping whitespace?
 mc1_stripped_subset = 0
@@ -58,7 +58,9 @@ for record in ds:
         mc1_stripped_subset += 1
 
 print()
-print(f"MC1 ⊆ MC2 (stripped): {mc1_stripped_subset}/{n} ({mc1_stripped_subset/n:.1%})")
+print(
+    f"MC1 ⊆ MC2 (stripped): {mc1_stripped_subset}/{n} ({mc1_stripped_subset / n:.1%})"
+)
 
 # Show an example where they differ
 if example_mismatch is not None:

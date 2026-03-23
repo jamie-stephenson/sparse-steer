@@ -273,10 +273,13 @@ def check_staleness(
     warnings: list[str] = []
 
     # 1. Source code drift
-    current_hash, current_per_file, _ = compute_source_hash(artifact_type, extra_sources)
+    current_hash, current_per_file, _ = compute_source_hash(
+        artifact_type, extra_sources
+    )
     if current_hash != manifest.source_hash:
         changed = [
-            f for f in manifest.per_file_hashes
+            f
+            for f in manifest.per_file_hashes
             if manifest.per_file_hashes.get(f) != current_per_file.get(f)
         ]
         # also check for new files not in manifest
@@ -287,8 +290,7 @@ def check_staleness(
         warnings.append(
             "Source code has changed since this artifact was cached.\n"
             f"  Cached at commit {manifest.git_commit}, current commit {current_git_commit()}.\n"
-            "  Changed files:\n"
-            + "".join(f"    - {f}\n" for f in changed)
+            "  Changed files:\n" + "".join(f"    - {f}\n" for f in changed)
         )
 
     # 2. Commit distance
@@ -388,10 +390,14 @@ def finalize(
 ) -> Path:
     """Write the cache manifest after the artifact has been saved. Returns artifact path."""
     config_hash, config_fields = compute_config_hash(
-        config, artifact_type, task_name, extra_fields,
+        config,
+        artifact_type,
+        task_name,
+        extra_fields,
     )
     source_hash, per_file_hashes, source_files = compute_source_hash(
-        artifact_type, extra_sources,
+        artifact_type,
+        extra_sources,
     )
 
     cache_path = _cache_dir(artifact_type, task_name, config_hash)
@@ -421,9 +427,17 @@ def store_json(
     extra_sources: list[str] | None = None,
 ) -> Path:
     """Store a JSON-serialisable dict (eval results) in the cache."""
-    dest = prepare_cache_path(artifact_type, config, task_name, extra_fields=extra_fields)
+    dest = prepare_cache_path(
+        artifact_type, config, task_name, extra_fields=extra_fields
+    )
     dest.write_text(json.dumps(data, indent=2))
-    return finalize(artifact_type, config, task_name, extra_fields=extra_fields, extra_sources=extra_sources)
+    return finalize(
+        artifact_type,
+        config,
+        task_name,
+        extra_fields=extra_fields,
+        extra_sources=extra_sources,
+    )
 
 
 def load_cached_json(path: Path) -> dict[str, Any]:

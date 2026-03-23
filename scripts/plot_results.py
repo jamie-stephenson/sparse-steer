@@ -28,14 +28,18 @@ def load_runs() -> list[dict]:
         # Label from model name and timestamp
         model_name = summary["config"]["model_name"].split("/")[-1]
         timestamp = summary_path.parent.name
-        l0_info = summary["config"].get("l0_scheduler_type", summary["config"].get("l0_lambda", "?"))
+        l0_info = summary["config"].get(
+            "l0_scheduler_type", summary["config"].get("l0_lambda", "?")
+        )
         summary["label"] = model_name
         summary["short_label"] = model_name
         summary["run_dir"] = str(summary_path.parent)
         runs.append(summary)
 
     # Only keep runs that used the exponential_decay schedule
-    runs = [r for r in runs if r["config"].get("l0_scheduler_type") == "exponential_decay"]
+    runs = [
+        r for r in runs if r["config"].get("l0_scheduler_type") == "exponential_decay"
+    ]
     return runs
 
 
@@ -60,14 +64,33 @@ def plot_eval_and_delta(runs: list[dict]) -> None:
         offset_base = (i * 2) * width_eval - (n_runs * width_eval) + width_eval / 2
         offset_steer = (i * 2 + 1) * width_eval - (n_runs * width_eval) + width_eval / 2
 
-        bars_b = ax_eval.bar(x + offset_base, baseline, width_eval, label=f"{run['label']} baseline",
-                             alpha=0.5, edgecolor="black", linewidth=0.5)
-        bars_s = ax_eval.bar(x + offset_steer, steered, width_eval, label=f"{run['label']} steered",
-                             edgecolor="black", linewidth=0.5)
+        bars_b = ax_eval.bar(
+            x + offset_base,
+            baseline,
+            width_eval,
+            label=f"{run['label']} baseline",
+            alpha=0.5,
+            edgecolor="black",
+            linewidth=0.5,
+        )
+        bars_s = ax_eval.bar(
+            x + offset_steer,
+            steered,
+            width_eval,
+            label=f"{run['label']} steered",
+            edgecolor="black",
+            linewidth=0.5,
+        )
 
         for bar in list(bars_b) + list(bars_s):
-            ax_eval.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.005,
-                         f"{bar.get_height():.3f}", ha="center", va="bottom", fontsize=6)
+            ax_eval.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.005,
+                f"{bar.get_height():.3f}",
+                ha="center",
+                va="bottom",
+                fontsize=6,
+            )
 
     ax_eval.set_ylabel("Score")
     ax_eval.set_title("TruthfulQA: Baseline vs Steered")
@@ -80,16 +103,30 @@ def plot_eval_and_delta(runs: list[dict]) -> None:
     # --- Right panel: steering delta ---
     width_delta = 0.8 / n_runs
     for i, run in enumerate(runs_with_eval):
-        deltas = [run["metrics"].get(m, 0) - run["baseline_metrics"].get(m, 0) for m in metrics]
+        deltas = [
+            run["metrics"].get(m, 0) - run["baseline_metrics"].get(m, 0)
+            for m in metrics
+        ]
         offset = i * width_delta - (n_runs * width_delta) / 2 + width_delta / 2
-        bars = ax_delta.bar(x + offset, deltas, width_delta, label=run["label"],
-                            edgecolor="black", linewidth=0.5)
+        bars = ax_delta.bar(
+            x + offset,
+            deltas,
+            width_delta,
+            label=run["label"],
+            edgecolor="black",
+            linewidth=0.5,
+        )
 
         for bar in bars:
             val = bar.get_height()
-            ax_delta.text(bar.get_x() + bar.get_width() / 2,
-                          val + (0.003 if val >= 0 else -0.012),
-                          f"{val:+.3f}", ha="center", va="bottom", fontsize=7)
+            ax_delta.text(
+                bar.get_x() + bar.get_width() / 2,
+                val + (0.003 if val >= 0 else -0.012),
+                f"{val:+.3f}",
+                ha="center",
+                va="bottom",
+                fontsize=7,
+            )
 
     ax_delta.axhline(0, color="black", linewidth=0.8)
     ax_delta.set_ylabel("Delta (steered - baseline)")
@@ -122,9 +159,13 @@ def plot_training_curves(runs: list[dict]) -> None:
         eval_loss = [e["eval_loss"] for e in logs if "eval_loss" in e]
 
         if train_steps:
-            ax_train.plot(train_steps, train_loss, marker=".", markersize=4, label=run["label"])
+            ax_train.plot(
+                train_steps, train_loss, marker=".", markersize=4, label=run["label"]
+            )
         if eval_steps:
-            ax_eval.plot(eval_steps, eval_loss, marker="o", markersize=4, label=run["label"])
+            ax_eval.plot(
+                eval_steps, eval_loss, marker="o", markersize=4, label=run["label"]
+            )
 
     ax_train.set_xlabel("Step")
     ax_train.set_ylabel("Train Loss")

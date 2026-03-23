@@ -7,6 +7,7 @@ cases where the expected output is obvious, then print a human-readable view.
 
 import torch
 
+
 def build_answer_mask(
     attention_mask: torch.Tensor,  # (batch, seq_len)
     prefix_lens: list[int],
@@ -27,7 +28,9 @@ def show(label: str, attention_mask: torch.Tensor, prefix_lens: list[int]) -> No
         print(f"    answer_mask    : {mask[i].tolist()}")
         # positions where mask is 1 (in the SHIFTED sequence, so +1 for original)
         on = (mask[i] == 1).nonzero(as_tuple=True)[0].tolist()
-        print(f"    active shifted positions: {on}  (original token indices: {[p+1 for p in on]})")
+        print(
+            f"    active shifted positions: {on}  (original token indices: {[p + 1 for p in on]})"
+        )
 
 
 # ── Case 1: no padding, single row ──────────────────────────────────────────
@@ -45,10 +48,12 @@ show(
 # row 1: prefix_len=4, total=6  → answer at [4,5]    → shifted [3,4]
 show(
     "two rows, different prefix lengths, no padding",
-    attention_mask=torch.tensor([
-        [1, 1, 1, 1, 1, 0],  # row 0: 5 real tokens + 1 pad to match length
-        [1, 1, 1, 1, 1, 1],  # row 1: 6 real tokens
-    ]),
+    attention_mask=torch.tensor(
+        [
+            [1, 1, 1, 1, 1, 0],  # row 0: 5 real tokens + 1 pad to match length
+            [1, 1, 1, 1, 1, 1],  # row 1: 6 real tokens
+        ]
+    ),
     prefix_lens=[2, 4],
 )
 
@@ -58,10 +63,12 @@ show(
 # padding zeros in attention_mask should suppress padded positions automatically
 show(
     "two rows with right-padding",
-    attention_mask=torch.tensor([
-        [1, 1, 1, 1, 0, 0],
-        [1, 1, 1, 1, 1, 1],
-    ]),
+    attention_mask=torch.tensor(
+        [
+            [1, 1, 1, 1, 0, 0],
+            [1, 1, 1, 1, 1, 1],
+        ]
+    ),
     prefix_lens=[2, 4],
 )
 

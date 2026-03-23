@@ -49,10 +49,12 @@ def _load_config(path: Path) -> TruthfulQAConfig:
 
 def main():
     parser = argparse.ArgumentParser(description="MCQ mode combination sweep")
-    parser.add_argument("--config", type=str, default="config.yaml",
-                        help="Path to base config YAML")
-    parser.add_argument("--num-epochs", type=int, default=None,
-                        help="Override num_epochs from config")
+    parser.add_argument(
+        "--config", type=str, default="config.yaml", help="Path to base config YAML"
+    )
+    parser.add_argument(
+        "--num-epochs", type=int, default=None, help="Override num_epochs from config"
+    )
     args = parser.parse_args()
 
     base_config = _load_config(ROOT / args.config)
@@ -88,7 +90,8 @@ def main():
     # ── Baseline (no steering) ──
     print(f"Loading {model_name} for baseline eval...")
     base_model = model_cls.from_pretrained(
-        model_name, torch_dtype=torch.float16,
+        model_name,
+        torch_dtype=torch.float16,
     ).to(base_config.device)
     base_model.upgrade_for_steering(
         gate_config=gate_config,
@@ -99,7 +102,9 @@ def main():
     print("Evaluating baseline (no steering)...")
     with base_model.steering_disabled(), torch.no_grad():
         baseline = evaluate(base_model, tokenizer, eval_ds)
-    print(f"  Baseline MC0={baseline['mc0']:.4f}  MC1={baseline['mc1']:.4f}  MC2={baseline['mc2']:.4f}")
+    print(
+        f"  Baseline MC0={baseline['mc0']:.4f}  MC1={baseline['mc1']:.4f}  MC2={baseline['mc2']:.4f}"
+    )
     del base_model
     if base_config.device == "mps":
         torch.mps.empty_cache()
@@ -108,12 +113,16 @@ def main():
     results = []
     combos = list(product(MCQ_MODES, MCQ_MODES))
     print(f"\nSweeping {len(combos)} extraction x train mcq_mode combinations...\n")
-    print(f"  {'extract':>8}  {'train':>8}  {'MC0':>8}  {'MC1':>8}  {'MC2':>8}  {'MC0Δ':>8}  {'MC1Δ':>8}  {'MC2Δ':>8}")
+    print(
+        f"  {'extract':>8}  {'train':>8}  {'MC0':>8}  {'MC1':>8}  {'MC2':>8}  {'MC0Δ':>8}  {'MC1Δ':>8}  {'MC2Δ':>8}"
+    )
 
     for extract_mode, train_mode in combos:
         tag = f"ext={extract_mode}_train={train_mode}"
         print(f"\n── {tag} ──")
-        run_dir = OUTPUT_DIR / "truthfulqa" / model_slug / f"mcq_sweep_{tag}_{timestamp}"
+        run_dir = (
+            OUTPUT_DIR / "truthfulqa" / model_slug / f"mcq_sweep_{tag}_{timestamp}"
+        )
         run_dir.mkdir(parents=True, exist_ok=True)
 
         config = replace(
@@ -125,7 +134,8 @@ def main():
 
         # Fresh model each run
         model = model_cls.from_pretrained(
-            model_name, torch_dtype=torch.float16,
+            model_name,
+            torch_dtype=torch.float16,
         ).to(config.device)
         model.upgrade_for_steering(
             gate_config=gate_config,
@@ -145,7 +155,9 @@ def main():
         # Extract steering vectors
         print("  Extracting steering vectors...")
         extraction_with_activations, component_names = collect_activations(
-            extraction_ds, model, tokenizer,
+            extraction_ds,
+            model,
+            tokenizer,
             targets=config.targets,
             batch_size=config.extract_batch_size,
             token_position=config.token_position,
@@ -186,7 +198,9 @@ def main():
 
     # ── Summary ──
     print("\n\n═══ Summary ═══")
-    print(f"  {'extract':>8}  {'train':>8}  {'MC0':>8}  {'MC1':>8}  {'MC2':>8}  {'MC0Δ':>8}  {'MC1Δ':>8}  {'MC2Δ':>8}")
+    print(
+        f"  {'extract':>8}  {'train':>8}  {'MC0':>8}  {'MC1':>8}  {'MC2':>8}  {'MC0Δ':>8}  {'MC1Δ':>8}  {'MC2Δ':>8}"
+    )
     for row in results:
         print(
             f"  {row['extraction_mcq_mode']:>8}  {row['gate_train_mcq_mode']:>8}"

@@ -14,6 +14,7 @@ def _make_identity_linear(dim: int) -> nn.Linear:
 
 class DummyMLP(nn.Module):
     """Minimal MLP with an identity down_proj for testing hook effects."""
+
     def __init__(self, dim: int = 4) -> None:
         super().__init__()
         self.down_proj = _make_identity_linear(dim)
@@ -24,6 +25,7 @@ class DummyMLP(nn.Module):
 
 class DummyAttention(nn.Module):
     """Minimal attention with an identity o_proj for testing hook effects."""
+
     def __init__(self, hidden: int = 6) -> None:
         super().__init__()
         self.o_proj = _make_identity_linear(hidden)

@@ -50,7 +50,11 @@ def download_csvs(
             print(f"  {filename} already exists, skipping")
             continue
         url = LOFIT_RAW_URL.format(
-            repo=repo, branch=branch, fold=fold, split=split, seed=seed,
+            repo=repo,
+            branch=branch,
+            fold=fold,
+            split=split,
+            seed=seed,
         )
         urllib.request.urlretrieve(url, path)
         print(f"  Downloaded {filename}")
@@ -128,8 +132,7 @@ def validate_against_hf(
         for split, records in parsed.items()
     }
     lofit_by_split = {
-        split: set(questions)
-        for split, questions in lofit_by_split_list.items()
+        split: set(questions) for split, questions in lofit_by_split_list.items()
     }
     lofit_questions = set()
     for records in lofit_by_split.values():
@@ -161,9 +164,7 @@ def validate_against_hf(
     expected_test_idxs: np.ndarray | None = None
 
     for i in range(num_folds):
-        train_pool = np.concatenate(
-            [fold_idxs[j] for j in range(num_folds) if j != i]
-        )
+        train_pool = np.concatenate([fold_idxs[j] for j in range(num_folds) if j != i])
         test_idxs = fold_idxs[i]
         train_size = int(len(train_pool) * (1 - val_ratio))
         train_idxs = rng.choice(train_pool, size=train_size, replace=False)
@@ -202,16 +203,12 @@ def validate_against_hf(
         exact_all = exact_all and exact
         status = "EXACT MATCH" if exact else "MISMATCH"
         print(
-            f"    {split}: expected {len(expected)} / actual {len(actual)} "
-            f"({status})"
+            f"    {split}: expected {len(expected)} / actual {len(actual)} ({status})"
         )
         if not exact:
             only_hf = expected - actual
             only_lofit = actual - expected
-            print(
-                "      "
-                f"HF-only={len(only_hf)} LoFiT-only={len(only_lofit)}"
-            )
+            print(f"      HF-only={len(only_hf)} LoFiT-only={len(only_lofit)}")
 
     print("  Seeded index-order match check:")
     index_match_all = True
@@ -271,7 +268,8 @@ def validate_against_get_truthfulqa_dataset(
     """
     hf_api_key = os.getenv("HF_API_KEY")
     tokenizer = AutoTokenizer.from_pretrained(
-        model_name, token=hf_api_key or True,
+        model_name,
+        token=hf_api_key or True,
     )
 
     hf_dataset_dict = get_truthfulqa_dataset(
@@ -311,10 +309,7 @@ def validate_against_get_truthfulqa_dataset(
         if not split_match:
             only_ours = split_questions - lofit_split_questions
             only_lofit = lofit_split_questions - split_questions
-            print(
-                "    "
-                f"Ours-only={len(only_ours)} LoFiT-only={len(only_lofit)}"
-            )
+            print(f"    Ours-only={len(only_ours)} LoFiT-only={len(only_lofit)}")
 
     matched = lofit_questions & hf_questions
     lofit_only = lofit_questions - hf_questions
@@ -329,8 +324,10 @@ def validate_against_get_truthfulqa_dataset(
     if lofit_only:
         print(f"  WARNING: {len(lofit_only)} questions in LoFiT but not HF MC")
     if hf_only:
-        print(f"  {len(hf_only)} questions in HF MC but not LoFiT "
-              f"(expected: LoFiT may filter some)")
+        print(
+            f"  {len(hf_only)} questions in HF MC but not LoFiT "
+            f"(expected: LoFiT may filter some)"
+        )
     if not lofit_only and not hf_only:
         print("  Perfect question match: OK")
     if split_match_all:
@@ -364,7 +361,9 @@ def main() -> None:
         os.environ["HF_TOKEN"] = hf_api_key
 
     print("Downloading LoFiT CSVs...")
-    paths = download_csvs(args.out_dir, fold=args.fold, seed=args.seed, force=args.force)
+    paths = download_csvs(
+        args.out_dir, fold=args.fold, seed=args.seed, force=args.force
+    )
 
     print("\nValidating split sizes and disjointness...")
     parsed = validate_splits(paths)
