@@ -27,7 +27,7 @@ from sparse_steer.models import MODEL_REGISTRY
 from sparse_steer.tasks.truthfulqa import TruthfulQAConfig
 from sparse_steer.tasks.truthfulqa.data import get_truthfulqa_datasets
 from sparse_steer.tasks.truthfulqa.eval import evaluate
-from sparse_steer.train import train_gates
+from sparse_steer.train import train_steering
 
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = ROOT / "output"
@@ -95,6 +95,7 @@ def main():
     ).to(base_config.device)
     base_model.upgrade_for_steering(
         gate_config=gate_config,
+        learn_scale=True,
         steering_layer_ids=list(range(len(base_model.get_layers()))),
         steering_components=base_config.targets,
     )
@@ -139,6 +140,7 @@ def main():
         ).to(config.device)
         model.upgrade_for_steering(
             gate_config=gate_config,
+            learn_scale=True,
             steering_layer_ids=list(range(len(model.get_layers()))),
             steering_components=config.targets,
         )
@@ -167,7 +169,7 @@ def main():
 
         # Train gates
         print("  Training gates...")
-        train_gates(model, tokenizer, gate_train_ds, config, output_dir=run_dir)
+        train_steering(model, tokenizer, gate_train_ds, config, output_dir=run_dir)
 
         # Eval (all three mc metrics)
         print("  Evaluating...")

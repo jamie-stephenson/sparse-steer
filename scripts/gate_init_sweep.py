@@ -86,7 +86,7 @@ def sweep_fn():
     from sparse_steer.tasks.truthfulqa import TruthfulQAConfig
     from sparse_steer.tasks.truthfulqa.data import get_truthfulqa_datasets
     from sparse_steer.tasks.truthfulqa.eval import evaluate
-    from sparse_steer.train import train_gates
+    from sparse_steer.train import train_steering
 
     wandb.init()
     try:
@@ -128,6 +128,7 @@ def sweep_fn():
         )
         model.upgrade_for_steering(
             gate_config=gate_config,
+            learn_scale=True,
             steering_layer_ids=list(range(len(model.get_layers()))),
             steering_components=["attention"],
         )
@@ -195,7 +196,7 @@ def sweep_fn():
         )
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        train_gates(
+        train_steering(
             model,
             tokenizer,
             gate_train_ds,

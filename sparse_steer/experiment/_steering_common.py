@@ -1,4 +1,4 @@
-"""Shared helpers for dense and sparse steering experiments."""
+"""Shared helpers for steering experiments."""
 
 from __future__ import annotations
 
@@ -15,29 +15,24 @@ from ..extract import (
     load_steering_vectors,
     save_steering_vectors,
 )
-from ..models import DENSE_MODEL_REGISTRY, MODEL_REGISTRY
+from ..models import MODEL_REGISTRY
 from ..utils.cache import ArtifactType
 
 from .base import Experiment
 
 
-def load_steering_model(
-    config: DictConfig,
-    *,
-    sparse: bool,
-) -> PreTrainedModel:
-    """Load a model from the steering registry and upgrade it."""
+def load_steering_model(config: DictConfig) -> PreTrainedModel:
+    """Load a model from the registry and upgrade it for steering."""
     from ..hardconcrete import HardConcreteConfig
 
     hf_config = AutoConfig.from_pretrained(config.model_name)
     model_type = getattr(hf_config, "model_type", None)
 
-    registry = MODEL_REGISTRY if sparse else DENSE_MODEL_REGISTRY
-    model_cls = registry.get(model_type)
+    model_cls = MODEL_REGISTRY.get(model_type)
     if model_cls is None:
         raise ValueError(
             f"Unsupported model_type '{model_type}' for '{config.model_name}'. "
-            f"Supported: {sorted(registry)}"
+            f"Supported: {sorted(MODEL_REGISTRY)}"
         )
 
     model = model_cls.from_pretrained(
@@ -50,25 +45,32 @@ def load_steering_model(
         else list(range(len(model.get_layers())))
     )
 
-    if sparse:
+    gate_config = None
+    if config.get("gate_config") is not None:
         gate_cfg = OmegaConf.to_container(config.gate_config, resolve=True)
         gate_config = HardConcreteConfig(**gate_cfg)
-        print("Initialising sparse-steering model...")
-        model.upgrade_for_steering(
-            gate_config=gate_config,
-            steering_layer_ids=layer_ids,
-            steering_components=list(config.targets),
-        )
+
+    learn_scale = config.get("learn_scale", False)
+    init_log_scale = config.get("init_log_scale", 0.0)
+    steering_strength = config.get("steering_strength", 1.0)
+
+    desc = []
+    if gate_config is not None:
+        desc.append("gates")
+    if learn_scale:
+        desc.append("learned scale")
     else:
-        print(
-            f"Initialising dense-steering model "
-            f"(steering_strength={config.steering_strength})..."
-        )
-        model.upgrade_for_steering(
-            steering_strength=config.steering_strength,
-            steering_layer_ids=layer_ids,
-            steering_components=list(config.targets),
-        )
+        desc.append(f"strength={steering_strength}")
+    print(f"Initialising steering model ({', '.join(desc)})...")
+
+    model.upgrade_for_steering(
+        steering_layer_ids=layer_ids,
+        steering_components=list(config.targets),
+        steering_strength=steering_strength,
+        gate_config=gate_config,
+        learn_scale=learn_scale,
+        init_log_scale=init_log_scale,
+    )
 
     return model
 
@@ -80,10 +82,7 @@ def run_extraction(
     extraction_ds: Dataset,
     cache_info: dict[str, Any],
 ) -> dict[str, Any] | None:
-    """Run steering vector extraction with caching.
-
-    Returns the steering vectors dict, or *None* if skipped.
-    """
+    """Run steering vector extraction with caching."""
     config = experiment.config
     sv_hit = experiment._try_cache_lookup(ArtifactType.STEERING_VECTORS)
 

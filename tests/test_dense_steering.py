@@ -2,7 +2,7 @@ import pytest
 import torch
 from torch import nn
 
-from sparse_steer.models.dense import DenseSteeringHook
+from sparse_steer.models.hook import SteeringHook
 
 
 def _make_identity_linear(dim: int) -> nn.Linear:
@@ -37,7 +37,7 @@ class DummyAttention(nn.Module):
 def test_dense_mlp_applies_steering_strength_correction() -> None:
     strength = 3.0
     mlp = DummyMLP(dim=4)
-    hook = DenseSteeringHook((4,), steering_strength=strength)
+    hook = SteeringHook((4,), steering_strength=strength)
     hook.set_steering_vectors(torch.tensor([1.0, 2.0, 3.0, 4.0]))
     mlp.down_proj.register_forward_pre_hook(hook.pre_hook)
     mlp.eval()
@@ -51,7 +51,7 @@ def test_dense_mlp_applies_steering_strength_correction() -> None:
 
 def test_dense_mlp_respects_steering_enabled_flag() -> None:
     mlp = DummyMLP(dim=4)
-    hook = DenseSteeringHook((4,), steering_strength=5.0)
+    hook = SteeringHook((4,), steering_strength=5.0)
     hook.set_steering_vectors(torch.ones(4))
     hook.steering_enabled = False
     mlp.down_proj.register_forward_pre_hook(hook.pre_hook)
@@ -68,7 +68,7 @@ def test_dense_attention_applies_steering_strength_correction() -> None:
     strength = 2.0
 
     attn = DummyAttention(hidden=hidden)
-    hook = DenseSteeringHook((num_heads, head_dim), steering_strength=strength)
+    hook = SteeringHook((num_heads, head_dim), steering_strength=strength)
     sv = torch.randn(num_heads, head_dim)
     hook.set_steering_vectors(sv)
     attn.o_proj.register_forward_pre_hook(hook.pre_hook)
@@ -86,7 +86,7 @@ def test_dense_attention_respects_steering_enabled_flag() -> None:
     hidden = num_heads * head_dim
 
     attn = DummyAttention(hidden=hidden)
-    hook = DenseSteeringHook((num_heads, head_dim), steering_strength=5.0)
+    hook = SteeringHook((num_heads, head_dim), steering_strength=5.0)
     hook.set_steering_vectors(torch.randn(num_heads, head_dim))
     hook.steering_enabled = False
     attn.o_proj.register_forward_pre_hook(hook.pre_hook)
@@ -98,6 +98,6 @@ def test_dense_attention_respects_steering_enabled_flag() -> None:
 
 
 def test_set_steering_vectors_validates_shape() -> None:
-    hook = DenseSteeringHook((4,))
+    hook = SteeringHook((4,))
     with pytest.raises(ValueError):
         hook.set_steering_vectors(torch.zeros(5))

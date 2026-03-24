@@ -2,8 +2,9 @@ import pytest
 import torch
 from torch import nn
 
-from sparse_steer.models.base import SteeringHook, Component
-from sparse_steer.models.sparse import SparseSteeringLM
+from sparse_steer.models.hook import Component, SteeringHook
+from sparse_steer.models.steering import SteeringLM
+from sparse_steer.models.base import BaseModelLayout
 from sparse_steer.hardconcrete import HardConcreteConfig
 
 
@@ -17,7 +18,6 @@ class DummyAttention(nn.Module):
         super().__init__()
         hidden = NUM_HEADS * HEAD_DIM
         self.o_proj = nn.Linear(hidden, hidden)
-        # Needed by _create_hook to determine vector shape
         self.head_dim = HEAD_DIM
         self.config = type("C", (), {"num_attention_heads": NUM_HEADS})()
 
@@ -36,13 +36,13 @@ class DummyLayer(nn.Module):
         self.mlp = DummyMLP()
 
 
-class DummySteeringLM(SparseSteeringLM, nn.Module):
+class DummySteeringLM(SteeringLM, nn.Module):
     def __init__(self, num_layers: int = 2) -> None:
         super().__init__()
         self.layers = nn.ModuleList([DummyLayer() for _ in range(num_layers)])
-        gate_config = HardConcreteConfig()
         self.upgrade_for_steering(
-            gate_config=gate_config,
+            gate_config=HardConcreteConfig(),
+            learn_scale=True,
             steering_layer_ids=list(range(num_layers)),
             steering_components=["attention", "mlp"],
         )

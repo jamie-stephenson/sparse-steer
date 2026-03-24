@@ -23,7 +23,7 @@ from sparse_steer.extract import (
     load_steering_vectors,
     save_steering_vectors,
 )
-from sparse_steer.models import DENSE_MODEL_REGISTRY
+from sparse_steer.models import MODEL_REGISTRY
 from sparse_steer.tasks.truthfulqa.data import get_truthfulqa_datasets
 from sparse_steer.tasks.truthfulqa.eval import evaluate
 
@@ -98,7 +98,7 @@ def main():
 
     # ── Model ──
     hf_config = AutoConfig.from_pretrained(model_name)
-    model_cls = DENSE_MODEL_REGISTRY[hf_config.model_type]
+    model_cls = MODEL_REGISTRY[hf_config.model_type]
     model = model_cls.from_pretrained(
         model_name,
         torch_dtype=torch.float16,

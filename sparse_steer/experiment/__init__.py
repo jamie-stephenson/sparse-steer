@@ -1,14 +1,12 @@
 from .base import Experiment, TaskSpec
 from .baseline import BaselineExperiment
-from .dense import DenseExperiment
 from .lora import LoraExperiment
-from .sparse import SparseExperiment
+from .steering import SteeringExperiment
 
 __all__ = [
     "BaselineExperiment",
-    "DenseExperiment",
     "Experiment",
     "LoraExperiment",
-    "SparseExperiment",
+    "SteeringExperiment",
     "TaskSpec",
 ]

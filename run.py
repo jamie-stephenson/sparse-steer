@@ -9,17 +9,18 @@ from omegaconf import DictConfig
 
 from sparse_steer.experiment import (
     BaselineExperiment,
-    DenseExperiment,
     LoraExperiment,
-    SparseExperiment,
+    SteeringExperiment,
 )
 from sparse_steer.experiment.base import Experiment, TaskSpec
 from sparse_steer.tasks.truthfulqa.task import TruthfulQATask
 
 METHODS: dict[str, type[Experiment]] = {
     "baseline": BaselineExperiment,
-    "dense": DenseExperiment,
-    "sparse": SparseExperiment,
+    "dense": SteeringExperiment,
+    "sparse": SteeringExperiment,
+    "scale_only": SteeringExperiment,
+    "gates_only": SteeringExperiment,
     "lora": LoraExperiment,
 }
 

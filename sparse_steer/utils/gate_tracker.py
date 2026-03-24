@@ -14,7 +14,7 @@ from matplotlib.figure import Figure
 from numpy import ndarray
 from transformers import TrainerCallback
 
-from ..models.sparse import SparseSteeringHook
+from ..models.hook import SteeringHook
 
 
 def _masked_cmap(base: str = "viridis"):
@@ -39,8 +39,8 @@ class GateTracker(TrainerCallback):
         self.use_wandb = use_wandb
         self.snapshots = GateSnapshots()
 
-        self._attn_hooks: list[tuple[int, SparseSteeringHook]] = []
-        self._mlp_hooks: list[tuple[int, SparseSteeringHook]] = []
+        self._attn_hooks: list[tuple[int, SteeringHook]] = []
+        self._mlp_hooks: list[tuple[int, SteeringHook]] = []
         self._attn_sv_norms: list[torch.Tensor] = []  # each (num_heads,)
         self._mlp_svs: list[torch.Tensor] = []  # each (mlp_dim,)
 
@@ -49,7 +49,7 @@ class GateTracker(TrainerCallback):
 
         for i, layer in enumerate(layers):
             attn_hook = getattr(layer, f"_steering_attention_{i}", None)
-            if isinstance(attn_hook, SparseSteeringHook):
+            if isinstance(attn_hook, SteeringHook):
                 self._attn_hooks.append((i, attn_hook))
                 self._attn_sv_norms.append(
                     attn_hook.steering_vectors.float().cpu().norm(dim=-1)
@@ -57,7 +57,7 @@ class GateTracker(TrainerCallback):
                 layer_id_set.add(i)
 
             mlp_hook = getattr(layer, f"_steering_mlp_{i}", None)
-            if isinstance(mlp_hook, SparseSteeringHook):
+            if isinstance(mlp_hook, SteeringHook):
                 self._mlp_hooks.append((i, mlp_hook))
                 self._mlp_svs.append(mlp_hook.steering_vectors.float().cpu())
                 layer_id_set.add(i)
@@ -75,7 +75,7 @@ class GateTracker(TrainerCallback):
                 for (_, hook), sv_norm in zip(self._attn_hooks, self._attn_sv_norms):
                     was_training = hook.training
                     hook.eval()
-                    gate = hook._scaled_gate(
+                    gate = hook.effective_weight(
                         dtype=torch.float32, device=torch.device("cpu")
                     )
                     if was_training:
@@ -88,7 +88,7 @@ class GateTracker(TrainerCallback):
                 for (_, hook), sv in zip(self._mlp_hooks, self._mlp_svs):
                     was_training = hook.training
                     hook.eval()
-                    gate = hook._scaled_gate(
+                    gate = hook.effective_weight(
                         dtype=torch.float32, device=torch.device("cpu")
                     )
                     if was_training:

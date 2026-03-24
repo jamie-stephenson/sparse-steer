@@ -16,8 +16,8 @@ from transformers import (
 )
 import wandb
 
-from .models.sparse import SparseSteeringLM
-from .hardconcrete import HardConcreteGateMixin
+from .models.hook import SteeringHook
+from .models.steering import SteeringLM
 from .utils.gate_tracker import GateTracker, render_gate_heatmap, render_gate_animation
 
 if TYPE_CHECKING:
@@ -27,10 +27,10 @@ L0Schedule = Callable[[int, int], float]
 
 
 def compute_l0_penalty(model: nn.Module) -> Tensor:
-    """Sum the L0 penalty across all HardConcrete-gated modules."""
+    """Sum the L0 penalty across all steering hooks with gates."""
     penalty = 0.0
     for module in model.modules():
-        if isinstance(module, HardConcreteGateMixin):
+        if isinstance(module, SteeringHook):
             penalty = penalty + module._l0_penalty()
     return penalty
 
@@ -144,15 +144,15 @@ def _prepare_dataset(
     )
 
 
-def train_gates(
-    model: SparseSteeringLM,
+def train_steering(
+    model: SteeringLM,
     tokenizer: PreTrainedTokenizerBase,
     dataset: Dataset | DatasetDict,
     config: "DictConfig",
     output_dir: Path,
     extra_callbacks: list | None = None,
 ) -> SparseSteeringTrainer:
-    """Freeze base weights, train only HardConcrete gate parameters."""
+    """Freeze base weights, train only learnable steering parameters."""
     if config.use_wandb:
         _init_wandb()
 
@@ -275,6 +275,6 @@ __all__ = [
     "compute_l0_penalty",
     "get_l0_scheduler_type",
     "SparseSteeringTrainer",
-    "train_gates",
+    "train_steering",
     "train_lora",
 ]

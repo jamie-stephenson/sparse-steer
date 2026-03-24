@@ -1,5 +1,6 @@
 # @package _global_
-method: sparse
+# Learned per-head scale, no gates.
+method: scale_only
 steering_strength: 1.0
 steering_layer_ids: null
 extract_batch_size: 8
@@ -8,11 +9,11 @@ targets: [attention]
 normalize_steering_vectors: false
 
 learn_scale: true
-init_log_scale: 2.79
+init_log_scale: 0.0
 
-l0_scheduler_type: warmup
-l0_warmup_steps: 16
-l0_lambda: 0.04
+l0_scheduler_type: none
+l0_warmup_steps: 0
+l0_lambda: 0.0
 learning_rate: 1.5e-2
 lr_scheduler_type: cosine
 lr_warmup_steps: 5
@@ -23,11 +24,3 @@ logging_steps: 1
 save_strategy: "no"
 freeze_log_scale: false
 track_gates: true
-
-gate_config:
-  temperature: 0.33
-  stretch_limits: [-0.1, 1.1]
-  eps: 1.0e-6
-  eval_threshold: 1.0e-2
-  init_log_alpha: -0.79
-  init_log_scale: 2.79

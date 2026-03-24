@@ -10,3 +10,4 @@ extract_batch_size: 8
 token_position: last
 targets: [residual]
 normalize_steering_vectors: false
+learn_scale: false

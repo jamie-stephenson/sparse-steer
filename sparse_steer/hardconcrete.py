@@ -1,9 +1,7 @@
-import math
 from dataclasses import dataclass, field
 
 import torch
-import torch.nn.functional as F
-from torch import Tensor, nn
+from torch import Tensor
 
 
 @dataclass
@@ -21,11 +19,7 @@ class HardConcreteConfig:
         return (weights >= self.eval_threshold).any().item()
 
     def active_layer_indices(self, state_dict: dict[str, Tensor]) -> set[int]:
-        """
-        Return the set of layer indices whose gates are active in *state_dict*.
-        This is important to avoid unnecessarily adapting attention layers that
-        don't need steering.
-        """
+        """Return the set of layer indices whose gates are active in *state_dict*."""
         active: set[int] = set()
         for k, v in state_dict.items():
             if "log_alpha" not in k:
@@ -46,71 +40,6 @@ class HardConcreteConfig:
         }
 
 
-class HardConcreteGateMixin:
-    temperature: float
-    stretch_limits: list[float]
-    eps: float
-    eval_threshold: float
-    init_log_alpha: float
-    init_log_scale: float
-
-    def __init__(
-        self,
-        *args,
-        num_gates: int,
-        gate_config: HardConcreteConfig,
-        **kwargs,
-    ) -> None:
-        super().__init__(*args, **kwargs)
-        self._set_gate_config(gate_config)
-        self.log_alpha = nn.Parameter(torch.full((num_gates,), self.init_log_alpha))
-        self.log_scale = nn.Parameter(torch.full((num_gates,), self.init_log_scale))
-
-    def _set_gate_config(self, cfg: HardConcreteConfig) -> None:
-        self.temperature = cfg.temperature
-        self.stretch_limits = cfg.stretch_limits
-        self.eps = cfg.eps
-        self.eval_threshold = cfg.eval_threshold
-        self.init_log_alpha = cfg.init_log_alpha
-        self.init_log_scale = cfg.init_log_scale
-
-    def _hard_concrete(self) -> Tensor:
-        low, high = self.stretch_limits
-        if self.training:
-            noise = torch.rand_like(self.log_alpha)
-
-            # linearly scale to [eps, 1-eps] for stability
-            noise = noise.mul(1.0 - 2.0 * self.eps).add(self.eps)
-            concrete = torch.sigmoid(
-                (noise.log() - torch.log1p(-noise) + self.log_alpha) / self.temperature
-            )
-        else:
-            concrete = torch.sigmoid(self.log_alpha)
-        stretched = concrete * (high - low) + low
-        return stretched.clamp(0.0, 1.0)
-
-    def _l0_penalty(self) -> Tensor:
-        """Expected number of active gates (differentiable L0 surrogate)."""
-        low, high = self.stretch_limits
-        return torch.sigmoid(
-            self.log_alpha - self.temperature * math.log(-low / high)
-        ).sum()
-
-    def _scaled_gate(
-        self,
-        *,
-        dtype: torch.dtype,
-        device: torch.device,
-    ) -> Tensor:
-        weights = self._hard_concrete()
-        if not self.training and self.eval_threshold > 0.0:
-            keep_mask = weights >= self.eval_threshold
-            weights = torch.where(keep_mask, weights, torch.zeros_like(weights))
-        scales = F.softplus(self.log_scale)
-        return (weights * scales).to(device=device, dtype=dtype)
-
-
 __all__ = [
     "HardConcreteConfig",
-    "HardConcreteGateMixin",
 ]

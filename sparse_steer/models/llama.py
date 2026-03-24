@@ -1,19 +1,17 @@
 from torch import nn
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
 
-from .base import Component
-from .sparse import SparseSteeringLM
-from .dense import DenseSteeringLM
+from .base import BaseModelLayout, Component
+from .steering import SteeringLM
 
 
-# ── Layout mixin ─────────────────────────────────────────────────────
-# Maps base.py's abstract interface to HuggingFace attribute names.
-# Llama and Qwen2 expose identical attribute names (o_proj, down_proj,
-# head_dim, model.layers, etc.) so this mixin is shared, but the
-# underlying HF base classes differ.
+class LlamaLayout(BaseModelLayout):
+    """Layout mixin for Llama-family models.
 
+    Llama and Qwen2 expose identical attribute names (o_proj, down_proj,
+    head_dim, model.layers, etc.) so this mixin is shared.
+    """
 
-class LlamaLayout:
     def get_layers(self) -> nn.ModuleList:
         return self.model.layers
 
@@ -47,19 +45,11 @@ class LlamaLayout:
         raise ValueError(f"Unknown component: {component!r}")
 
 
-# ── Concrete LM classes ──────────────────────────────────────────────
-
-
-class LlamaSparseSteeringLM(LlamaLayout, SparseSteeringLM, LlamaForCausalLM):
-    pass
-
-
-class LlamaDenseSteeringLM(LlamaLayout, DenseSteeringLM, LlamaForCausalLM):
+class LlamaSteeringLM(LlamaLayout, SteeringLM, LlamaForCausalLM):
     pass
 
 
 __all__ = [
     "LlamaLayout",
-    "LlamaSparseSteeringLM",
-    "LlamaDenseSteeringLM",
+    "LlamaSteeringLM",
 ]

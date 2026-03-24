@@ -1,5 +1,6 @@
 # @package _global_
-method: sparse
+# HardConcrete gates with fixed steering strength (no learned scale).
+method: gates_only
 steering_strength: 1.0
 steering_layer_ids: null
 extract_batch_size: 8
@@ -7,8 +8,7 @@ token_position: last
 targets: [attention]
 normalize_steering_vectors: false
 
-learn_scale: true
-init_log_scale: 2.79
+learn_scale: false
 
 l0_scheduler_type: warmup
 l0_warmup_steps: 16
@@ -30,4 +30,4 @@ gate_config:
   eps: 1.0e-6
   eval_threshold: 1.0e-2
   init_log_alpha: -0.79
-  init_log_scale: 2.79
+  init_log_scale: 0.0
