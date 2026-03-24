@@ -1,23 +1,14 @@
-model_name: Qwen/Qwen2.5-0.5B-Instruct
-seed: 42
-
-# === Method ===
+# @package _global_
 method: sparse
 steering_strength: 1.0
 steering_layer_ids: null
-
-# === Data ===
-extraction_fraction: 0.5
-
-# === Activation extraction ===
 extract_batch_size: 8
 token_position: last
 targets: [attention]
 normalize_steering_vectors: false
 
-# === Gate training ===
 l0_scheduler_type: warmup
-l0_warmup_steps: 4
+l0_warmup_steps: 16
 l0_lambda: 0.04
 learning_rate: 1.5e-2
 lr_scheduler_type: cosine
@@ -30,19 +21,6 @@ save_strategy: "no"
 freeze_log_scale: false
 track_gates: true
 
-# === Evaluation ===
-eval_batch_size: 32
-
-# === Wandb ===
-use_wandb: false
-
-# === Cache ===
-use_cache: true
-
-# === Device ===
-device: mps
-
-# === Hard concrete gate config ===
 gate_config:
   temperature: 0.33
   stretch_limits: [-0.1, 1.1]
@@ -50,8 +28,3 @@ gate_config:
   eval_threshold: 1.0e-2
   init_log_alpha: -0.79
   init_log_scale: 2.79
-
-# === Task specific ===
-# --- TruthfulQA ---
-extraction_mcq_mode: mc1
-gate_train_mcq_mode: mc1

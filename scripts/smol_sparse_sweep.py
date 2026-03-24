@@ -8,8 +8,9 @@ import itertools
 import json
 from pathlib import Path
 
-from sparse_steer.tasks.truthfulqa.config import TruthfulQAConfig
-from sparse_steer.tasks.truthfulqa.experiment import TruthfulQAExperiment
+from sparse_steer.experiment import SparseExperiment
+from sparse_steer.tasks.truthfulqa.config import TruthfulQASparseConfig
+from sparse_steer.tasks.truthfulqa.task import TruthfulQATask
 
 PLOTS_DIR = Path("plots")
 
@@ -62,16 +63,17 @@ def main() -> None:
     )
     print("-" * 70)
 
+    task = TruthfulQATask()
     for i, (l0, lr, warmup) in enumerate(GRID):
-        config = TruthfulQAConfig(
+        config = TruthfulQASparseConfig(
             **BASE,
             l0_lambda=l0,
             learning_rate=lr,
             l0_warmup_steps=warmup,
         )
-        summary = TruthfulQAExperiment(config).run()
-        b = summary["baseline_metrics"]
-        s = summary["steered_metrics"]
+        summary = SparseExperiment(config, task).run()
+        b = summary.get("baseline_metrics", {})
+        s = summary["metrics"]
         row = {
             "l0_lambda": l0,
             "learning_rate": lr,

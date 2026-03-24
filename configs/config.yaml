@@ -1,0 +1,17 @@
+defaults:
+  - method: sparse
+  - task: truthfulqa
+  - _self_
+
+model_name: Qwen/Qwen2.5-0.5B-Instruct
+seed: 42
+device: mps
+eval_batch_size: 32
+extraction_fraction: 0.5
+use_cache: false
+use_wandb: false
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null

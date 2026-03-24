@@ -1,0 +1,8 @@
+# @package _global_
+method: dense
+steering_strength: 1.0
+steering_layer_ids: null
+extract_batch_size: 8
+token_position: last
+targets: [attention]
+normalize_steering_vectors: false

@@ -1,0 +1,12 @@
+# @package _global_
+# Contrastive Activation Addition (Panickssery et al. 2024)
+# Mean-difference vector added to the residual stream at a single middle layer.
+# Paper uses layer 15/32 on Llama-2-7B (~47%).
+# For Qwen2.5-0.5B (24 layers), the equivalent is layer 12.
+method: dense
+steering_strength: 2.0
+steering_layer_ids: [12]
+extract_batch_size: 8
+token_position: last
+targets: [residual]
+normalize_steering_vectors: false

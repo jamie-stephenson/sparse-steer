@@ -1,61 +1,50 @@
 #!/usr/bin/env python3
 
-import argparse
-from dataclasses import fields
-from pathlib import Path
-from typing import Any
+import logging
 
-import yaml
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
-from sparse_steer.tasks.truthfulqa import TruthfulQAConfig, TruthfulQAExperiment
+import hydra
+from omegaconf import DictConfig
 
+from sparse_steer.experiment import (
+    BaselineExperiment,
+    DenseExperiment,
+    LoraExperiment,
+    SparseExperiment,
+)
+from sparse_steer.experiment.base import Experiment, TaskSpec
+from sparse_steer.tasks.truthfulqa.task import TruthfulQATask
 
-TASKS: dict[str, tuple[type[Any], type[Any]]] = {
-    "truthfulqa": (TruthfulQAConfig, TruthfulQAExperiment),
+METHODS: dict[str, type[Experiment]] = {
+    "baseline": BaselineExperiment,
+    "dense": DenseExperiment,
+    "sparse": SparseExperiment,
+    "lora": LoraExperiment,
+}
+
+TASKS: dict[str, type[TaskSpec]] = {
+    "truthfulqa": TruthfulQATask,
 }
 
 
-def _load_config(config_cls: type[Any], path: str | None) -> Any:
-    if path is None:
-        return config_cls()
+@hydra.main(config_path="configs", config_name="config", version_base=None)
+def main(cfg: DictConfig) -> None:
+    task_name = cfg.get("task_name", "truthfulqa")
+    method = cfg.method
 
-    payload = yaml.safe_load(Path(path).read_text())
-    if not isinstance(payload, dict):
-        raise ValueError(f"Config file {path} must contain a YAML mapping.")
-
-    valid_fields = {f.name for f in fields(config_cls)}
-    unknown = set(payload) - valid_fields
-    if unknown:
+    if task_name not in TASKS:
         raise ValueError(
-            f"Unknown config keys in {path}: {sorted(unknown)}. "
-            f"Valid keys: {sorted(valid_fields)}"
+            f"Unknown task '{task_name}'. Available: {sorted(TASKS)}"
         )
-    return config_cls(**payload)
+    if method not in METHODS:
+        raise ValueError(
+            f"Unknown method '{method}'. Available: {sorted(METHODS)}"
+        )
 
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Run a sparse steering experiment for a task."
-    )
-    parser.add_argument(
-        "task",
-        choices=sorted(TASKS),
-        help="Task experiment to run (for example: truthfulqa).",
-    )
-    parser.add_argument(
-        "--config",
-        type=str,
-        default=None,
-        help="Path to a YAML file with config overrides for the selected task.",
-    )
-    return parser.parse_args()
-
-
-def main() -> None:
-    args = parse_args()
-    config_cls, experiment_cls = TASKS[args.task]
-    config = _load_config(config_cls, args.config)
-    experiment = experiment_cls(config)
+    task = TASKS[task_name]()
+    experiment_cls = METHODS[method]
+    experiment = experiment_cls(cfg, task)
     experiment.run()
 
 

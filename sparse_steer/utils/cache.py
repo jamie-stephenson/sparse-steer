@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..experiment import ExperimentConfig
+    from omegaconf import DictConfig
 
 # ── Cache root ────────────────────────────────────────────────────────
 
@@ -26,6 +26,7 @@ CACHE_ROOT = _PROJECT_ROOT / ".cache" / "sparse_steer"
 class ArtifactType(Enum):
     STEERING_VECTORS = "steering_vectors"
     SPARSE_STEERING = "sparse_steering"
+    PEFT_ADAPTER = "peft_adapter"
     BASELINE_EVAL = "baseline_eval"
     STEERED_EVAL = "steered_eval"
 
@@ -70,18 +71,38 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "seed",
         "eval_batch_size",
     ],
-    ArtifactType.STEERED_EVAL: [
+    ArtifactType.PEFT_ADAPTER: [
         "method",
-        "steering_strength",
-        # inherits sparse-steering fields
         "model_name",
         "seed",
         "extraction_fraction",
+        # training
+        "learning_rate",
+        "lr_scheduler_type",
+        "lr_warmup_steps",
+        "num_epochs",
+        "train_batch_size",
+        "weight_decay",
+        # lora-specific
+        "lora_rank",
+        "lora_alpha",
+        "lora_target_modules",
+        "lora_dropout",
+    ],
+    ArtifactType.STEERED_EVAL: [
+        "method",
+        "model_name",
+        "seed",
+        "extraction_fraction",
+        "eval_batch_size",
+        # steering fields (None for non-steering methods)
+        "steering_strength",
         "extract_batch_size",
         "token_position",
         "targets",
         "steering_layer_ids",
         "normalize_steering_vectors",
+        # sparse training fields (None for non-sparse methods)
         "l0_scheduler_type",
         "l0_warmup_steps",
         "l0_lambda",
@@ -93,8 +114,11 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "weight_decay",
         "freeze_log_scale",
         "gate_config",
-        # eval-specific
-        "eval_batch_size",
+        # lora fields (None for non-lora methods)
+        "lora_rank",
+        "lora_alpha",
+        "lora_target_modules",
+        "lora_dropout",
     ],
 }
 
@@ -111,6 +135,9 @@ _SOURCE_FILES: dict[ArtifactType, list[str]] = {
         "sparse_steer/train.py",
         "sparse_steer/hardconcrete.py",
         "sparse_steer/models/sparse.py",
+    ],
+    ArtifactType.PEFT_ADAPTER: [
+        "sparse_steer/train.py",
     ],
     ArtifactType.BASELINE_EVAL: [
         "sparse_steer/utils/eval.py",
@@ -129,6 +156,7 @@ _SOURCE_FILES: dict[ArtifactType, list[str]] = {
 _ARTIFACT_FILENAMES: dict[ArtifactType, str] = {
     ArtifactType.STEERING_VECTORS: "steering_vectors.pt",
     ArtifactType.SPARSE_STEERING: "sparse_steering.pt",
+    ArtifactType.PEFT_ADAPTER: "adapter_config.json",
     ArtifactType.BASELINE_EVAL: "results.json",
     ArtifactType.STEERED_EVAL: "results.json",
 }
@@ -168,15 +196,17 @@ class CacheHit:
 
 def _normalize_for_hash(value: Any) -> Any:
     """Normalize values for deterministic JSON serialisation."""
-    if isinstance(value, list):
-        return [_normalize_for_hash(v) for v in value]
-    if isinstance(value, dict):
+    from omegaconf import DictConfig, ListConfig
+
+    if isinstance(value, (DictConfig, dict)):
         return {k: _normalize_for_hash(v) for k, v in sorted(value.items())}
+    if isinstance(value, (ListConfig, list)):
+        return [_normalize_for_hash(v) for v in value]
     return value
 
 
 def compute_config_hash(
-    config: "ExperimentConfig",
+    config: "DictConfig",
     artifact_type: ArtifactType,
     task_name: str,
     extra_fields: dict[str, Any] | None = None,
@@ -185,7 +215,7 @@ def compute_config_hash(
     field_names = _CONFIG_FIELDS[artifact_type]
     fields_dict: dict[str, Any] = {"_task_name": task_name}
     for name in field_names:
-        value = getattr(config, name)
+        value = getattr(config, name, None)
         # sort targets list (order-insensitive)
         if name == "targets" and isinstance(value, list):
             value = sorted(value)
@@ -195,7 +225,7 @@ def compute_config_hash(
 
     normalized = _normalize_for_hash(fields_dict)
     blob = json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(blob).hexdigest(), fields_dict
+    return hashlib.sha256(blob).hexdigest(), normalized
 
 
 def compute_source_hash(
@@ -336,7 +366,7 @@ def _cache_dir(artifact_type: ArtifactType, task_name: str, config_hash: str) ->
 
 def lookup(
     artifact_type: ArtifactType,
-    config: "ExperimentConfig",
+    config: "DictConfig",
     task_name: str,
     *,
     extra_fields: dict[str, Any] | None = None,
@@ -368,7 +398,7 @@ def lookup(
 
 def prepare_cache_path(
     artifact_type: ArtifactType,
-    config: "ExperimentConfig",
+    config: "DictConfig",
     task_name: str,
     *,
     extra_fields: dict[str, Any] | None = None,
@@ -382,7 +412,7 @@ def prepare_cache_path(
 
 def finalize(
     artifact_type: ArtifactType,
-    config: "ExperimentConfig",
+    config: "DictConfig",
     task_name: str,
     *,
     extra_fields: dict[str, Any] | None = None,
@@ -419,7 +449,7 @@ def finalize(
 
 def store_json(
     artifact_type: ArtifactType,
-    config: "ExperimentConfig",
+    config: "DictConfig",
     task_name: str,
     data: dict[str, Any],
     *,

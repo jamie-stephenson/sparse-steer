@@ -1,0 +1,6 @@
+# @package _global_
+task_name: truthfulqa
+extraction_mcq_mode: mc1
+gate_train_mcq_mode: mc1
+generative_eval: false
+gen_max_new_tokens: 64

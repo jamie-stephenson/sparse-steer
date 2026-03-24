@@ -1,11 +1,10 @@
-from .config import TruthfulQAConfig
 from .data import get_truthfulqa_datasets
-from .eval import evaluate
-from .experiment import TruthfulQAExperiment
+from .eval import evaluate, evaluate_generative
+from .task import TruthfulQATask
 
 __all__ = [
-    "TruthfulQAConfig",
-    "TruthfulQAExperiment",
+    "TruthfulQATask",
     "evaluate",
+    "evaluate_generative",
     "get_truthfulqa_datasets",
 ]

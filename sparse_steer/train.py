@@ -9,6 +9,7 @@ from torch import Tensor, nn
 from datasets import Dataset, DatasetDict
 from transformers import (
     DataCollatorForLanguageModeling,
+    PreTrainedModel,
     PreTrainedTokenizerBase,
     Trainer,
     TrainingArguments,
@@ -20,7 +21,7 @@ from .hardconcrete import HardConcreteGateMixin
 from .utils.gate_tracker import GateTracker, render_gate_heatmap, render_gate_animation
 
 if TYPE_CHECKING:
-    from .experiment import ExperimentConfig
+    from omegaconf import DictConfig
 
 L0Schedule = Callable[[int, int], float]
 
@@ -147,7 +148,7 @@ def train_gates(
     model: SparseSteeringLM,
     tokenizer: PreTrainedTokenizerBase,
     dataset: Dataset | DatasetDict,
-    config: "ExperimentConfig",
+    config: "DictConfig",
     output_dir: Path,
     extra_callbacks: list | None = None,
 ) -> SparseSteeringTrainer:
@@ -207,6 +208,67 @@ def train_gates(
     return trainer
 
 
+def train_lora(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    dataset: Dataset | DatasetDict,
+    config: "DictConfig",
+    output_dir: Path | None = None,
+) -> PreTrainedModel:
+    """Wrap model with LoRA adapters and fine-tune on the training data."""
+    from peft import LoraConfig as PeftLoraConfig, get_peft_model, TaskType
+
+    if config.use_wandb:
+        _init_wandb()
+
+    lora_config = PeftLoraConfig(
+        r=config.lora_rank,
+        lora_alpha=config.lora_alpha,
+        target_modules=list(config.lora_target_modules),
+        lora_dropout=config.lora_dropout,
+        task_type=TaskType.CAUSAL_LM,
+    )
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
+
+    train_source = dataset["train"] if isinstance(dataset, DatasetDict) else dataset
+    train_dataset = _prepare_dataset(train_source, tokenizer)
+
+    eval_dataset = None
+    if isinstance(dataset, DatasetDict) and "val" in dataset:
+        eval_dataset = _prepare_dataset(dataset["val"], tokenizer)
+
+    train_args = TrainingArguments(
+        output_dir=str((output_dir or Path("output")) / "lora_checkpoints"),
+        num_train_epochs=config.num_epochs,
+        per_device_train_batch_size=config.train_batch_size,
+        learning_rate=config.learning_rate,
+        lr_scheduler_type=config.lr_scheduler_type,
+        warmup_steps=config.lr_warmup_steps,
+        weight_decay=config.weight_decay,
+        logging_steps=config.logging_steps,
+        save_strategy=config.save_strategy,
+        eval_strategy="epoch" if eval_dataset is not None else "no",
+        report_to="wandb" if config.use_wandb else "none",
+        fp16=model.device.type == "cuda",
+        remove_unused_columns=False,
+    )
+
+    data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+
+    trainer = Trainer(
+        model=model,
+        args=train_args,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        data_collator=data_collator,
+        processing_class=tokenizer,
+    )
+    trainer.train()
+
+    return model
+
+
 __all__ = [
     "L0Schedule",
     "L0_SCHEDULES",
@@ -214,4 +276,5 @@ __all__ = [
     "get_l0_scheduler_type",
     "SparseSteeringTrainer",
     "train_gates",
+    "train_lora",
 ]

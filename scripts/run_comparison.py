@@ -11,8 +11,9 @@ Usage:
 import json
 from pathlib import Path
 
-from sparse_steer.tasks.truthfulqa.config import TruthfulQAConfig
-from sparse_steer.tasks.truthfulqa.experiment import TruthfulQAExperiment
+from sparse_steer.experiment import DenseExperiment, SparseExperiment
+from sparse_steer.tasks.truthfulqa.config import TruthfulQADenseConfig, TruthfulQASparseConfig
+from sparse_steer.tasks.truthfulqa.task import TruthfulQATask
 
 PLOTS_DIR = Path("plots")
 
@@ -75,11 +76,14 @@ SPARSE_SHARED = dict(
 )
 
 
-def _run(config: TruthfulQAConfig) -> dict:
+_task = TruthfulQATask()
+
+
+def _run(experiment_cls, config) -> dict:
     print(f"\n{'=' * 60}")
     print(f"  {config.model_name.split('/')[-1]}  method={config.method}")
     print(f"{'=' * 60}\n")
-    return TruthfulQAExperiment(config).run()
+    return experiment_cls(config, _task).run()
 
 
 def main() -> None:
@@ -90,34 +94,34 @@ def main() -> None:
 
         # ── Dense ──
         dense_summary = _run(
-            TruthfulQAConfig(
+            DenseExperiment,
+            TruthfulQADenseConfig(
                 model_name=model_name,
-                method="dense",
                 steering_strength=spec["dense_strength"],
                 **SHARED,
-            )
+            ),
         )
 
-        baseline = dense_summary["baseline_metrics"]
+        baseline = dense_summary.get("baseline_metrics", {})
 
         # ── Sparse ──
         sparse_kwargs = {**SHARED, **SPARSE_SHARED, **spec["sparse"]}
         sparse_summary = _run(
-            TruthfulQAConfig(
+            SparseExperiment,
+            TruthfulQASparseConfig(
                 model_name=model_name,
-                method="sparse",
                 **sparse_kwargs,
-            )
+            ),
         )
 
         results[label] = {
             "model_name": model_name,
             "baseline": baseline,
             "dense": {
-                **dense_summary["steered_metrics"],
+                **dense_summary["metrics"],
                 "steering_strength": spec["dense_strength"],
             },
-            "sparse": sparse_summary["steered_metrics"],
+            "sparse": sparse_summary["metrics"],
         }
 
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)

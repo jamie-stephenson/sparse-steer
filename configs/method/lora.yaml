@@ -1,0 +1,15 @@
+# @package _global_
+method: lora
+lora_rank: 4
+lora_alpha: 8
+lora_target_modules: [q_proj, v_proj]
+lora_dropout: 0.05
+
+learning_rate: 2.0e-4
+lr_scheduler_type: cosine
+lr_warmup_steps: 5
+num_epochs: 2
+train_batch_size: 8
+weight_decay: 0.01
+logging_steps: 1
+save_strategy: "no"
