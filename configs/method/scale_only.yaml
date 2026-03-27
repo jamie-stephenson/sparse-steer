@@ -1,15 +1,15 @@
 # @package _global_
 # Learned per-head scale, no gates.
 method: scale_only
-steering_strength: 1.0
+scale: 1.0
 steering_layer_ids: null
 extract_batch_size: 8
 token_position: last
 targets: [attention]
 normalize_steering_vectors: false
 
-learn_scale: true
-init_log_scale: 0.0
+scale_mode: per_head
+init_log_scale: null
 
 l0_scheduler_type: none
 l0_warmup_steps: 0

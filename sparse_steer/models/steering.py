@@ -7,7 +7,7 @@ from torch import Tensor, nn
 
 from ..hardconcrete import HardConcreteConfig
 from .base import BaseModelLayout, Component
-from .hook import SteeringHook
+from .hook import ScaleMode, SteeringHook
 
 # Hook attachment mode: pre-hook on output proj, or post-hook on layer
 _PRE_HOOK_COMPONENTS = frozenset({"attention", "mlp"})
@@ -25,22 +25,31 @@ class SteeringLM(BaseModelLayout):
         *,
         steering_layer_ids: list[int],
         steering_components: list[Component],
-        steering_strength: float = 1.0,
+        scale: float = 1.0,
         gate_config: HardConcreteConfig | None = None,
-        learn_scale: bool = False,
-        init_log_scale: float = 0.0,
+        scale_mode: ScaleMode = "fixed",
+        init_log_scale: float | None = None,
     ) -> None:
-        self.steering_strength = steering_strength
+        self.scale = scale
         self.gate_config = gate_config
-        self.learn_scale = learn_scale
+        self.scale_mode = scale_mode
         self.init_log_scale = init_log_scale
         self.steering_layer_ids = steering_layer_ids
         self.steering_components = steering_components
+
+        # Create a single shared log_scale parameter for the whole model
+        if scale_mode == "shared":
+            from .hook import _softplus_inverse
+            init = init_log_scale if init_log_scale is not None else _softplus_inverse(scale)
+            self._shared_log_scale = nn.Parameter(torch.full((1,), init))
+        else:
+            self._shared_log_scale = None
+
         self._attach_steering_hooks()
 
     @property
     def has_learnable_steering(self) -> bool:
-        return self.gate_config is not None or self.learn_scale
+        return self.gate_config is not None or self.scale_mode != "fixed"
 
     # ── Hook management ──────────────────────────────────────────────
 
@@ -48,10 +57,11 @@ class SteeringLM(BaseModelLayout):
         shape = self._get_vector_shape(component, layer)
         return SteeringHook(
             shape,
-            steering_strength=self.steering_strength,
+            scale=self.scale,
             gate_config=self.gate_config,
-            learn_scale=self.learn_scale,
+            scale_mode=self.scale_mode,
             init_log_scale=self.init_log_scale,
+            shared_log_scale=self._shared_log_scale,
         )
 
     def _validate_components(self, components: list[Component]) -> None:
@@ -134,6 +144,15 @@ class SteeringLM(BaseModelLayout):
 
     # ── Learnable steering ───────────────────────────────────────────
 
+    def _unfreeze_scale(self) -> None:
+        """Unfreeze all scale parameters (per-hook or shared)."""
+        if self._shared_log_scale is not None:
+            self._shared_log_scale.requires_grad = True
+        else:
+            for module in self.modules():
+                if isinstance(module, SteeringHook) and module.log_scale is not None:
+                    module.log_scale.requires_grad = True
+
     def freeze_base_model(self, freeze_log_scale: bool = False) -> None:
         """Freeze everything, then unfreeze learnable steering parameters."""
         for param in self.parameters():
@@ -142,8 +161,17 @@ class SteeringLM(BaseModelLayout):
             if isinstance(module, SteeringHook):
                 if module.log_alpha is not None:
                     module.log_alpha.requires_grad = True
-                if not freeze_log_scale and module.log_scale is not None:
-                    module.log_scale.requires_grad = True
+        if not freeze_log_scale:
+            self._unfreeze_scale()
+
+    def freeze_gates(self) -> None:
+        """Freeze gate parameters and lock to eval-mode values. Scale remains trainable."""
+        for param in self.parameters():
+            param.requires_grad = False
+        for module in self.modules():
+            if isinstance(module, SteeringHook):
+                module.freeze_gates()
+        self._unfreeze_scale()
 
     def steering_state_dict(self) -> dict[str, Tensor]:
         steering_terms = ("log_alpha", "log_scale", "steering_vectors")
@@ -162,9 +190,9 @@ class SteeringLM(BaseModelLayout):
             path.mkdir(parents=True, exist_ok=True)
             output_path = path / "steering.pt"
         payload = {
-            "steering_strength": self.steering_strength,
+            "scale": self.scale,
             "gate_config": self.gate_config.to_dict() if self.gate_config else None,
-            "learn_scale": self.learn_scale,
+            "scale_mode": self.scale_mode,
             "init_log_scale": self.init_log_scale,
             "steering_layer_ids": self.steering_layer_ids,
             "steering_components": self.steering_components,
@@ -183,15 +211,13 @@ class SteeringLM(BaseModelLayout):
         payload = torch.load(Path(path), map_location="cpu")
         state_dict = payload["state_dict"]
 
-        # Support both new and legacy checkpoint formats
         gate_config = None
-        raw_gate_config = payload.get("gate_config") or payload.get("config")
-        if raw_gate_config is not None:
-            gate_config = HardConcreteConfig(**raw_gate_config)
+        if payload.get("gate_config") is not None:
+            gate_config = HardConcreteConfig(**payload["gate_config"])
 
-        learn_scale = payload.get("learn_scale", gate_config is not None)
-        init_log_scale = payload.get("init_log_scale", 0.0)
-        steering_strength = payload.get("steering_strength", 1.0)
+        scale_mode = payload["scale_mode"]
+        init_log_scale = payload.get("init_log_scale")
+        scale = payload.get("scale", 1.0)
 
         steering_layer_ids = payload.get("steering_layer_ids")
         if steering_layer_ids is None:
@@ -205,9 +231,9 @@ class SteeringLM(BaseModelLayout):
         steering_components = payload.get("steering_components", ["attention"])
 
         self.upgrade_for_steering(
-            steering_strength=steering_strength,
+            scale=scale,
             gate_config=gate_config,
-            learn_scale=learn_scale,
+            scale_mode=scale_mode,
             init_log_scale=init_log_scale,
             steering_layer_ids=steering_layer_ids,
             steering_components=steering_components,

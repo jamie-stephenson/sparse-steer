@@ -34,10 +34,10 @@ class DummyAttention(nn.Module):
         return self.o_proj(x)
 
 
-def test_dense_mlp_applies_steering_strength_correction() -> None:
+def test_dense_mlp_applies_scale_correction() -> None:
     strength = 3.0
     mlp = DummyMLP(dim=4)
-    hook = SteeringHook((4,), steering_strength=strength)
+    hook = SteeringHook((4,), scale=strength)
     hook.set_steering_vectors(torch.tensor([1.0, 2.0, 3.0, 4.0]))
     mlp.down_proj.register_forward_pre_hook(hook.pre_hook)
     mlp.eval()
@@ -51,7 +51,7 @@ def test_dense_mlp_applies_steering_strength_correction() -> None:
 
 def test_dense_mlp_respects_steering_enabled_flag() -> None:
     mlp = DummyMLP(dim=4)
-    hook = SteeringHook((4,), steering_strength=5.0)
+    hook = SteeringHook((4,), scale=5.0)
     hook.set_steering_vectors(torch.ones(4))
     hook.steering_enabled = False
     mlp.down_proj.register_forward_pre_hook(hook.pre_hook)
@@ -62,13 +62,13 @@ def test_dense_mlp_respects_steering_enabled_flag() -> None:
     assert torch.allclose(y, x)
 
 
-def test_dense_attention_applies_steering_strength_correction() -> None:
+def test_dense_attention_applies_scale_correction() -> None:
     num_heads, head_dim = 2, 3
     hidden = num_heads * head_dim
     strength = 2.0
 
     attn = DummyAttention(hidden=hidden)
-    hook = SteeringHook((num_heads, head_dim), steering_strength=strength)
+    hook = SteeringHook((num_heads, head_dim), scale=strength)
     sv = torch.randn(num_heads, head_dim)
     hook.set_steering_vectors(sv)
     attn.o_proj.register_forward_pre_hook(hook.pre_hook)
@@ -86,7 +86,7 @@ def test_dense_attention_respects_steering_enabled_flag() -> None:
     hidden = num_heads * head_dim
 
     attn = DummyAttention(hidden=hidden)
-    hook = SteeringHook((num_heads, head_dim), steering_strength=5.0)
+    hook = SteeringHook((num_heads, head_dim), scale=5.0)
     hook.set_steering_vectors(torch.randn(num_heads, head_dim))
     hook.steering_enabled = False
     attn.o_proj.register_forward_pre_hook(hook.pre_hook)

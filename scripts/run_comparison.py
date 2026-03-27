@@ -97,7 +97,7 @@ def main() -> None:
             DenseExperiment,
             TruthfulQADenseConfig(
                 model_name=model_name,
-                steering_strength=spec["dense_strength"],
+                scale=spec["dense_strength"],
                 **SHARED,
             ),
         )
@@ -119,7 +119,7 @@ def main() -> None:
             "baseline": baseline,
             "dense": {
                 **dense_summary["metrics"],
-                "steering_strength": spec["dense_strength"],
+                "scale": spec["dense_strength"],
             },
             "sparse": sparse_summary["metrics"],
         }

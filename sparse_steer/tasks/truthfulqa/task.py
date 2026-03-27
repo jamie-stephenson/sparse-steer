@@ -24,7 +24,7 @@ class TruthfulQATask:
             extraction_mcq_mode=config.get("extraction_mcq_mode", "mc1"),
             gate_train_mcq_mode=config.get("gate_train_mcq_mode", "mc1"),
             extraction_fraction=config.extraction_fraction,
-            seed=config.seed,
+            seed=config.get("data_seed"),
         )
 
     def run_task_evaluation(

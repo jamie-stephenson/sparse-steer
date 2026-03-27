@@ -5,10 +5,11 @@ defaults:
 
 model_name: Qwen/Qwen2.5-0.5B-Instruct
 seed: 42
+data_seed: null
 device: mps
 eval_batch_size: 32
 extraction_fraction: 0.5
-use_cache: false
+use_cache: true
 use_wandb: false
 
 hydra:

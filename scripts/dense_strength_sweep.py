@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sweep steering_strength for dense steering and evaluate TruthfulQA.
+"""Sweep scale for dense steering and evaluate TruthfulQA.
 
 No training required — just extract steering vectors once, then eval at
 each strength.
@@ -45,11 +45,11 @@ def _find_steering_vectors(model_name: str) -> Path | None:
     return paths[-1] if paths else None
 
 
-def _set_steering_strength(model, strength: float) -> None:
-    """Update steering_strength on all steered modules in-place."""
+def _set_scale(model, scale: float) -> None:
+    """Update fixed scale on all steering hooks in-place."""
     for module in model.modules():
-        if hasattr(module, "steering_strength"):
-            module.steering_strength = strength
+        if hasattr(module, "_fixed_scale"):
+            module._fixed_scale = scale
 
 
 def main():
@@ -105,7 +105,7 @@ def main():
     ).to(args.device)
 
     model.upgrade_for_steering(
-        steering_strength=1.0,
+        scale=1.0,
         steering_layer_ids=list(range(len(model.get_layers()))),
         steering_components=args.targets,
     )
@@ -148,12 +148,12 @@ def main():
     )
 
     for strength in args.strengths:
-        _set_steering_strength(model, strength)
+        _set_scale(model, strength)
         with torch.no_grad():
             metrics = evaluate(model, tokenizer, eval_ds)
 
         row = {
-            "steering_strength": strength,
+            "scale": strength,
             "mc0": metrics["mc0"],
             "mc1": metrics["mc1"],
             "mc2": metrics["mc2"],

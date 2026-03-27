@@ -20,7 +20,7 @@ import numpy as np
 from dotenv import load_dotenv
 from transformers import AutoTokenizer
 
-from sparse_steer.tasks.truthfulqa.data import get_truthfulqa_dataset
+from sparse_steer.tasks.truthfulqa.data import get_truthfulqa_datasets
 
 LOFIT_RAW_URL = (
     "https://raw.githubusercontent.com/{repo}/{branch}"
@@ -253,83 +253,60 @@ def validate_against_hf(
         print("  WARNING: Seeded split index-order does not exactly match LoFiT CSVs")
 
 
-def validate_against_get_truthfulqa_dataset(
+def validate_against_get_truthfulqa_datasets(
     parsed: dict[str, list[dict[str, Any]]],
     model_name: str,
     *,
-    seed: int,
+    seed: int | None,
     fold: int,
 ) -> None:
-    """Compare LoFiT CSV questions against get_truthfulqa_dataset() questions.
+    """Compare LoFiT CSV questions against get_truthfulqa_datasets() questions.
 
     The LoFiT CSVs use the TruthfulQA *generation* format while
-    get_truthfulqa_dataset() uses the *multiple_choice* format, so answer
+    get_truthfulqa_datasets() uses the *multiple_choice* format, so answer
     texts will differ. We compare question strings only.
     """
+    from datasets import load_dataset
+
     hf_api_key = os.getenv("HF_API_KEY")
     tokenizer = AutoTokenizer.from_pretrained(
         model_name,
         token=hf_api_key or True,
     )
 
-    hf_dataset_dict = get_truthfulqa_dataset(
-        tokenizer,
-        mode="mc1",
-        seed=seed,
-        fold=fold,
+    extraction_ds, gate_train_ds, eval_ds = get_truthfulqa_datasets(
+        tokenizer, seed=seed, fold=fold,
     )
-    hf_total_rows = sum(len(ds) for ds in hf_dataset_dict.values())
-    hf_question_ids = {
-        int(qid)
-        for split in ("train", "val", "test")
-        for qid in hf_dataset_dict[split]["question_id"]
-    }
-
-    # Extract unique questions from get_truthfulqa_dataset by stripping the
-    # chat template — simpler to just reload raw questions from HF
-    from datasets import load_dataset
 
     mc_ds = load_dataset("truthful_qa", "multiple_choice", split="validation")
     hf_questions_ordered = [r["question"].strip() for r in mc_ds]
-    hf_questions = set(hf_questions_ordered)
 
-    lofit_questions = set()
-    for records in parsed.values():
-        lofit_questions.update(r["question"] for r in records)
+    # Reconstruct LoFiT-style splits: train = extraction ∪ gate_train
+    our_splits: dict[str, set[str]] = {
+        "train": {
+            hf_questions_ordered[qid]
+            for qid in set(extraction_ds["question_id"])
+            | set(gate_train_ds["train"]["question_id"])
+        },
+        "val": {
+            hf_questions_ordered[qid]
+            for qid in gate_train_ds["val"]["question_id"]
+        },
+        "test": set(eval_ds["question"]),
+    }
 
     split_match_all = True
     for split in ("train", "val", "test"):
-        split_qids = {int(qid) for qid in hf_dataset_dict[split]["question_id"]}
-        split_questions = {hf_questions_ordered[qid] for qid in split_qids}
         lofit_split_questions = {record["question"] for record in parsed[split]}
-        split_match = split_questions == lofit_split_questions
-        split_match_all = split_match_all and split_match
-        status = "EXACT MATCH" if split_match else "MISMATCH"
+        match = our_splits[split] == lofit_split_questions
+        split_match_all = split_match_all and match
+        status = "EXACT MATCH" if match else "MISMATCH"
         print(f"  {split} question assignment vs LoFiT: {status}")
-        if not split_match:
-            only_ours = split_questions - lofit_split_questions
-            only_lofit = lofit_split_questions - split_questions
+        if not match:
+            only_ours = our_splits[split] - lofit_split_questions
+            only_lofit = lofit_split_questions - our_splits[split]
             print(f"    Ours-only={len(only_ours)} LoFiT-only={len(only_lofit)}")
 
-    matched = lofit_questions & hf_questions
-    lofit_only = lofit_questions - hf_questions
-    hf_only = hf_questions - lofit_questions
-
-    print(
-        "  get_truthfulqa_dataset() produces "
-        f"{hf_total_rows} rows from {len(hf_question_ids)} questions (mc1)"
-    )
-    print(f"  LoFiT CSVs contain {len(lofit_questions)} questions")
-    print(f"  Questions in common: {len(matched)}")
-    if lofit_only:
-        print(f"  WARNING: {len(lofit_only)} questions in LoFiT but not HF MC")
-    if hf_only:
-        print(
-            f"  {len(hf_only)} questions in HF MC but not LoFiT "
-            f"(expected: LoFiT may filter some)"
-        )
-    if not lofit_only and not hf_only:
-        print("  Perfect question match: OK")
     if split_match_all:
         print("  Per-split question assignment match: OK")
     else:
@@ -360,24 +337,38 @@ def main() -> None:
     if hf_api_key and not os.getenv("HF_TOKEN"):
         os.environ["HF_TOKEN"] = hf_api_key
 
-    print("Downloading LoFiT CSVs...")
+    # Always download and validate against the canonical LoFiT seed=42 CSVs
+    print("Downloading LoFiT CSVs (seed=42)...")
     paths = download_csvs(
-        args.out_dir, fold=args.fold, seed=args.seed, force=args.force
+        args.out_dir, fold=args.fold, seed=42, force=args.force
     )
 
     print("\nValidating split sizes and disjointness...")
     parsed = validate_splits(paths)
 
-    print("\nValidating against HuggingFace source...")
-    validate_against_hf(parsed, seed=args.seed, fold=args.fold)
+    print("\nValidating seed=42 against LoFiT (expect match)...")
+    validate_against_hf(parsed, seed=42, fold=args.fold)
 
-    print("\nValidating against get_truthfulqa_dataset()...")
-    validate_against_get_truthfulqa_dataset(
+    if args.seed != 42:
+        print(f"\nValidating seed={args.seed} against LoFiT (expect mismatch)...")
+        validate_against_hf(parsed, seed=args.seed, fold=args.fold)
+
+    print("\nValidating get_truthfulqa_datasets(seed=None) against LoFiT (expect match)...")
+    validate_against_get_truthfulqa_datasets(
         parsed,
         args.model,
-        seed=args.seed,
+        seed=None,
         fold=args.fold,
     )
+
+    if args.seed != 42:
+        print(f"\nValidating get_truthfulqa_datasets(seed={args.seed}) against LoFiT (expect mismatch)...")
+        validate_against_get_truthfulqa_datasets(
+            parsed,
+            args.model,
+            seed=args.seed,
+            fold=args.fold,
+        )
 
     print("\nDone.")
 

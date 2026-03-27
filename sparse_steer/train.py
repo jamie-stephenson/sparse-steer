@@ -165,6 +165,7 @@ def train_steering(
 
     train_args = TrainingArguments(
         output_dir=str(output_dir / "checkpoints"),
+        seed=config.seed,
         num_train_epochs=config.num_epochs,
         per_device_train_batch_size=config.train_batch_size,
         learning_rate=config.learning_rate,
@@ -205,6 +206,37 @@ def train_steering(
         render_gate_heatmap(tracker.snapshots, output_dir / "gate_heatmap.png")
         render_gate_animation(tracker.snapshots, output_dir / "gate_animation.gif")
 
+    # ── Phase 2: optional scale tuning with frozen gates ────────────
+    scale_tuning_epochs = config.get("scale_tuning_epochs", 0)
+    if scale_tuning_epochs > 0:
+        print("Scale tuning with frozen gates...")
+        model.freeze_gates()
+        scale_tuning_lr = config.get("scale_tuning_lr") or config.learning_rate
+        scale_tuning_args = TrainingArguments(
+            output_dir=str(output_dir / "scale_tuning"),
+            seed=config.seed,
+            num_train_epochs=scale_tuning_epochs,
+            per_device_train_batch_size=config.train_batch_size,
+            learning_rate=scale_tuning_lr,
+            lr_scheduler_type=config.lr_scheduler_type,
+            warmup_steps=0,
+            weight_decay=config.weight_decay,
+            logging_steps=config.logging_steps,
+            save_strategy="no",
+            report_to="wandb" if config.use_wandb else "none",
+            fp16=model.device.type == "cuda",
+            remove_unused_columns=False,
+        )
+        scale_tuning_trainer = Trainer(
+            model=model,
+            args=scale_tuning_args,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            data_collator=data_collator,
+            processing_class=tokenizer,
+        )
+        scale_tuning_trainer.train()
+
     return trainer
 
 
@@ -240,6 +272,7 @@ def train_lora(
 
     train_args = TrainingArguments(
         output_dir=str((output_dir or Path("output")) / "lora_checkpoints"),
+        seed=config.seed,
         num_train_epochs=config.num_epochs,
         per_device_train_batch_size=config.train_batch_size,
         learning_rate=config.learning_rate,

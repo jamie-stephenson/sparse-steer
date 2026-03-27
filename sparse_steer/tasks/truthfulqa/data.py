@@ -11,12 +11,12 @@ from ...utils.tokenize import apply_template
 def _compute_lofit_question_splits(
     num_questions: int,
     *,
-    seed: int,
+    seed: int | None,
     fold: int,
     num_folds: int,
     val_ratio: float,
 ) -> dict[str, set[int]]:
-    """Reproduce LoFiT's seeded question-level split assignment."""
+    """Compute question-level splits. seed=None reproduces LoFiT exactly."""
     if num_folds < 2:
         raise ValueError("num_folds must be >= 2")
     if fold < 0 or fold >= num_folds:
@@ -24,15 +24,20 @@ def _compute_lofit_question_splits(
     if not (0.0 < val_ratio < 1.0):
         raise ValueError("val_ratio must be in (0, 1)")
 
-    fold_idxs = np.array_split(np.arange(num_questions), num_folds)
-    rng = np.random.RandomState(seed)
+    indices = np.arange(num_questions)
+    rng = np.random.RandomState(seed) if seed is not None else None
+    if rng is not None:
+        rng.shuffle(indices)
+    fold_idxs = np.array_split(indices, num_folds)
 
+    lofit_rng = np.random.RandomState(42)
     split_indices: dict[str, np.ndarray] | None = None
     for i in range(num_folds):
         train_pool = np.concatenate([fold_idxs[j] for j in range(num_folds) if j != i])
         test_idxs = fold_idxs[i]
         train_size = int(len(train_pool) * (1 - val_ratio))
-        train_idxs = rng.choice(train_pool, size=train_size, replace=False)
+        active_rng = rng if rng is not None else lofit_rng
+        train_idxs = active_rng.choice(train_pool, size=train_size, replace=False)
         train_idx_set = set(train_idxs.tolist())
         val_idxs = np.array([idx for idx in train_pool if idx not in train_idx_set])
         if i == fold:
@@ -189,7 +194,7 @@ def get_truthfulqa_datasets(
     extraction_mcq_mode: Literal["mc0", "mc1", "mc2"] = "mc1",
     gate_train_mcq_mode: Literal["mc0", "mc1", "mc2"] = "mc1",
     extraction_fraction: float = 0.5,
-    seed: int = 42,
+    seed: int | None = None,
     fold: int = 0,
     num_folds: int = 2,
     val_ratio: float = 0.2,
@@ -214,9 +219,9 @@ def get_truthfulqa_datasets(
     # Partition train question IDs into extraction and gate-train subsets.
     train_qids = list(splits["train"])
     n_extraction = round(len(train_qids) * extraction_fraction)
-    rng = np.random.RandomState(seed)
+    ext_rng = np.random.RandomState(seed if seed is not None else 42)
     extraction_qids = set(
-        rng.choice(train_qids, size=n_extraction, replace=False).tolist()
+        ext_rng.choice(train_qids, size=n_extraction, replace=False).tolist()
     )
     gate_train_qids = splits["train"] - extraction_qids
 

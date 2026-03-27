@@ -8,6 +8,14 @@ from torch import Tensor, nn
 from ..hardconcrete import HardConcreteConfig
 
 Component = Literal["attention", "mlp", "residual"]
+ScaleMode = Literal["fixed", "per_head", "shared"]
+
+
+def _softplus_inverse(x: float) -> float:
+    """Inverse of softplus: log(exp(x) - 1). For large x, ≈ x."""
+    if x > 20.0:
+        return x
+    return math.log(math.expm1(x))
 
 
 class SteeringHook(nn.Module):
@@ -16,23 +24,26 @@ class SteeringHook(nn.Module):
     Correction formula: ``vectors * gate * scale``
 
     - **gate**: ``1.0`` (no gates) or ``hard_concrete(log_alpha)`` (learned)
-    - **scale**: ``steering_strength`` (fixed) or ``softplus(log_scale)`` (learned)
+    - **scale**: fixed value or learned via ``softplus(log_scale)``
     """
 
     def __init__(
         self,
         vector_shape: tuple[int, ...],
         *,
-        steering_strength: float = 1.0,
+        scale: float = 1.0,
         gate_config: HardConcreteConfig | None = None,
-        learn_scale: bool = False,
-        init_log_scale: float = 0.0,
+        scale_mode: ScaleMode = "fixed",
+        init_log_scale: float | None = None,
+        shared_log_scale: nn.Parameter | None = None,
     ) -> None:
         super().__init__()
         self.steering_enabled = True
         self.register_buffer("steering_vectors", torch.zeros(vector_shape))
         num_gates = vector_shape[0] if len(vector_shape) > 1 else 1
-        self.steering_strength = steering_strength
+        self._fixed_scale = scale
+        # External shared parameter (owned by SteeringLM, not this hook)
+        self._shared_log_scale = shared_log_scale
 
         # Gate axis: optional HardConcrete gates
         self.gate_config = gate_config
@@ -43,20 +54,33 @@ class SteeringHook(nn.Module):
         else:
             self.register_parameter("log_alpha", None)
 
-        # Scale axis: fixed steering_strength or learned per-gate scale
-        if learn_scale:
+        # Scale axis: fixed, per-head learned, or shared learned
+        if scale_mode == "shared":
+            # Shared across all hooks — parameter lives on SteeringLM
+            self.register_parameter("log_scale", None)
+        elif scale_mode == "per_head":
+            if init_log_scale is None:
+                init_log_scale = _softplus_inverse(scale)
             self.log_scale = nn.Parameter(
                 torch.full((num_gates,), init_log_scale)
             )
         else:
             self.register_parameter("log_scale", None)
 
+        self._gates_frozen = False
+
     # ── Gate computation ─────────────────────────────────────────────
+
+    def freeze_gates(self) -> None:
+        """Lock gates to deterministic eval-mode values."""
+        if self.log_alpha is not None:
+            self.log_alpha.requires_grad = False
+        self._gates_frozen = True
 
     def _hard_concrete(self) -> Tensor:
         cfg = self.gate_config
         low, high = cfg.stretch_limits
-        if self.training:
+        if self.training and not self._gates_frozen:
             noise = torch.rand_like(self.log_alpha)
             noise = noise.mul(1.0 - 2.0 * cfg.eps).add(cfg.eps)
             concrete = torch.sigmoid(
@@ -94,9 +118,11 @@ class SteeringHook(nn.Module):
         return weights
 
     def _scale_weights(self) -> Tensor | float:
+        if self._shared_log_scale is not None:
+            return F.softplus(self._shared_log_scale)
         if self.log_scale is not None:
             return F.softplus(self.log_scale)
-        return self.steering_strength
+        return self._fixed_scale
 
     # ── Correction ───────────────────────────────────────────────────
 
@@ -162,5 +188,6 @@ class SteeringHook(nn.Module):
 
 __all__ = [
     "Component",
+    "ScaleMode",
     "SteeringHook",
 ]

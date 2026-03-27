@@ -1,13 +1,13 @@
 # @package _global_
 method: sparse
-steering_strength: 1.0
+scale: 1.0
 steering_layer_ids: null
 extract_batch_size: 8
 token_position: last
 targets: [attention]
 normalize_steering_vectors: false
 
-learn_scale: true
+scale_mode: per_head
 init_log_scale: 2.79
 
 l0_scheduler_type: warmup
@@ -23,6 +23,8 @@ logging_steps: 1
 save_strategy: "no"
 freeze_log_scale: false
 track_gates: true
+scale_tuning_epochs: 0
+scale_tuning_lr: null
 
 gate_config:
   temperature: 0.33

@@ -1,14 +1,14 @@
 # @package _global_
 # HardConcrete gates with fixed steering strength (no learned scale).
 method: gates_only
-steering_strength: 1.0
+scale: 1.0
 steering_layer_ids: null
 extract_batch_size: 8
 token_position: last
 targets: [attention]
 normalize_steering_vectors: false
 
-learn_scale: false
+scale_mode: fixed
 
 l0_scheduler_type: warmup
 l0_warmup_steps: 16

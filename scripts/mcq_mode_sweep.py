@@ -95,7 +95,7 @@ def main():
     ).to(base_config.device)
     base_model.upgrade_for_steering(
         gate_config=gate_config,
-        learn_scale=True,
+        scale_mode="per_head",
         steering_layer_ids=list(range(len(base_model.get_layers()))),
         steering_components=base_config.targets,
     )
@@ -140,7 +140,7 @@ def main():
         ).to(config.device)
         model.upgrade_for_steering(
             gate_config=gate_config,
-            learn_scale=True,
+            scale_mode="per_head",
             steering_layer_ids=list(range(len(model.get_layers()))),
             steering_components=config.targets,
         )

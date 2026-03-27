@@ -168,7 +168,21 @@ class Experiment(abc.ABC):
         )
         return {}
 
+    @staticmethod
+    def _seed_everything(seed: int) -> None:
+        import random
+        import numpy as np
+        import torch
+
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
     def run(self) -> dict[str, Any]:
+        self._seed_everything(self.config.seed)
+
         load_dotenv()
         hf_token = os.environ.get("HF_TOKEN")
         if hf_token:
