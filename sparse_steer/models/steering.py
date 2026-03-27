@@ -7,7 +7,7 @@ from torch import Tensor, nn
 
 from ..hardconcrete import HardConcreteConfig
 from .base import BaseModelLayout, Component
-from .hook import ScaleMode, SteeringHook
+from .hook import SteeringHook
 
 # Hook attachment mode: pre-hook on output proj, or post-hook on layer
 _PRE_HOOK_COMPONENTS = frozenset({"attention", "mlp"})
@@ -25,23 +25,22 @@ class SteeringLM(BaseModelLayout):
         *,
         steering_layer_ids: list[int],
         steering_components: list[Component],
-        scale: float = 1.0,
         gate_config: HardConcreteConfig | None = None,
-        scale_mode: ScaleMode = "fixed",
-        init_log_scale: float | None = None,
+        learn_scale: bool = False,
+        shared_scale: bool = False,
+        init_log_scale: float = 0.0,
     ) -> None:
-        self.scale = scale
         self.gate_config = gate_config
-        self.scale_mode = scale_mode
+        self.learn_scale = learn_scale
+        self.shared_scale = shared_scale
         self.init_log_scale = init_log_scale
         self.steering_layer_ids = steering_layer_ids
         self.steering_components = steering_components
 
-        # Create a single shared log_scale parameter for the whole model
-        if scale_mode == "shared":
-            from .hook import _softplus_inverse
-            init = init_log_scale if init_log_scale is not None else _softplus_inverse(scale)
-            self._shared_log_scale = nn.Parameter(torch.full((1,), init))
+        if shared_scale:
+            self._shared_log_scale = nn.Parameter(
+                torch.full((1,), init_log_scale)
+            )
         else:
             self._shared_log_scale = None
 
@@ -49,7 +48,7 @@ class SteeringLM(BaseModelLayout):
 
     @property
     def has_learnable_steering(self) -> bool:
-        return self.gate_config is not None or self.scale_mode != "fixed"
+        return self.gate_config is not None or self.learn_scale or self.shared_scale
 
     # ── Hook management ──────────────────────────────────────────────
 
@@ -57,9 +56,8 @@ class SteeringLM(BaseModelLayout):
         shape = self._get_vector_shape(component, layer)
         return SteeringHook(
             shape,
-            scale=self.scale,
             gate_config=self.gate_config,
-            scale_mode=self.scale_mode,
+            learn_scale=self.learn_scale,
             init_log_scale=self.init_log_scale,
             shared_log_scale=self._shared_log_scale,
         )
@@ -190,9 +188,9 @@ class SteeringLM(BaseModelLayout):
             path.mkdir(parents=True, exist_ok=True)
             output_path = path / "steering.pt"
         payload = {
-            "scale": self.scale,
             "gate_config": self.gate_config.to_dict() if self.gate_config else None,
-            "scale_mode": self.scale_mode,
+            "learn_scale": self.learn_scale,
+            "shared_scale": self.shared_scale,
             "init_log_scale": self.init_log_scale,
             "steering_layer_ids": self.steering_layer_ids,
             "steering_components": self.steering_components,
@@ -212,12 +210,13 @@ class SteeringLM(BaseModelLayout):
         state_dict = payload["state_dict"]
 
         gate_config = None
-        if payload.get("gate_config") is not None:
-            gate_config = HardConcreteConfig(**payload["gate_config"])
+        raw_gate_config = payload.get("gate_config") or payload.get("config")
+        if raw_gate_config is not None:
+            gate_config = HardConcreteConfig(**raw_gate_config)
 
-        scale_mode = payload["scale_mode"]
-        init_log_scale = payload.get("init_log_scale")
-        scale = payload.get("scale", 1.0)
+        learn_scale = payload.get("learn_scale", gate_config is not None)
+        shared_scale = payload.get("shared_scale", False)
+        init_log_scale = payload.get("init_log_scale", 0.0)
 
         steering_layer_ids = payload.get("steering_layer_ids")
         if steering_layer_ids is None:
@@ -231,9 +230,9 @@ class SteeringLM(BaseModelLayout):
         steering_components = payload.get("steering_components", ["attention"])
 
         self.upgrade_for_steering(
-            scale=scale,
             gate_config=gate_config,
-            scale_mode=scale_mode,
+            learn_scale=learn_scale,
+            shared_scale=shared_scale,
             init_log_scale=init_log_scale,
             steering_layer_ids=steering_layer_ids,
             steering_components=steering_components,

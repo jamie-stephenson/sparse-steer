@@ -50,25 +50,27 @@ def load_steering_model(config: DictConfig) -> PreTrainedModel:
         gate_cfg = OmegaConf.to_container(config.gate_config, resolve=True)
         gate_config = HardConcreteConfig(**gate_cfg)
 
-    scale_mode = config.get("scale_mode", "fixed")
-    init_log_scale = config.get("init_log_scale")
-    scale = config.get("scale", 1.0)
+    learn_scale = config.get("learn_scale", False)
+    shared_scale = config.get("shared_scale", False)
+    init_log_scale = config.get("init_log_scale", 0.0)
 
     desc = []
     if gate_config is not None:
         desc.append("gates")
-    if scale_mode != "fixed":
-        desc.append(f"{scale_mode} learned scale")
+    if shared_scale:
+        desc.append("shared learned scale")
+    elif learn_scale:
+        desc.append("learned scale")
     else:
-        desc.append(f"scale={scale}")
+        desc.append(f"scale=softplus({init_log_scale:.2f})")
     print(f"Initialising steering model ({', '.join(desc)})...")
 
     model.upgrade_for_steering(
         steering_layer_ids=layer_ids,
         steering_components=list(config.targets),
-        scale=scale,
         gate_config=gate_config,
-        scale_mode=scale_mode,
+        learn_scale=learn_scale,
+        shared_scale=shared_scale,
         init_log_scale=init_log_scale,
     )
 

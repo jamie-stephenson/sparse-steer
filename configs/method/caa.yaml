@@ -4,10 +4,10 @@
 # Paper uses layer 15/32 on Llama-2-7B (~47%).
 # For Qwen2.5-0.5B (24 layers), the equivalent is layer 12.
 method: dense
-scale: 2.0
 steering_layer_ids: [12]
 extract_batch_size: 8
 token_position: last
 targets: [residual]
 normalize_steering_vectors: false
-scale_mode: fixed
+learn_scale: false
+init_log_scale: 1.8546

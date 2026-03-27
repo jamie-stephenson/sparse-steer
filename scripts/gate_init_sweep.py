@@ -128,7 +128,7 @@ def sweep_fn():
         )
         model.upgrade_for_steering(
             gate_config=gate_config,
-            scale_mode="per_head",
+            learn_scale=True,
             steering_layer_ids=list(range(len(model.get_layers()))),
             steering_components=["attention"],
         )

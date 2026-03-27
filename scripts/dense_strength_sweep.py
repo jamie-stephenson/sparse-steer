@@ -45,11 +45,13 @@ def _find_steering_vectors(model_name: str) -> Path | None:
     return paths[-1] if paths else None
 
 
-def _set_scale(model, scale: float) -> None:
-    """Update fixed scale on all steering hooks in-place."""
+def _set_scale(model, strength: float) -> None:
+    """Update scale on all steered modules in-place via log_scale buffer."""
+    import math
+    log_val = math.log(math.exp(strength) - 1) if strength > 0 else -20.0
     for module in model.modules():
-        if hasattr(module, "_fixed_scale"):
-            module._fixed_scale = scale
+        if hasattr(module, "log_scale") and module.log_scale is not None:
+            module.log_scale.fill_(log_val)
 
 
 def main():
@@ -105,7 +107,6 @@ def main():
     ).to(args.device)
 
     model.upgrade_for_steering(
-        scale=1.0,
         steering_layer_ids=list(range(len(model.get_layers()))),
         steering_components=args.targets,
     )

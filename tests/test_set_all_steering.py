@@ -42,7 +42,7 @@ class DummySteeringLM(SteeringLM, nn.Module):
         self.layers = nn.ModuleList([DummyLayer() for _ in range(num_layers)])
         self.upgrade_for_steering(
             gate_config=HardConcreteConfig(),
-            scale_mode="per_head",
+            learn_scale=True,
             steering_layer_ids=list(range(num_layers)),
             steering_components=["attention", "mlp"],
         )

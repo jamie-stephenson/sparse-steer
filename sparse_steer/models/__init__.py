@@ -1,4 +1,4 @@
-from .hook import Component, ScaleMode, SteeringHook
+from .hook import Component, SteeringHook
 from .steering import SteeringLM
 from .llama import LlamaLayout, LlamaSteeringLM
 from .qwen2 import Qwen2SteeringLM
@@ -13,7 +13,6 @@ __all__ = [
     "LlamaLayout",
     "LlamaSteeringLM",
     "MODEL_REGISTRY",
-    "ScaleMode",
     "Qwen2SteeringLM",
     "SteeringHook",
     "SteeringLM",

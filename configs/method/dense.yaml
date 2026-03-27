@@ -1,9 +1,9 @@
 # @package _global_
 method: dense
-scale: 1.0
 steering_layer_ids: null
 extract_batch_size: 8
 token_position: last
 targets: [attention]
 normalize_steering_vectors: false
-scale_mode: fixed
+learn_scale: false
+init_log_scale: 0.5413

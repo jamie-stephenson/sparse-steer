@@ -22,7 +22,7 @@ PLOTS_DIR = Path("plots")
 MODELS = {
     "Qwen2.5-0.5B": {
         "model_name": "Qwen/Qwen2.5-0.5B-Instruct",
-        "dense_strength": 10.0,
+        "dense_init_log_scale": 10.0,
         "sparse": {
             "learning_rate": 0.015,
             "l0_lambda": 0.01,
@@ -30,7 +30,7 @@ MODELS = {
     },
     "SmolLM2-135M": {
         "model_name": "HuggingFaceTB/SmolLM2-135M-Instruct",
-        "dense_strength": 8.0,
+        "dense_init_log_scale": 8.0,
         "sparse": {
             "learning_rate": 0.01,
             "l0_lambda": 0.1,
@@ -97,7 +97,7 @@ def main() -> None:
             DenseExperiment,
             TruthfulQADenseConfig(
                 model_name=model_name,
-                scale=spec["dense_strength"],
+                init_log_scale=spec["dense_init_log_scale"],
                 **SHARED,
             ),
         )
@@ -119,7 +119,7 @@ def main() -> None:
             "baseline": baseline,
             "dense": {
                 **dense_summary["metrics"],
-                "scale": spec["dense_strength"],
+                "init_log_scale": spec["dense_init_log_scale"],
             },
             "sparse": sparse_summary["metrics"],
         }

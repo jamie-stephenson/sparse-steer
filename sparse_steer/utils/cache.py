@@ -96,7 +96,6 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "extraction_fraction",
         "eval_batch_size",
         # steering fields (None for non-steering methods)
-        "scale",
         "extract_batch_size",
         "token_position",
         "targets",

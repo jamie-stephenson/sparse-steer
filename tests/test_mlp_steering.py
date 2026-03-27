@@ -18,7 +18,7 @@ class DummyMLP(nn.Module):
 
 
 def test_set_steering_vectors_validates_shape() -> None:
-    hook = SteeringHook((4,), gate_config=HardConcreteConfig(), scale_mode="per_head")
+    hook = SteeringHook((4,), gate_config=HardConcreteConfig(), learn_scale=True)
     with pytest.raises(ValueError):
         hook.set_steering_vectors(torch.zeros(5))
 
@@ -26,7 +26,7 @@ def test_set_steering_vectors_validates_shape() -> None:
 def test_mlp_hook_applies_gated_correction() -> None:
     cfg = HardConcreteConfig(init_log_alpha=5.0, init_log_scale=0.0, eval_threshold=0.0)
     mlp = DummyMLP(dim=4)
-    hook = SteeringHook((4,), gate_config=cfg, scale_mode="per_head", init_log_scale=cfg.init_log_scale)
+    hook = SteeringHook((4,), gate_config=cfg, learn_scale=True, init_log_scale=cfg.init_log_scale)
     hook.set_steering_vectors(torch.tensor([1.0, 2.0, 3.0, 4.0]))
     mlp.down_proj.register_forward_pre_hook(hook.pre_hook)
     hook.eval()
@@ -43,7 +43,7 @@ def test_mlp_hook_applies_gated_correction() -> None:
 def test_mlp_hook_respects_steering_enabled_flag() -> None:
     cfg = HardConcreteConfig(init_log_alpha=5.0, eval_threshold=0.0)
     mlp = DummyMLP(dim=4)
-    hook = SteeringHook((4,), gate_config=cfg, scale_mode="per_head")
+    hook = SteeringHook((4,), gate_config=cfg, learn_scale=True)
     hook.set_steering_vectors(torch.ones(4))
     hook.steering_enabled = False
     mlp.down_proj.register_forward_pre_hook(hook.pre_hook)

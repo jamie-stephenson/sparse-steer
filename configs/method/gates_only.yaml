@@ -1,14 +1,14 @@
 # @package _global_
-# HardConcrete gates with fixed steering strength (no learned scale).
+# HardConcrete gates with fixed scale (no learned scale).
 method: gates_only
-scale: 1.0
 steering_layer_ids: null
 extract_batch_size: 8
 token_position: last
 targets: [attention]
 normalize_steering_vectors: false
 
-scale_mode: fixed
+learn_scale: false
+init_log_scale: 0.5413
 
 l0_scheduler_type: warmup
 l0_warmup_steps: 16
@@ -23,6 +23,8 @@ logging_steps: 1
 save_strategy: "no"
 freeze_log_scale: false
 track_gates: true
+scale_tuning_epochs: 0
+scale_tuning_lr: null
 
 gate_config:
   temperature: 0.33
