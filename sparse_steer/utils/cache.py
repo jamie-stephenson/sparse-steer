@@ -27,7 +27,7 @@ class ArtifactType(Enum):
     STEERING_VECTORS = "steering_vectors"
     SPARSE_STEERING = "sparse_steering"
     PEFT_ADAPTER = "peft_adapter"
-    BASELINE_EVAL = "baseline_eval"
+    UNSTEERED_EVAL = "unsteered_eval"
     STEERED_EVAL = "steered_eval"
 
 
@@ -66,7 +66,7 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "freeze_log_scale",
         "gate_config",
     ],
-    ArtifactType.BASELINE_EVAL: [
+    ArtifactType.UNSTEERED_EVAL: [
         "model_name",
         "seed",
         "eval_batch_size",
@@ -138,7 +138,7 @@ _SOURCE_FILES: dict[ArtifactType, list[str]] = {
     ArtifactType.PEFT_ADAPTER: [
         "sparse_steer/train.py",
     ],
-    ArtifactType.BASELINE_EVAL: [
+    ArtifactType.UNSTEERED_EVAL: [
         "sparse_steer/utils/eval.py",
     ],
     ArtifactType.STEERED_EVAL: [
@@ -156,7 +156,7 @@ _ARTIFACT_FILENAMES: dict[ArtifactType, str] = {
     ArtifactType.STEERING_VECTORS: "steering_vectors.pt",
     ArtifactType.SPARSE_STEERING: "sparse_steering.pt",
     ArtifactType.PEFT_ADAPTER: "adapter_config.json",
-    ArtifactType.BASELINE_EVAL: "results.json",
+    ArtifactType.UNSTEERED_EVAL: "results.json",
     ArtifactType.STEERED_EVAL: "results.json",
 }
 

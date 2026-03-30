@@ -2,7 +2,7 @@
 """Sweep all 9 combinations of extraction_mcq_mode x gate_train_mcq_mode.
 
 For each combo, runs the full pipeline (extract, train, eval) and reports
-mc0/mc1/mc2 metrics plus deltas from the baseline.
+mc0/mc1/mc2 metrics plus deltas from the unsteered model.
 
 Usage:
     uv run python scripts/mcq_mode_sweep.py
@@ -87,8 +87,8 @@ def main():
         seed=base_config.seed,
     )
 
-    # ── Baseline (no steering) ──
-    print(f"Loading {model_name} for baseline eval...")
+    # ── Unsteered (no steering) ──
+    print(f"Loading {model_name} for unsteered eval...")
     base_model = model_cls.from_pretrained(
         model_name,
         torch_dtype=torch.float16,
@@ -100,11 +100,11 @@ def main():
         steering_components=base_config.targets,
     )
     base_model.eval()
-    print("Evaluating baseline (no steering)...")
+    print("Evaluating unsteered (no steering)...")
     with base_model.steering_disabled(), torch.no_grad():
-        baseline = evaluate(base_model, tokenizer, eval_ds)
+        unsteered = evaluate(base_model, tokenizer, eval_ds)
     print(
-        f"  Baseline MC0={baseline['mc0']:.4f}  MC1={baseline['mc1']:.4f}  MC2={baseline['mc2']:.4f}"
+        f"  Unsteered MC0={unsteered['mc0']:.4f}  MC1={unsteered['mc1']:.4f}  MC2={unsteered['mc2']:.4f}"
     )
     del base_model
     if base_config.device == "mps":
@@ -183,9 +183,9 @@ def main():
             "mc0": metrics["mc0"],
             "mc1": metrics["mc1"],
             "mc2": metrics["mc2"],
-            "mc0_delta": metrics["mc0"] - baseline["mc0"],
-            "mc1_delta": metrics["mc1"] - baseline["mc1"],
-            "mc2_delta": metrics["mc2"] - baseline["mc2"],
+            "mc0_delta": metrics["mc0"] - unsteered["mc0"],
+            "mc1_delta": metrics["mc1"] - unsteered["mc1"],
+            "mc2_delta": metrics["mc2"] - unsteered["mc2"],
         }
         results.append(row)
         print(
@@ -213,7 +213,7 @@ def main():
     # ── Save ──
     out = {
         "model": model_name,
-        "baseline": baseline,
+        "unsteered": unsteered,
         "results": results,
         "config": asdict(base_config),
     }

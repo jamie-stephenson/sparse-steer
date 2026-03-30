@@ -136,10 +136,10 @@ def sweep_fn():
         vectors, _ = load_steering_vectors(Path(sv_path))
         model.set_all_vectors(vectors, normalize=False)
 
-        # ── Baseline (steering disabled) ──
+        # ── Unsteered (steering disabled) ──
         model.eval()
         with model.steering_disabled(), torch.no_grad():
-            baseline = evaluate(model, tokenizer, eval_ds)
+            unsteered = evaluate(model, tokenizer, eval_ds)
 
         # ── Epoch eval callback ──
         class EpochEvalCallback(TrainerCallback):
@@ -154,9 +154,9 @@ def sweep_fn():
                     model.train()
                 wandb.log(
                     {
-                        "mc0_delta": metrics["mc0"] - baseline["mc0"],
-                        "mc1_delta": metrics["mc1"] - baseline["mc1"],
-                        "mc2_delta": metrics["mc2"] - baseline["mc2"],
+                        "mc0_delta": metrics["mc0"] - unsteered["mc0"],
+                        "mc1_delta": metrics["mc1"] - unsteered["mc1"],
+                        "mc2_delta": metrics["mc2"] - unsteered["mc2"],
                     },
                     step=state.global_step,
                 )
@@ -215,12 +215,12 @@ def sweep_fn():
                 "mc0": final["mc0"],
                 "mc1": final["mc1"],
                 "mc2": final["mc2"],
-                "baseline_mc0": baseline["mc0"],
-                "baseline_mc1": baseline["mc1"],
-                "baseline_mc2": baseline["mc2"],
-                "mc0_delta": final["mc0"] - baseline["mc0"],
-                "mc1_delta": final["mc1"] - baseline["mc1"],
-                "mc2_delta": final["mc2"] - baseline["mc2"],
+                "unsteered_mc0": unsteered["mc0"],
+                "unsteered_mc1": unsteered["mc1"],
+                "unsteered_mc2": unsteered["mc2"],
+                "mc0_delta": final["mc0"] - unsteered["mc0"],
+                "mc1_delta": final["mc1"] - unsteered["mc1"],
+                "mc2_delta": final["mc2"] - unsteered["mc2"],
             }
         )
 

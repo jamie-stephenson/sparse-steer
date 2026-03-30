@@ -6,7 +6,7 @@ Sparse activation steering experiments for language models.
 
 - Extract contrastive steering vectors from activations.
 - Train Hard-Concrete gates to apply steering sparsely.
-- Evaluate baseline vs steered model.
+- Evaluate unsteered vs steered model.
 
 ## Setup
 
@@ -21,30 +21,42 @@ If you want Weights & Biases logging, also set `WANDB_*` values.
 ## Run
 
 ```bash
-uv run run.py <task> --config <config_path>
+uv run run.py
+uv run run.py method=sparse task=truthfulqa  # override method and task
 ```
+
+Hydra configs live under `configs/`. Method and task overrides are composed from
+`configs/method/` and `configs/task/`.
 
 ## Repo structure
 
 ```text
 .
-├── run.py                      # entrypoint
-├── config.yaml                 # default experiment config
-├── output/                     # run artifacts created at runtime
-└── sparse_steer
-    ├── experiment.py           # shared extract/train/eval experiment pipeline
-    ├── extract.py              # activation collection + steering vector extraction
-    ├── hardconcrete.py         # Hard-Concrete gate config and mixin
+├── run.py                          # entrypoint
+├── configs/
+│   ├── config.yaml                 # default experiment config
+│   ├── method/                     # method overrides (unsteered, dense, sparse, lora, …)
+│   └── task/                       # task overrides (truthfulqa, …)
+├── output/                         # run artifacts created at runtime
+└── sparse_steer/
+    ├── experiment/
+    │   ├── base.py                 # base experiment pipeline
+    │   ├── unsteered.py            # no-steering control
+    │   ├── steering.py             # steering experiment (dense/sparse/gates_only/…)
+    │   └── lora.py                 # LoRA-based steering
+    ├── extract.py                  # activation collection + steering vector extraction
+    ├── train.py                    # gate training loop (HF Trainer + L0 penalty)
+    ├── hardconcrete.py             # Hard-Concrete gate config
     ├── models/
-    │   ├── base.py             # shared model abstractions
-    │   ├── sparse.py           # sparse-steering (Hard-Concrete gated) mixin
-    │   └── dense.py            # dense-steering (fixed strength) mixin
-    ├── tasks/                  # task-specific datasets/evaluation/experiment wiring
-    ├── train.py                # gate training loop (HF Trainer + L0 penalty)
+    │   ├── base.py                 # model layout abstractions
+    │   ├── steering.py             # steering hook injection and management
+    │   └── hook.py                 # per-layer steering hook implementation
+    ├── tasks/
+    │   └── truthfulqa/             # TruthfulQA dataset, evaluation, and task wiring
     └── utils/
-        ├── cache.py            # artifact caching with staleness detection
-        ├── eval.py             # answer log-prob scoring utilities
-        ├── gate_tracker.py     # gate sparsification tracking and visualization
-        └── tokenize.py         # chat-template text formatting and tokenization
+        ├── cache.py                # artifact caching with staleness detection
+        ├── eval.py                 # answer log-prob scoring utilities
+        ├── gate_tracker.py         # gate sparsification tracking and visualisation
+        └── tokenize.py             # chat-template formatting and tokenisation
 ```
 

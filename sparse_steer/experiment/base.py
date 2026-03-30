@@ -147,24 +147,24 @@ class Experiment(abc.ABC):
 
     # ── Run ───────────────────────────────────────────────────
 
-    def _lookup_baseline_metrics(
+    def _lookup_unsteered_metrics(
         self, cache_info: dict[str, Any]
     ) -> dict[str, float]:
-        """Look up cached baseline metrics for comparison."""
-        if self._eval_artifact_type == ArtifactType.BASELINE_EVAL:
+        """Look up cached unsteered metrics for comparison."""
+        if self._eval_artifact_type == ArtifactType.UNSTEERED_EVAL:
             return {}
-        hit = self._try_cache_lookup(ArtifactType.BASELINE_EVAL)
+        hit = self._try_cache_lookup(ArtifactType.UNSTEERED_EVAL)
         if hit is not None:
-            baseline = load_cached_json(hit.artifact_path)
-            cache_info["baseline_eval"] = {
+            unsteered = load_cached_json(hit.artifact_path)
+            cache_info["unsteered_eval"] = {
                 "status": "hit",
                 "path": str(hit.artifact_path),
             }
-            for mode, score in baseline.items():
-                print(f"  Baseline {mode.upper()}: {score:.4f}")
-            return baseline
+            for mode, score in unsteered.items():
+                print(f"  Unsteered {mode.upper()}: {score:.4f}")
+            return unsteered
         print(
-            "  (No cached baseline — run baseline experiment first for comparison)"
+            "  (No cached unsteered — run unsteered experiment first for comparison)"
         )
         return {}
 
@@ -259,15 +259,15 @@ class Experiment(abc.ABC):
         for mode, score in metrics.items():
             print(f"  {mode.upper()}: {score:.4f}")
 
-        # ── Baseline comparison ───────────────────────────────
-        baseline_metrics = self._lookup_baseline_metrics(cache_info)
+        # ── Unsteered comparison ──────────────────────────────
+        unsteered_metrics = self._lookup_unsteered_metrics(cache_info)
 
         # ── Summary ───────────────────────────────────────────
         summary: dict[str, Any] = {
             "task": self.task.task_name,
             "method": self.config.method,
             "metrics": metrics,
-            "baseline_metrics": baseline_metrics,
+            "unsteered_metrics": unsteered_metrics,
             "artifacts": artifacts,
             "cache_info": cache_info,
             "config": OmegaConf.to_container(self.config, resolve=True),

@@ -17,9 +17,9 @@ PLOTS_DIR = Path("plots")
 RESULTS_PATH = PLOTS_DIR / "comparison_results.json"
 
 METRICS = ["mc0", "mc1", "mc2"]
-METHODS = ["baseline", "dense", "sparse"]
-COLORS = {"baseline": "#9e9e9e", "dense": "#4285f4", "sparse": "#f4a142"}
-LABELS = {"baseline": "Baseline", "dense": "Dense", "sparse": "Sparse"}
+METHODS = ["unsteered", "dense", "sparse"]
+COLORS = {"unsteered": "#9e9e9e", "dense": "#4285f4", "sparse": "#f4a142"}
+LABELS = {"unsteered": "Unsteered", "dense": "Dense", "sparse": "Sparse"}
 
 
 def main() -> None:
@@ -41,8 +41,8 @@ def main() -> None:
             group_center = g * total_group
 
             for m, method in enumerate(METHODS):
-                if method == "baseline":
-                    val = model_data["baseline"][metric]
+                if method == "unsteered":
+                    val = model_data["unsteered"][metric]
                 else:
                     val = model_data[method][metric]
 

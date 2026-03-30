@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Plot mc0/mc1/mc2 across the 4 steering methods + baseline."""
+"""Plot mc0/mc1/mc2 across the 4 steering methods + unsteered."""
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-methods = ["baseline", "dense", "scale_only", "gates_only", "sparse"]
+methods = ["unsteered", "dense", "scale_only", "gates_only", "sparse"]
 labels = [
-    "Baseline\n(no steering)",
+    "Unsteered\n(no steering)",
     "Dense\n(fixed scale,\nno gates)",
     "Scale Only\n(learned scale,\nno gates)",
     "Gates Only\n(fixed scale,\nlearned gates)",
@@ -32,7 +32,7 @@ for ax, (metric_name, values) in zip(axes, metrics.items()):
     ax.set_xticklabels(labels, fontsize=8)
     ax.set_ylabel("Score")
 
-    # baseline reference line
+    # unsteered reference line
     ax.axhline(y=values[0], color="#9e9e9e", linestyle="--", alpha=0.5, linewidth=1)
 
     # value labels on bars

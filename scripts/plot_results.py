@@ -44,8 +44,8 @@ def load_runs() -> list[dict]:
 
 
 def plot_eval_and_delta(runs: list[dict]) -> None:
-    """Combined figure: baseline vs steered bar chart + steering delta bar chart."""
-    runs_with_eval = [r for r in runs if r.get("metrics") and r.get("baseline_metrics")]
+    """Combined figure: unsteered vs steered bar chart + steering delta bar chart."""
+    runs_with_eval = [r for r in runs if r.get("metrics") and r.get("unsteered_metrics")]
     if not runs_with_eval:
         print("No runs with eval results found.")
         return
@@ -56,19 +56,19 @@ def plot_eval_and_delta(runs: list[dict]) -> None:
 
     fig, (ax_eval, ax_delta) = plt.subplots(1, 2, figsize=(14, 5))
 
-    # --- Left panel: baseline vs steered ---
+    # --- Left panel: unsteered vs steered ---
     width_eval = 0.8 / (n_runs * 2)
     for i, run in enumerate(runs_with_eval):
-        baseline = [run["baseline_metrics"].get(m, 0) for m in metrics]
+        unsteered = [run["unsteered_metrics"].get(m, 0) for m in metrics]
         steered = [run["metrics"].get(m, 0) for m in metrics]
         offset_base = (i * 2) * width_eval - (n_runs * width_eval) + width_eval / 2
         offset_steer = (i * 2 + 1) * width_eval - (n_runs * width_eval) + width_eval / 2
 
         bars_b = ax_eval.bar(
             x + offset_base,
-            baseline,
+            unsteered,
             width_eval,
-            label=f"{run['label']} baseline",
+            label=f"{run['label']} unsteered",
             alpha=0.5,
             edgecolor="black",
             linewidth=0.5,
@@ -93,7 +93,7 @@ def plot_eval_and_delta(runs: list[dict]) -> None:
             )
 
     ax_eval.set_ylabel("Score")
-    ax_eval.set_title("TruthfulQA: Baseline vs Steered")
+    ax_eval.set_title("TruthfulQA: Unsteered vs Steered")
     ax_eval.set_xticks(x)
     ax_eval.set_xticklabels([m.upper() for m in metrics])
     ax_eval.legend(fontsize=7, loc="upper left", bbox_to_anchor=(0, -0.15), ncol=2)
@@ -104,7 +104,7 @@ def plot_eval_and_delta(runs: list[dict]) -> None:
     width_delta = 0.8 / n_runs
     for i, run in enumerate(runs_with_eval):
         deltas = [
-            run["metrics"].get(m, 0) - run["baseline_metrics"].get(m, 0)
+            run["metrics"].get(m, 0) - run["unsteered_metrics"].get(m, 0)
             for m in metrics
         ]
         offset = i * width_delta - (n_runs * width_delta) / 2 + width_delta / 2
@@ -129,7 +129,7 @@ def plot_eval_and_delta(runs: list[dict]) -> None:
             )
 
     ax_delta.axhline(0, color="black", linewidth=0.8)
-    ax_delta.set_ylabel("Delta (steered - baseline)")
+    ax_delta.set_ylabel("Delta (steered - unsteered)")
     ax_delta.set_title("TruthfulQA: Steering Effect")
     ax_delta.set_xticks(x)
     ax_delta.set_xticklabels([m.upper() for m in metrics])

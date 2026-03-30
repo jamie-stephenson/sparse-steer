@@ -8,15 +8,15 @@ import hydra
 from omegaconf import DictConfig
 
 from sparse_steer.experiment import (
-    BaselineExperiment,
     LoraExperiment,
     SteeringExperiment,
+    UnsteeredExperiment,
 )
 from sparse_steer.experiment.base import Experiment, TaskSpec
 from sparse_steer.tasks.truthfulqa.task import TruthfulQATask
 
 METHODS: dict[str, type[Experiment]] = {
-    "baseline": BaselineExperiment,
+    "unsteered": UnsteeredExperiment,
     "dense": SteeringExperiment,
     "sparse": SteeringExperiment,
     "scale_only": SteeringExperiment,

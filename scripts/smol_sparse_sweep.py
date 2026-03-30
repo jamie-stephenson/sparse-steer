@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Sweep sparse steering hparams for SmolLM2-135M.
 
-Each run ~1.5 min (steering vectors + baseline cached), so ~15 runs in 30 min.
+Each run ~1.5 min (steering vectors + unsteered cached), so ~15 runs in 30 min.
 """
 
 import itertools
@@ -72,13 +72,13 @@ def main() -> None:
             l0_warmup_steps=warmup,
         )
         summary = SparseExperiment(config, task).run()
-        b = summary.get("baseline_metrics", {})
+        b = summary.get("unsteered_metrics", {})
         s = summary["metrics"]
         row = {
             "l0_lambda": l0,
             "learning_rate": lr,
             "l0_warmup_steps": warmup,
-            **{f"baseline_{k}": v for k, v in b.items()},
+            **{f"unsteered_{k}": v for k, v in b.items()},
             **{f"steered_{k}": v for k, v in s.items()},
             "mc1_delta": s["mc1"] - b["mc1"],
         }

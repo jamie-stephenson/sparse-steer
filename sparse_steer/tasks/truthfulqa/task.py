@@ -73,7 +73,7 @@ class TruthfulQATask:
             if artifact_type == ArtifactType.STEERED_EVAL:
                 fields["generative_eval"] = config.get("generative_eval", False)
             return fields
-        if artifact_type == ArtifactType.BASELINE_EVAL:
+        if artifact_type == ArtifactType.UNSTEERED_EVAL:
             return {
                 "generative_eval": config.get("generative_eval", False),
             }
@@ -88,7 +88,7 @@ class TruthfulQATask:
     def cache_source_files(self, artifact_type: ArtifactType) -> list[str]:
         files = ["sparse_steer/tasks/truthfulqa/data.py"]
         if artifact_type in (
-            ArtifactType.BASELINE_EVAL,
+            ArtifactType.UNSTEERED_EVAL,
             ArtifactType.STEERED_EVAL,
         ):
             files.append("sparse_steer/tasks/truthfulqa/eval.py")

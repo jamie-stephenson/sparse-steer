@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the full comparison: baseline / dense / sparse × Qwen / SmolLM.
+"""Run the full comparison: unsteered / dense / sparse x Qwen / SmolLM.
 
 Produces plots/comparison_results.json consumed by plot_comparison.py.
 All experiments use use_cache=True, so repeated runs are fast.
@@ -102,7 +102,7 @@ def main() -> None:
             ),
         )
 
-        baseline = dense_summary.get("baseline_metrics", {})
+        unsteered = dense_summary.get("unsteered_metrics", {})
 
         # ── Sparse ──
         sparse_kwargs = {**SHARED, **SPARSE_SHARED, **spec["sparse"]}
@@ -116,7 +116,7 @@ def main() -> None:
 
         results[label] = {
             "model_name": model_name,
-            "baseline": baseline,
+            "unsteered": unsteered,
             "dense": {
                 **dense_summary["metrics"],
                 "init_log_scale": spec["dense_init_log_scale"],

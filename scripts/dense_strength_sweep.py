@@ -132,13 +132,13 @@ def main():
 
     model.set_all_vectors(vectors, normalize=False)
 
-    # ── Baseline (steering disabled) ──
+    # ── Unsteered (steering disabled) ──
     model.eval()
-    print("Evaluating baseline (no steering)...")
+    print("Evaluating unsteered (no steering)...")
     with model.steering_disabled(), torch.no_grad():
-        baseline = evaluate(model, tokenizer, eval_ds)
+        unsteered = evaluate(model, tokenizer, eval_ds)
     print(
-        f"  Baseline MC0={baseline['mc0']:.4f}  MC1={baseline['mc1']:.4f}  MC2={baseline['mc2']:.4f}"
+        f"  Unsteered MC0={unsteered['mc0']:.4f}  MC1={unsteered['mc1']:.4f}  MC2={unsteered['mc2']:.4f}"
     )
 
     # ── Sweep ──
@@ -158,9 +158,9 @@ def main():
             "mc0": metrics["mc0"],
             "mc1": metrics["mc1"],
             "mc2": metrics["mc2"],
-            "mc0_delta": metrics["mc0"] - baseline["mc0"],
-            "mc1_delta": metrics["mc1"] - baseline["mc1"],
-            "mc2_delta": metrics["mc2"] - baseline["mc2"],
+            "mc0_delta": metrics["mc0"] - unsteered["mc0"],
+            "mc1_delta": metrics["mc1"] - unsteered["mc1"],
+            "mc2_delta": metrics["mc2"] - unsteered["mc2"],
         }
         results.append(row)
         print(
@@ -171,7 +171,7 @@ def main():
     # ── Save ──
     out = {
         "model": model_name,
-        "baseline": baseline,
+        "unsteered": unsteered,
         "strengths": results,
     }
     out_path = run_dir / "dense_sweep_results.json"

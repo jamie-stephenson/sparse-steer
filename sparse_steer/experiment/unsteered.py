@@ -11,8 +11,8 @@ from ..utils.cache import ArtifactType
 from .base import Experiment
 
 
-class BaselineExperiment(Experiment):
-    _eval_artifact_type = ArtifactType.BASELINE_EVAL
+class UnsteeredExperiment(Experiment):
+    _eval_artifact_type = ArtifactType.UNSTEERED_EVAL
 
     def _load_model(self) -> PreTrainedModel:
         return AutoModelForCausalLM.from_pretrained(
@@ -30,4 +30,4 @@ class BaselineExperiment(Experiment):
         return model, {}, {}
 
 
-__all__ = ["BaselineExperiment"]
+__all__ = ["UnsteeredExperiment"]
