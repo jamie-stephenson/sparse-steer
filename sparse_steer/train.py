@@ -121,7 +121,7 @@ def _init_wandb() -> None:
     if not api_key:
         raise RuntimeError("WANDB_API_KEY not set in environment or .env file")
 
-    os.environ["WANDB_LOG_MODEL"] = "end"
+    os.environ["WANDB_LOG_MODEL"] = "false"
     wandb.login(key=api_key)
     wandb.init(
         project=os.environ.get("WANDB_PROJECT", "sparse-steer"),

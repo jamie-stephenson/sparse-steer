@@ -1,0 +1,26 @@
+# @package _global_
+# Single learned scale shared across all heads, no gates.
+method: shared_scale_only
+steering_layer_ids: null
+extract_batch_size: 8
+token_position: last
+targets: [attention]
+normalize_steering_vectors: false
+
+learn_scale: false
+shared_scale: true
+init_log_scale: 0.0
+
+l0_scheduler_type: none
+l0_warmup_steps: 0
+l0_lambda: 0.0
+learning_rate: 1.5e-2
+lr_scheduler_type: cosine
+lr_warmup_steps: 5
+num_epochs: 2
+train_batch_size: 8
+weight_decay: 0.01
+logging_steps: 1
+save_strategy: "no"
+freeze_log_scale: false
+track_gates: true

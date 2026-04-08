@@ -54,6 +54,9 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "steering_layer_ids",
         # training-specific
         "normalize_steering_vectors",
+        "learn_scale",
+        "shared_scale",
+        "init_log_scale",
         "l0_scheduler_type",
         "l0_warmup_steps",
         "l0_lambda",
@@ -102,6 +105,9 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "steering_layer_ids",
         "normalize_steering_vectors",
         # sparse training fields (None for non-sparse methods)
+        "learn_scale",
+        "shared_scale",
+        "init_log_scale",
         "l0_scheduler_type",
         "l0_warmup_steps",
         "l0_lambda",

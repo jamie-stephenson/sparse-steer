@@ -102,10 +102,23 @@ class GateTracker(TrainerCallback):
         self._snapshot(state.global_step)
         if self.use_wandb:
             import wandb
+            import torch.nn.functional as F
+
+            log_dict = {}
 
             fig = _build_heatmap_figure(self.snapshots)
-            wandb.log({"gate_heatmap": wandb.Image(fig)}, step=state.global_step)
+            log_dict["gate_heatmap"] = wandb.Image(fig)
             plt.close(fig)
+
+            # Log shared scale parameter if present
+            all_hooks = self._attn_hooks + self._mlp_hooks
+            if all_hooks:
+                hook = all_hooks[0][1]
+                if hook._shared_log_scale is not None:
+                    log_dict["scale/raw_param"] = hook._shared_log_scale.item()
+                    log_dict["scale/effective"] = F.softplus(hook._shared_log_scale).item()
+
+            wandb.log(log_dict, step=state.global_step)
 
     def on_train_end(self, args, state, control, **kwargs):
         self._snapshot(state.global_step)

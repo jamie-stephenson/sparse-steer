@@ -20,6 +20,7 @@ METHODS: dict[str, type[Experiment]] = {
     "dense": SteeringExperiment,
     "sparse": SteeringExperiment,
     "scale_only": SteeringExperiment,
+    "shared_scale_only": SteeringExperiment,
     "gates_only": SteeringExperiment,
     "lora": LoraExperiment,
 }

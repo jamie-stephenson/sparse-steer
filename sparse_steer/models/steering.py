@@ -38,6 +38,9 @@ class SteeringLM(BaseModelLayout):
         self.steering_components = steering_components
 
         if shared_scale:
+            # This parameter is shared by reference across all SteeringHooks,
+            # which means save_pretrained will fail (shared tensors not in
+            # _tied_weights_keys). Use save_steering/load_steering instead.
             self._shared_log_scale = nn.Parameter(
                 torch.full((1,), init_log_scale)
             )
