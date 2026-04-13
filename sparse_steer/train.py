@@ -176,7 +176,7 @@ def train_steering(
         save_strategy=config.save_strategy,
         eval_strategy="epoch" if eval_dataset is not None else "no",
         report_to="wandb" if config.use_wandb else "none",
-        fp16=model.device.type == "cuda",
+        bf16=model.device.type == "cuda",
         remove_unused_columns=False,
     )
 
@@ -224,7 +224,7 @@ def train_steering(
             logging_steps=config.logging_steps,
             save_strategy="no",
             report_to="wandb" if config.use_wandb else "none",
-            fp16=model.device.type == "cuda",
+            bf16=model.device.type == "cuda",
             remove_unused_columns=False,
         )
         scale_tuning_trainer = Trainer(
@@ -283,7 +283,7 @@ def train_lora(
         save_strategy=config.save_strategy,
         eval_strategy="epoch" if eval_dataset is not None else "no",
         report_to="wandb" if config.use_wandb else "none",
-        fp16=model.device.type == "cuda",
+        bf16=model.device.type == "cuda",
         remove_unused_columns=False,
     )
 
