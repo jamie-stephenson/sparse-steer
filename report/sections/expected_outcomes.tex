@@ -1,0 +1,10 @@
+%-------------------- Expected Outcomes --------------------------
+\subsection{Expected Outcomes}\label{sec:expected-outcomes}
+
+The anticipated outcomes of this project are:
+
+\begin{enumerate}
+    \item \textbf{Open-source codebase.} A modular framework (already substantially implemented) for contrastive steering vector extraction, HardConcrete gate training, and evaluation, built on Hugging Face Transformers.
+
+    \item \textbf{Systematic comparison to baselines.} Quantitative results comparing sparse steering against various baselines, including: (a)~hand-tuned contrastive steering approaches such as CAA and ITI, (b)~JoLA-style fully learned additive edits, (c)~LoRA, and (d)~ablated variants of our method: \emph{dense} (contrastive vectors at every head with a fixed scale and no gates), \emph{gates-only} (gates but no learned scale), and \emph{scale-only} (learned per-head scales but no gates). I will compare along the axes described in Section~\ref{sec:evaluation-criteria}.
+\end{enumerate}

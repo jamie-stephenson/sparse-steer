@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import shutil
 from pathlib import Path
 from typing import Any
@@ -9,7 +7,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
 from ..utils.cache import ArtifactType
 from .base import Experiment
-from ._steering_common import load_steering_model, run_extraction
+from ._common import load_steering_model, run_extraction
 
 
 class SteeringExperiment(Experiment):
@@ -61,7 +59,8 @@ class SteeringExperiment(Experiment):
         if model.has_learnable_steering:
             print("Training steering parameters...")
             train_steering(
-                model, tokenizer, train_ds, self.config, output_dir=output_dir
+                model, tokenizer, train_ds, self.config, output_dir=output_dir,
+                task=self.task,
             )
 
             ss_dest = self._prepare_cache_path(ArtifactType.SPARSE_STEERING)

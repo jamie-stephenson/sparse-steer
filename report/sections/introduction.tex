@@ -1,0 +1,23 @@
+%==========================================================
+\section{Introduction}
+
+As large language models (LLMs) are deployed in increasingly diverse settings, the ability to control their behaviour cheaply and reliably becomes critical.
+A common family of lightweight interventions works by \textbf{adding steering vectors to model activations} at inference time, bypassing the cost of full fine-tuning.
+Methods in this family differ primarily in \emph{how} the steering vector is obtained.
+
+\textbf{Contrastive} approaches compute a steering direction as the mean-difference between activations on paired examples of desired versus undesired behaviour, requiring no gradient-based training~\cite{turner2025actadd,rimsky2024caa}.
+The approach is simple: a single vector, applied at a chosen layer of the model's residual stream, can shift coarse behaviours such as sycophancy~\cite{rimsky2024caa}, or refusal~\cite{arditi2024refusal}.
+However, the choice of \emph{where} and \emph{how strongly} to steer is typically made by hand, and recent work has shown that steering can be brittle across models and evaluation settings, sometimes degrading performance rather than improving it~\cite{dasilva2025steering}.
+
+\textbf{Learned} approaches instead treat the steering vector as a trainable parameter optimised on a downstream loss. Joint Localization and Activation Editing (JoLA)~\cite{lai2025jola} is a recent representative: it jointly learns the additive steering vectors (JoLA in particular also supports multiplicative edits) and \emph{where} to apply these edits, using HardConcrete gates~\cite{louizos2018hardconcrete} to obtain sparse, differentiable localisation. JoLA itself focuses only on editing the output of attention heads, but in principle can be applied to all parts of the model. JoLA outperforms earlier activation-editing methods and several parameter-efficient alternatives, but it requires learning the edit vectors themselves, one per selected head.
+
+\textbf{Dictionary learning-based} approaches extract steering directions from sparse autoencoder (SAE) features, identifying interpretable latent directions that can be clamped or amplified to steer behaviour~\cite{templeton2024scaling}. These benefit from the monosemanticity of SAE features but depend on the availability and quality of a pretrained SAE for the target model.
+
+This project proposes \textbf{sparse activation steering}, a hybrid that uses \emph{contrastive} directions but learns \emph{where} and \emph{how much} to apply them, borrowing the sparse localisation machinery of JoLA. Instead of learning edit vectors, we fix per-head steering directions from contrastive data and learn only HardConcrete gates plus per-head scale parameters. The result is a method that decides \emph{where} and \emph{how much} to steer via gradient descent while keeping the steering directions themselves parameter-free.
+
+Our central research questions are:
+\begin{enumerate}
+    \item Can fixed contrastive steering vectors with learned sparse gates match or approach JoLA on low-resource tasks while learning only scalars per head rather than full edit vectors?
+    \item Does learned localisation reduce the hyperparameter sensitivity of purely hand-tuned contrastive steering?
+    \item Which heads and layers are selected by the gates, and how does this compare with known head specialisation and with JoLA's localisation patterns?
+\end{enumerate}

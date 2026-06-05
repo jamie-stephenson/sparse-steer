@@ -1,0 +1,8 @@
+%-------------------- Preliminary Results --------------------------
+\subsection{Preliminary Results}\label{sec:preliminary-results}
+
+I have run initial experiments on TruthfulQA~\cite{lin2022truthfulqa} with Qwen2.5-0.5B-Instruct~\cite{qwen2025qwen25}, comparing all eight methods on both multiple-choice and generative evaluation (full details in Appendix~\ref{app:preliminary-results}).
+
+Sparse steering achieves the largest MC2 gain (0.515 vs.\ 0.357 baseline), but generative evaluation reveals this is misleading: the model collapses to whitespace output, scoring as vacuously truthful but completely uninformative. Length bias analysis shows that 96.6\% of the model's highest-probability answers are the shortest option, compared with 40\textendash44\% for all other methods.
+
+Two issues drive this result. First, fine-tuning on TruthfulQA exposes the model to the benchmark's known short-answer bias~\cite{turntrout2025truthfulqa}, which sparse steering exploits far more effectively than the less expressive baselines. Second, the technique itself may be too invasive under the current hyperparameter setup, with some heads learning very large edits. Addressing both issues is a primary focus of the ongoing work.

@@ -1,0 +1,93 @@
+%-------------------- Research Plan --------------------------
+\section{Research Plan, Milestones, and Deliverables}
+\textit{This section does not count towards the page limit.}
+
+The dissertation period runs for approximately 11 weeks (June--August 2026).
+The core codebase (steering vector extraction, HardConcrete gate training, TruthfulQA evaluation, and all baselines) has already been implemented.
+Preliminary results (Section~\ref{sec:preliminary-results}) have revealed an output collapse problem and a length bias confound in the MC evaluation, both of which inform the remaining work plan.
+
+\textbf{WP1: Diagnose and address output collapse (Weeks 1--3).}
+Investigate why sparse steering collapses to whitespace on TruthfulQA. Explore scale regularisation, gradient clipping, alternative training objectives, and whether one of the ablated variants (e.g.\ scale-only) avoids the issue. Establish whether the problem is specific to TruthfulQA's training data or fundamental to the technique.
+\emph{Dependency: none.}
+
+\textbf{WP2: Expand evaluation suite (Weeks 2--4).}
+Finalise the benchmark selection beyond TruthfulQA. Implement evaluation pipelines for candidate tasks (e.g.\ hh-rlhf, JoLA NLU/NLG tasks). Prioritise generative evaluation as the primary success criterion.
+\emph{Dependency: none; can run in parallel with WP1.}
+
+\textbf{WP3: Core experiments (Weeks 4--7).}
+Run the full comparison across benchmarks: sparse steering versus CAA, ITI, dense, gates-only, scale-only, JoLA, and LoRA. Evaluate along all axes in Section~\ref{sec:evaluation-criteria}: task performance, ablations, parameter efficiency, data efficiency, and robustness across seeds.
+\emph{Dependency: WP1 (collapse addressed or understood), WP2 (benchmarks ready).}
+
+\textbf{WP4: Analysis and writing (Weeks 6--11).}
+Conduct localisation analysis (gate pattern visualisations, comparison with JoLA/ITI/REAL head selections). Write dissertation chapters. A first complete draft is targeted by Week 9, with two weeks for revision.
+\emph{Dependency: WP3 for core results}
+
+\textbf{Meetings.} I suggest weekly 30-minute meetings with Prof.~Titov throughout, with additional ad-hoc check-ins as needed.
+
+\textbf{Resources.} Development hardware: personal laptop.
+University cluster access for experiments on larger models once setups are validated.
+All datasets and model weights are publicly available via Hugging Face.
+
+\begin{figure}[htbp]
+\centering
+\begin{ganttchart}[
+    y unit title=0.4cm,
+    y unit chart=0.5cm,
+    vgrid,hgrid,
+    x unit=1.4mm,
+    time slot format=isodate,
+    title/.append style={draw=none, fill=accentblue},
+    title label font=\sffamily\bfseries\color{white},
+    bar/.append style={draw=none, fill=mainblue},
+    bar height=.6,
+    bar label font=\small\color{black!50},
+    progress label text={}
+]{2026-06-01}{2026-08-14}
+   \gantttitlecalendar{month=name}\\
+   \ganttbar[progress=0]{WP1: Diagnose collapse}{2026-06-01}{2026-06-19} \\
+   \ganttbar[progress=0]{WP2: Expand eval suite}{2026-06-08}{2026-06-26} \\
+   \ganttbar[progress=0]{WP3: Core experiments}{2026-06-22}{2026-07-17} \\
+   \ganttbar[progress=0]{WP4: Analysis \& writing}{2026-06-29}{2026-08-14} \\
+   \ganttmilestone{$M_1$: Collapse understood}{2026-06-19} \\
+   \ganttmilestone{$M_2$: Benchmarks ready}{2026-06-26} \\
+   \ganttmilestone{$M_3$: Core results}{2026-07-17} \\
+   \ganttmilestone{$M_4$: First draft}{2026-07-31} \\
+   \ganttmilestone{$M_5$: Submission}{2026-08-14}
+\end{ganttchart}
+\caption{Gantt chart of project activities (June--August 2026).}
+\label{fig:gantt}
+\end{figure}
+
+%-------------------- Milestones -------------------------
+\begin{table}[htbp]
+\centering
+\begin{tabular}{@{}ccp{8cm}@{}}
+\toprule
+\textbf{Milestone} & \textbf{Week} & \textbf{Description} \\
+\midrule
+$M_1$ & 3  & Output collapse diagnosed; mitigation strategy established or negative result documented \\
+$M_2$ & 4  & Evaluation suite finalised and pipelines implemented for all benchmarks \\
+$M_3$ & 7  & Core experiments complete across all benchmarks and baselines \\
+$M_4$ & 9  & First complete dissertation draft \\
+$M_5$ & 11 & Final submission \\
+\bottomrule
+\end{tabular}
+\caption{Project milestones.}
+\label{tab:milestones}
+\end{table}
+
+%-------------------- Deliverables -----------------------
+\begin{table}[htbp]
+\centering
+\begin{tabular}{@{}ccp{8cm}@{}}
+\toprule
+\textbf{Deliverable} & \textbf{Week} & \textbf{Description} \\
+\midrule
+$D_1$ & 4  & Open-source codebase with all methods, benchmarks, and evaluation pipelines \\
+$D_2$ & 8  & Experimental results: comparison tables, gate visualisations, ablation plots, generative eval outputs \\
+$D_3$ & 11 & Completed M.Sc.\ dissertation \\
+\bottomrule
+\end{tabular}
+\caption{Project deliverables.}
+\label{tab:deliverables}
+\end{table}

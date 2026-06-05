@@ -1,0 +1,43 @@
+%-------------------- State of the Art --------------------------
+\section{State of the Art}
+
+Both ``steering'' and ``fine-tuning'' are used broadly in the literature to describe techniques for adjusting model behaviour, but they have a key distinction. \emph{Steering} tends to refer to inference-time interventions that modify a model's internal activations without updating its weights. \emph{Fine-tuning} refers to updating model parameters via gradient descent. The method proposed here sits between the two: it trains a small number of parameters, but those parameters control an activation-level intervention (like steering). We use the term \emph{activation steering} throughout to reflect that the intervention acts on activations, even though the localisation and scaling are learned.
+
+\subsection{Contrastive Activation Steering}
+
+Activation Addition (ActAdd)~\cite{turner2025actadd} is an example of activation steering that extracts per-token position steering vectors from the residual stream using as little as a single pair of contrastive prompts and applies them across a given input (i.e. the first step of generation, also know as ``prefill'') at a fixed layer of the residual stream, demonstrating control over coarse attributes such as topic and sentiment.
+Contrastive Activation Addition (CAA)~\cite{rimsky2024caa} instead extracts contrastive steering vectors from a single token position and applies it across every step of generation, yielding robust behavioural shifts for sycophancy, corrigibility, and hallucination.
+
+Arditi et al.~\cite{arditi2024refusal} use an approach similar to CAA to identify a single ``refusal direction'' in the residual stream and show that adding it to one layer or \emph{ablating} it from \emph{every} layer across every step of generation can reliably elicit or suppress refusal. Follow-up work from Zhao et al.~\cite{zhao2025harmfulness} extracts a \emph{harmfulness} direction and a \emph{refusal} direction from two distinct token positions and applies them instead only to the prefill stage. Their ``reply inversion'' experiment shows that these directions have decoupled behavioral effects, demonstrating that careful choice of extraction technique can yield more conceptually clean steering vectors than the single direction identified by Arditi et al., which conflated the two concepts.
+
+Other work refines where contrastive vectors are applied.
+Inference-Time Intervention (ITI)~\cite{li2024iti} uses linear probes to select a sparse subset of attention heads for intervention, steering only those heads at the final prompt token.
+Function Vectors~\cite{todd2024functionvectors} similarly identify task-relevant heads via activation patching, extracting and applying per-head vectors to induce in-context-learning behaviour without any few-shot examples.
+REAL~\cite{zhan2026real} selects heads using a vector-quantised autoencoder.
+
+A common thread is that \emph{where} to steer matters greatly, yet localisation is either restricted to coarse layer sweeps or performed via analysis of the \emph{unperturbed} model (e.g.\ ITI trains probes on the model's natural head activations). While selecting ``important'' heads from the base model is a reasonable approach, it could well be answering a subtly different question to ``which heads respond best to steering?''
+This motivates methods that learn localisation \emph{end-to-end}, closing the loop between where to steer and how well the steering works.
+More broadly, a recent large-scale evaluation by Da Silva et al.~\cite{dasilva2025steering} found that many published steering vectors fail to generalise reliably across models and prompt formats, and that careless application can degrade performance. No single method has emerged as dominant, and the field remains an open landscape of tradeoffs between simplicity, expressiveness, and robustness.
+
+\subsection{Learned Activation Editing and Parameter-Efficient Fine-Tuning}
+
+Parameter-efficient fine-tuning (PEFT) methods adapt large models with minimal trainable parameters.
+LoRA~\cite{hu2022lora} is the dominant parameter-based approach, adding low-rank updates to weight matrices.
+Activation-based PEFT methods intervene on hidden states instead: Representation Finetuning (ReFT)~\cite{wu2024reft} learns low-rank edits to hidden representations at specific token positions and layers.
+
+JoLA~\cite{lai2025jola} extends the activation-editing paradigm with principled localisation.
+For each attention head, it learns additive and multiplicative edit vectors gated by HardConcrete samples~\cite{louizos2018hardconcrete}.
+Training with an expected-$L_0$ penalty encourages most gates to collapse to zero, yielding a sparse set of edited heads.
+At test time, low-expectation gates are dropped and the remaining gates are frozen at their expectations, producing deterministic edits.
+JoLA outperforms LoRA and other PEFT baselines on several low-resource NLU and NLG benchmarks, while learning on the order of a hundred parameters per task.
+
+However, JoLA still learns the edit vectors themselves.
+For tasks where good steering vectors are more cheaply accessible, this may be unnecessary. For example, contrastive steering vectors can often be determined from small amounts data, leaving only the selection and scaling of that direction needs to be learned.
+
+\subsection[HardConcrete Gates and L0 Regularisation]{HardConcrete Gates and $L_0$ Regularisation}
+
+Both JoLA and the method proposed in this project use HardConcrete gates~\cite{louizos2018hardconcrete} for differentiable sparse localisation.
+The HardConcrete distribution is a reparameterisable relaxation of the Bernoulli distribution that, crucially, places point masses at exactly 0 and 1, so gates can be truly ``off'' during training while remaining differentiable.
+The gates are input-independent: each gate has a single learned location parameter $\log\alpha$ that determines a fixed activation probability, so the sparsity pattern is a property of the task, not of individual inputs.
+Making the gates stochastic during training serves two purposes: it enables reparameterised gradient estimates through the discrete on/off decision, since gate samples are a differentiable function of $\log\alpha$ and uniform noise (see Section~3.1), and it yields a closed-form $L_0$ penalty on the expected number of active gates.
+Together, these allow the model to select a sparse subset of intervention sites via standard gradient descent.

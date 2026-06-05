@@ -1,15 +1,18 @@
 from typing import Any
 
+import torch.nn.functional as F
 from datasets import Dataset, DatasetDict
 from omegaconf import DictConfig
+from torch import Tensor
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
+from ..base import TaskSpec
 from ...utils.cache import ArtifactType
 from .data import get_truthfulqa_datasets
 from .eval import evaluate, evaluate_generative
 
 
-class TruthfulQATask:
+class TruthfulQATask(TaskSpec):
     @property
     def task_name(self) -> str:
         return "truthfulqa"
@@ -46,6 +49,15 @@ class TruthfulQATask:
             )
             metrics.update(gen_metrics)
         return metrics
+
+    def loss(self, model, batch: dict[str, Tensor], logits: Tensor) -> Tensor:
+        """Next-token cross-entropy over the (default-collated) ``text`` rows."""
+        shift_logits = logits[..., :-1, :].float()
+        return F.cross_entropy(
+            shift_logits.reshape(-1, shift_logits.size(-1)),
+            batch["labels"][..., 1:].reshape(-1),
+            ignore_index=-100,
+        )
 
     def extra_cache_fields(
         self,
@@ -88,10 +100,17 @@ class TruthfulQATask:
     def cache_source_files(self, artifact_type: ArtifactType) -> list[str]:
         files = ["sparse_steer/tasks/truthfulqa/data.py"]
         if artifact_type in (
+            ArtifactType.SPARSE_STEERING,
+            ArtifactType.STEERED_EVAL,
+        ):
+            # the training objective (loss) lives here
+            files.append("sparse_steer/tasks/truthfulqa/task.py")
+        if artifact_type in (
             ArtifactType.UNSTEERED_EVAL,
             ArtifactType.STEERED_EVAL,
         ):
             files.append("sparse_steer/tasks/truthfulqa/eval.py")
+            files.append("sparse_steer/generate.py")
         return files
 
 

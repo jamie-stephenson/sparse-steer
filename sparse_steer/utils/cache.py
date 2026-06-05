@@ -1,7 +1,5 @@
 """Artifact caching with staleness detection for the sparse-steering pipeline."""
 
-from __future__ import annotations
-
 import hashlib
 import json
 import subprocess
@@ -10,10 +8,9 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from omegaconf import DictConfig
+from omegaconf import DictConfig, ListConfig
 
 # ── Cache root ────────────────────────────────────────────────────────
 
@@ -56,7 +53,7 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "normalize_steering_vectors",
         "learn_scale",
         "shared_scale",
-        "init_log_scale",
+        "init_raw_scale",
         "l0_scheduler_type",
         "l0_warmup_steps",
         "l0_lambda",
@@ -66,7 +63,7 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "num_epochs",
         "train_batch_size",
         "weight_decay",
-        "freeze_log_scale",
+        "freeze_raw_scale",
         "gate_config",
     ],
     ArtifactType.UNSTEERED_EVAL: [
@@ -107,7 +104,7 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         # sparse training fields (None for non-sparse methods)
         "learn_scale",
         "shared_scale",
-        "init_log_scale",
+        "init_raw_scale",
         "l0_scheduler_type",
         "l0_warmup_steps",
         "l0_lambda",
@@ -117,7 +114,7 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "num_epochs",
         "train_batch_size",
         "weight_decay",
-        "freeze_log_scale",
+        "freeze_raw_scale",
         "gate_config",
         # lora fields (None for non-lora methods)
         "lora_rank",
@@ -132,14 +129,12 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
 _SOURCE_FILES: dict[ArtifactType, list[str]] = {
     ArtifactType.STEERING_VECTORS: [
         "sparse_steer/extract.py",
-        "sparse_steer/models/base.py",
+        "sparse_steer/steering.py",
     ],
     ArtifactType.SPARSE_STEERING: [
         "sparse_steer/extract.py",
-        "sparse_steer/models/base.py",
+        "sparse_steer/steering.py",
         "sparse_steer/train.py",
-        "sparse_steer/hardconcrete.py",
-        "sparse_steer/models/sparse.py",
     ],
     ArtifactType.PEFT_ADAPTER: [
         "sparse_steer/train.py",
@@ -149,10 +144,8 @@ _SOURCE_FILES: dict[ArtifactType, list[str]] = {
     ],
     ArtifactType.STEERED_EVAL: [
         "sparse_steer/extract.py",
-        "sparse_steer/models/base.py",
+        "sparse_steer/steering.py",
         "sparse_steer/train.py",
-        "sparse_steer/hardconcrete.py",
-        "sparse_steer/models/sparse.py",
         "sparse_steer/utils/eval.py",
     ],
 }
@@ -185,7 +178,7 @@ class CacheManifest:
         path.write_text(json.dumps(asdict(self), indent=2))
 
     @classmethod
-    def load(cls, path: Path) -> CacheManifest:
+    def load(cls, path: Path) -> "CacheManifest":
         return cls(**json.loads(path.read_text()))
 
 
@@ -201,8 +194,6 @@ class CacheHit:
 
 def _normalize_for_hash(value: Any) -> Any:
     """Normalize values for deterministic JSON serialisation."""
-    from omegaconf import DictConfig, ListConfig
-
     if isinstance(value, (DictConfig, dict)):
         return {k: _normalize_for_hash(v) for k, v in sorted(value.items())}
     if isinstance(value, (ListConfig, list)):

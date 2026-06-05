@@ -1,3 +1,4 @@
+import warnings
 from typing import Any
 from typing import Literal
 
@@ -112,8 +113,6 @@ def format_train_dataset(
     mc2: all correct answers per question (there may be more than one).
     Each row has: text (templated Q+A), question_id (int).
     """
-    import warnings
-
     if mcq_mode == "mc0":
         warnings.warn(
             "mcq_mode='mc0' is identical to 'mc1' for gate training: both have "

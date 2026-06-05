@@ -12,12 +12,15 @@ from sparse_steer.experiment import (
     SteeringExperiment,
     UnsteeredExperiment,
 )
-from sparse_steer.experiment.base import Experiment, TaskSpec
+from sparse_steer.experiment.base import Experiment
+from sparse_steer.tasks.base import TaskSpec
+from sparse_steer.tasks.tinysleepers.task import TinySleepersTask
 from sparse_steer.tasks.truthfulqa.task import TruthfulQATask
 
 METHODS: dict[str, type[Experiment]] = {
     "unsteered": UnsteeredExperiment,
     "dense": SteeringExperiment,
+    "fixed_single_ablate": SteeringExperiment,
     "sparse": SteeringExperiment,
     "scale_only": SteeringExperiment,
     "shared_scale_only": SteeringExperiment,
@@ -27,6 +30,7 @@ METHODS: dict[str, type[Experiment]] = {
 
 TASKS: dict[str, type[TaskSpec]] = {
     "truthfulqa": TruthfulQATask,
+    "tinysleepers": TinySleepersTask,
 }
 
 

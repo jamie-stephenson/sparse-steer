@@ -1,0 +1,20 @@
+%-------------------- Responsible Research --------------------------
+\subsection{Responsible Research Including Ethics}
+
+\textbf{Ethics review.} This project does not involve human participants, personal data, or deceptive studies.
+All datasets will be publicly available research benchmarks. Some candidate datasets (e.g.\ hh-rlhf~\cite{bai2022hhrlhf}) contain offensive or harmful content by design, as they are intended for studying model safety. However, this content is only used to extract steering vectors and evaluate model behaviour, not to deploy harmful outputs.
+Pre-trained models are accessed via Hugging Face under their existing licences.
+A formal ethical review is therefore not required.
+
+\textbf{Dual-use considerations.} Activation steering techniques could in principle be used to bypass safety measures in deployed language models (e.g.\ suppressing refusal).
+However, the methods studied here operate on open-weight models and are already described in the public literature~\cite{arditi2024refusal,rimsky2024caa}.
+This project contributes to the \emph{understanding} of steering reliability, which is necessary for developing robust defences.
+
+\textbf{Environmental impact.} Because only a handful of scalar parameters are trained over a frozen model, compute requirements are minimal.
+Preliminary experiments can all be run on Apple MPS and cluster GPU use will be limited to experiments with larger models once experiment setups have been validated.
+
+\textbf{Data management.} All code will be maintained in a public GitHub repository.
+Experimental configurations are managed via Hydra~\cite{yadan2019hydra}, ensuring full reproducibility from public data and fixed random seeds.
+
+\textbf{Attribution.} The project builds directly on the JoLA codebase and methodology of Lai, Fraser, and Titov~\cite{lai2025jola}; this will be clearly acknowledged.
+All other code dependencies are open-source and will be listed in the repository.

@@ -3,7 +3,8 @@ defaults:
   - task: truthfulqa
   - _self_
 
-model_name: Qwen/Qwen2.5-0.5B-Instruct
+# model_name and dtype are task-owned (set in configs/task/*.yaml): the defaults
+# list ends with _self_, so anything here would override a task's value.
 seed: 42
 data_seed: null
 device: mps
@@ -11,6 +12,11 @@ eval_batch_size: 32
 extraction_fraction: 0.5
 use_cache: true
 use_wandb: false
+
+# Ablation only: divide each site's ablation by its own mean |activation·v̂| so
+# the L0 gates select on objective benefit rather than residual norm (which grows
+# with depth). Site-agnostic; lets multi-site sparse ablation localise. Default off.
+normalize_ablation: false
 
 hydra:
   run:

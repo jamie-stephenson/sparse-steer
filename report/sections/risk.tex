@@ -1,0 +1,27 @@
+%-------------------- Risk Assessment --------------------------
+\subsection{Risk Assessment and Mitigations}
+
+\begin{table}[!ht]
+\centering
+\small
+\begin{tabular}{@{}p{3.8cm}ccp{5.2cm}@{}}
+\toprule
+\textbf{Risk} & \textbf{Likelihood} & \textbf{Impact} & \textbf{Mitigation} \\
+\midrule
+Output collapse persists across tasks and hyperparameters &
+Medium & High &
+Already observed on TruthfulQA (Section~\ref{sec:preliminary-results}). Investigate regularisation/alternative training objectives and whether one of the ablated baselines is instead the technqiue of interest. If collapse cannot be resolved, the negative result and analysis of its causes are themselves a contribution. \\
+\addlinespace
+Sparse steering underperforms baselines on generative evaluation &
+Medium & High &
+Explain negative result. Ablated variants (gates-only, scale-only, dense) diagnose which component fails. Comparison with JoLA could help explain whether the issue is specific to fixed steering directions or to the learned localisation. \\
+\addlinespace
+Compute unavailable (University MLP teaching cluster, has limited capacity that is often in use) &
+Medium & Medium &
+Personally pay for cloud compute. \\
+\addlinespace
+\bottomrule
+\end{tabular}
+\caption{Key project risks, assessed likelihood and impact, and mitigation strategies.}
+\label{tab:risks}
+\end{table}

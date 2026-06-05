@@ -1,13 +1,11 @@
 """Shared helpers for steering experiments."""
 
-from __future__ import annotations
-
 from typing import Any
 
 import torch
 from datasets import Dataset
 from omegaconf import DictConfig, OmegaConf
-from transformers import AutoConfig, PreTrainedModel, PreTrainedTokenizerBase
+from transformers import PreTrainedTokenizerBase
 
 from ..extract import (
     collect_activations,
@@ -15,46 +13,40 @@ from ..extract import (
     load_steering_vectors,
     save_steering_vectors,
 )
-from ..models import MODEL_REGISTRY
+from ..steering import HardConcreteConfig, SteeringModel
 from ..utils.cache import ArtifactType
 
 from .base import Experiment
 
+_DTYPES = {
+    "float16": torch.float16,
+    "float32": torch.float32,
+    "bfloat16": torch.bfloat16,
+}
 
-def load_steering_model(config: DictConfig) -> PreTrainedModel:
-    """Load a model from the registry and upgrade it for steering."""
-    from ..hardconcrete import HardConcreteConfig
 
-    hf_config = AutoConfig.from_pretrained(config.model_name)
-    model_type = getattr(hf_config, "model_type", None)
+def resolve_dtype(config: DictConfig) -> torch.dtype:
+    return _DTYPES[config.get("dtype", "float16")]
 
-    model_cls = MODEL_REGISTRY.get(model_type)
-    if model_cls is None:
-        raise ValueError(
-            f"Unsupported model_type '{model_type}' for '{config.model_name}'. "
-            f"Supported: {sorted(MODEL_REGISTRY)}"
-        )
 
-    model = model_cls.from_pretrained(
-        config.model_name, torch_dtype=torch.float16
-    ).to(config.device)
-
-    layer_ids = (
-        list(config.steering_layer_ids)
-        if config.get("steering_layer_ids") is not None
-        else list(range(len(model.get_layers())))
-    )
-
+def load_steering_model(config: DictConfig) -> SteeringModel:
+    """Load a TransformerLens model and attach steering hooks."""
     gate_config = None
     if config.get("gate_config") is not None:
         gate_cfg = OmegaConf.to_container(config.gate_config, resolve=True)
         gate_config = HardConcreteConfig(**gate_cfg)
 
+    layer_ids = (
+        list(config.steering_layer_ids)
+        if config.get("steering_layer_ids") is not None
+        else None
+    )
     learn_scale = config.get("learn_scale", False)
     shared_scale = config.get("shared_scale", False)
-    init_log_scale = config.get("init_log_scale", 0.0)
+    init_raw_scale = config.get("init_raw_scale", 0.0)
+    intervention = config.get("intervention", "steer")
 
-    desc = []
+    desc = [intervention]
     if gate_config is not None:
         desc.append("gates")
     if shared_scale:
@@ -62,24 +54,39 @@ def load_steering_model(config: DictConfig) -> PreTrainedModel:
     elif learn_scale:
         desc.append("learned scale")
     else:
-        desc.append(f"scale=softplus({init_log_scale:.2f})")
+        desc.append(f"scale=softplus({init_raw_scale:.2f})")
     print(f"Initialising steering model ({', '.join(desc)})...")
 
-    model.upgrade_for_steering(
+    return SteeringModel.from_pretrained(
+        config.model_name,
+        device=config.device,
+        dtype=resolve_dtype(config),
+        lora_adapter=config.get("lora_adapter"),
         steering_layer_ids=layer_ids,
         steering_components=list(config.targets),
         gate_config=gate_config,
         learn_scale=learn_scale,
         shared_scale=shared_scale,
-        init_log_scale=init_log_scale,
+        init_raw_scale=init_raw_scale,
+        intervention=intervention,
     )
 
-    return model
+
+def load_plain_model(config: DictConfig) -> SteeringModel:
+    """Load a TransformerLens model with no steering (used for the unsteered control)."""
+    return SteeringModel.from_pretrained(
+        config.model_name,
+        device=config.device,
+        dtype=resolve_dtype(config),
+        lora_adapter=config.get("lora_adapter"),
+        steering_layer_ids=[],
+        steering_components=[],
+    )
 
 
 def run_extraction(
     experiment: Experiment,
-    model: PreTrainedModel,
+    model: SteeringModel,
     tokenizer: PreTrainedTokenizerBase,
     extraction_ds: Dataset,
     cache_info: dict[str, Any],
@@ -105,15 +112,11 @@ def run_extraction(
         token_position=config.token_position,
     )
     print("Computing steering vectors...")
-    steering_vectors = extract_steering_vectors(
-        extraction_with_acts, component_names
-    )
+    steering_vectors = extract_steering_vectors(extraction_with_acts, component_names)
     sv_dest = experiment._prepare_cache_path(ArtifactType.STEERING_VECTORS)
     metadata = OmegaConf.to_container(config, resolve=True)
     save_steering_vectors(steering_vectors, sv_dest, metadata=metadata)
-    steering_vectors_path = str(
-        experiment._finalize_cache(ArtifactType.STEERING_VECTORS)
-    )
+    steering_vectors_path = str(experiment._finalize_cache(ArtifactType.STEERING_VECTORS))
     print(f"Saved steering vectors to {steering_vectors_path}")
     cache_info["steering_vectors"] = {"status": "miss"}
 
@@ -121,6 +124,8 @@ def run_extraction(
 
 
 __all__ = [
+    "load_plain_model",
     "load_steering_model",
+    "resolve_dtype",
     "run_extraction",
 ]

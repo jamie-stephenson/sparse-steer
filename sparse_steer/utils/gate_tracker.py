@@ -4,6 +4,8 @@ from pathlib import Path
 import numpy as np
 import numpy.ma as ma
 import torch
+import torch.nn.functional as F
+import wandb
 
 import matplotlib
 
@@ -12,9 +14,8 @@ import matplotlib.pyplot as plt
 from matplotlib import animation
 from matplotlib.figure import Figure
 from numpy import ndarray
-from transformers import TrainerCallback
 
-from ..models.hook import SteeringHook
+from ..steering import SteeringModel
 
 
 def _masked_cmap(base: str = "viridis"):
@@ -32,35 +33,35 @@ class GateSnapshots:
     layer_ids: list[int] = field(default_factory=list)
 
 
-class GateTracker(TrainerCallback):
-    """Records effective steering norms per head/layer across training."""
+class GateTracker:
+    """Records effective steering norms per head/layer across training.
 
-    def __init__(self, model, use_wandb: bool = False) -> None:
+    Driven manually by the training loop via :meth:`snapshot`.
+    """
+
+    def __init__(self, model: SteeringModel, use_wandb: bool = False) -> None:
         self.use_wandb = use_wandb
         self.snapshots = GateSnapshots()
 
-        self._attn_hooks: list[tuple[int, SteeringHook]] = []
-        self._mlp_hooks: list[tuple[int, SteeringHook]] = []
+        self._attn_hooks: list = []  # each: SteeringHook
+        self._mlp_hooks: list = []
         self._attn_sv_norms: list[torch.Tensor] = []  # each (num_heads,)
         self._mlp_svs: list[torch.Tensor] = []  # each (mlp_dim,)
 
-        layers = model.get_layers()
         layer_id_set: set[int] = set()
-
-        for i, layer in enumerate(layers):
-            attn_hook = getattr(layer, f"_steering_attention_{i}", None)
-            if isinstance(attn_hook, SteeringHook):
-                self._attn_hooks.append((i, attn_hook))
+        for component, layer, hook in sorted(
+            model.iter_hooks(), key=lambda x: (x[0], x[1])
+        ):
+            if component == "attention":
+                self._attn_hooks.append(hook)
                 self._attn_sv_norms.append(
-                    attn_hook.steering_vectors.float().cpu().norm(dim=-1)
+                    hook.steering_vectors.float().cpu().norm(dim=-1)
                 )
-                layer_id_set.add(i)
-
-            mlp_hook = getattr(layer, f"_steering_mlp_{i}", None)
-            if isinstance(mlp_hook, SteeringHook):
-                self._mlp_hooks.append((i, mlp_hook))
-                self._mlp_svs.append(mlp_hook.steering_vectors.float().cpu())
-                layer_id_set.add(i)
+                layer_id_set.add(layer)
+            elif component == "mlp":
+                self._mlp_hooks.append(hook)
+                self._mlp_svs.append(hook.steering_vectors.float().cpu())
+                layer_id_set.add(layer)
 
         self.snapshots.layer_ids = sorted(layer_id_set)
         if self._attn_hooks:
@@ -68,60 +69,51 @@ class GateTracker(TrainerCallback):
         if self._mlp_hooks:
             self.snapshots.mlp_norms = []
 
-    def _snapshot(self, step: int) -> None:
+        # The heatmap/animation render attention-head and MLP gates only. Residual
+        # components (resid_mid/resid_post) carry a single scalar gate per hook and
+        # aren't plotted here, so with residual-only steering there's nothing to
+        # render — snapshot() becomes a no-op rather than producing an empty figure.
+        self._renderable = bool(self._attn_hooks or self._mlp_hooks)
+        if not self._renderable:
+            print(
+                "  GateTracker: residual-only steering — gate heatmap/animation "
+                "skipped (renderer covers attention-head / MLP gates)."
+            )
+
+    def _effective(self, hook) -> torch.Tensor:
+        was_training = hook.training
+        hook.eval()
+        gate = hook.effective_weight(dtype=torch.float32, device=torch.device("cpu"))
+        if was_training:
+            hook.train()
+        return gate
+
+    def snapshot(self, step: int) -> None:
+        if not self._renderable:
+            return
         with torch.no_grad():
             if self._attn_hooks:
-                rows = []
-                for (_, hook), sv_norm in zip(self._attn_hooks, self._attn_sv_norms):
-                    was_training = hook.training
-                    hook.eval()
-                    gate = hook.effective_weight(
-                        dtype=torch.float32, device=torch.device("cpu")
-                    )
-                    if was_training:
-                        hook.train()
-                    rows.append((gate * sv_norm).numpy())
+                rows = [
+                    (self._effective(hook) * sv_norm).numpy()
+                    for hook, sv_norm in zip(self._attn_hooks, self._attn_sv_norms)
+                ]
                 self.snapshots.attn_norms.append(np.stack(rows))
-
             if self._mlp_hooks:
-                vals = []
-                for (_, hook), sv in zip(self._mlp_hooks, self._mlp_svs):
-                    was_training = hook.training
-                    hook.eval()
-                    gate = hook.effective_weight(
-                        dtype=torch.float32, device=torch.device("cpu")
-                    )
-                    if was_training:
-                        hook.train()
-                    vals.append((gate * sv).norm().item())
+                vals = [
+                    (self._effective(hook) * sv).norm().item()
+                    for hook, sv in zip(self._mlp_hooks, self._mlp_svs)
+                ]
                 self.snapshots.mlp_norms.append(np.array(vals))
-
         self.snapshots.steps.append(step)
 
-    def on_log(self, args, state, control, **kwargs):
-        self._snapshot(state.global_step)
         if self.use_wandb:
-            import wandb
-            import torch.nn.functional as F
-
-            log_dict = {}
-
-            fig = _build_heatmap_figure(self.snapshots)
-            log_dict["gate_heatmap"] = wandb.Image(fig)
-            plt.close(fig)
-
-            # Log shared scale parameter if present
-            all_hooks = self._attn_hooks + self._mlp_hooks
-            if all_hooks:
-                hook = all_hooks[0][1]
-                if hook._shared_log_scale is not None:
-                    log_dict["scale/raw_param"] = hook._shared_log_scale.item()
-                    log_dict["scale/effective"] = F.softplus(hook._shared_log_scale).item()
-
-            wandb.log(log_dict, step=state.global_step)
-
-    def on_train_end(self, args, state, control, **kwargs):
-        self._snapshot(state.global_step)
+            log_dict = {"gate_heatmap": wandb.Image(_build_heatmap_figure(self.snapshots))}
+            plt.close("all")
+            shared = (self._attn_hooks + self._mlp_hooks)[0]._shared_raw_scale
+            if shared is not None:
+                log_dict["scale/raw_param"] = shared.item()
+                log_dict["scale/effective"] = F.softplus(shared).item()
+            wandb.log(log_dict, step=step)
 
 
 def _make_layout(

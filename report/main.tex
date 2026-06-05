@@ -1,0 +1,170 @@
+%==========================================================
+%   Modern Informatics Research Review LaTeX Template
+%==========================================================
+
+\documentclass[a4paper,11pt]{article}
+
+%-------------------- Packages ----------------------------
+\usepackage[utf8]{inputenc}        % UTF-8 encoding
+\usepackage[T1]{fontenc}           % Font encoding
+\usepackage{lmodern}               % Clean, scalable fonts
+\usepackage[pdftex]{graphicx}      % Graphics support
+\usepackage{url}                    % Better URL handling
+\usepackage[numbers]{natbib}         % Bibliography with DOI support (numbered)
+\usepackage{doi}                    % Clickable DOI links
+\usepackage{datetime}               % Custom date formatting
+\usepackage{pgfgantt}               % Gantt charts
+\usepackage{xcolor}                 % Color definitions
+\usepackage{geometry}               % Page margins
+\usepackage{fancyhdr}               % Headers and footers
+\usepackage{titlesec}               % Custom section titles
+\usepackage{booktabs}               % Cleaner tables
+\usepackage{amsmath,amssymb}        % Math
+\usepackage{tikz}                   % Figures
+\usepackage{hyperref}               % Hyperlinks
+\usetikzlibrary{positioning,arrows.meta,patterns,calc,decorations.pathreplacing}
+
+%-------------------- Page Setup --------------------------
+\geometry{a4paper, left=25mm, right=25mm, top=25mm, bottom=25mm}
+\setlength{\headheight}{13.6pt}
+\addtolength{\topmargin}{-1.6pt}
+\parindent=0pt                      % No paragraph indentation
+\parskip=6pt                        % Space between paragraphs
+\Urlmuskip=0mu plus 1mu             % Better URL line breaks
+
+%-------------------- Colors -----------------------------
+\definecolor{mainblue}{RGB}{51,102,204}
+\definecolor{accentblue}{RGB}{153,204,254}
+
+%-------------------- Date Format -------------------------
+\newdateformat{monthyeardate}{\monthname[\THEMONTH] \THEYEAR}
+
+%-------------------- Header & Footer --------------------
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\textbf{Informatics Project Proposal 20}}
+\rhead{\thepage}
+\lfoot{\small School of Informatics}
+\rfoot{\monthyeardate\today}
+\renewcommand{\headrulewidth}{1pt}
+\renewcommand{\footrulewidth}{0.5pt}
+
+%-------------------- Section Styles ----------------------
+\titleformat{\section}{\Large\bfseries\color{mainblue}}{\thesection.}{1em}{}
+\titleformat{\subsection}{\large\bfseries\color{mainblue}}{\thesubsection.}{1em}{}
+
+%-------------------- Title Page Info ---------------------
+\newcommand{\examnumber}{s2891779}
+\newcommand{\field}{Sparse Activation Steering for Low-Resource Fine-Tuning}
+\newcommand{\tutor}{Daniel Woods}
+\newcommand{\supervisor}{Ivan Titov}
+
+%==========================================================
+\begin{document}
+
+%-------------------- Title Page --------------------------
+\begin{titlepage}
+\begin{center}
+\vspace*{2cm}
+\includegraphics[width=40mm]{crest.png}\\[1cm]
+
+{\Huge\bf School of Informatics}\\[1.5cm]
+
+{\LARGE\bf Informatics Project Proposal}\\[0.5cm]
+{\Large\bf \field}\\[2cm]
+
+{\large \textbf{UID:} \examnumber}\\[0.5cm]
+{\large \textbf{Date:} \monthyeardate\today}\\[2cm]
+
+{\large \textbf{Tutor:} \tutor\\[0.2cm]
+\textbf{Supervisor:} \supervisor}
+\vfill
+\end{center}
+\textit{I give permission for future Informatics Project Proposal classes to read an anonymous version of this document.}
+
+\textit{This page does not count towards the page limit.}
+\end{titlepage}
+
+%-------------------- Abstract & Declaration ----------------------------
+\input{sections/abstract}
+
+%==========================================================
+\input{sections/introduction}
+
+\input{sections/state_of_the_art}
+
+\section{Implementation}
+
+\input{sections/methodology}
+
+\input{sections/expected_outcomes}
+
+\input{sections/evaluation}
+
+\input{sections/preliminary_results}
+
+\input{sections/risk}
+
+\input{sections/ethics}
+
+\input{sections/plan}
+
+%-------------------- References -------------------------
+\bibliographystyle{unsrtnat}
+
+{\small
+
+\bibliography{main}
+\textit{This section does not count towards the page limit. References should include embedded DOI links.}
+
+}
+
+%-------------------- Appendix ---------------------------
+\appendix
+\section{Inference Simplification}\label{app:inference}
+
+Once gates are frozen, the sparse steering formulation admits a useful simplification.
+For each layer $l$, the gated per-head corrections can be summed and pushed through the output projection $W_O$:
+\begin{equation}
+    \Delta^{(l)} = W_O \sum_h g^{(l,h)} s^{(l,h)} \mathbf{v}^{(l,h)}.
+\end{equation}
+This precomputed constant can be added directly to the residual stream via a lightweight hook, avoiding the need for a custom attention module at inference time.
+
+\section{Preliminary Results: Full Details}\label{app:preliminary-results}
+
+The following expands on the preliminary results summarised in Section~\ref{sec:preliminary-results}. All experiments use TruthfulQA~\cite{lin2022truthfulqa} with Qwen2.5-0.5B-Instruct~\cite{qwen2025qwen25}. Contrastive steering vectors are extracted from TruthfulQA's paired correct/incorrect examples. For the learned methods (sparse, gates-only, scale-only, shared-scale, LoRA), we fine-tune on a subset of TruthfulQA using the cross-entropy loss described in Section~\ref{sec:methodology}. All methods are evaluated on the same held-out subset. Generative answers are scored by fine-tuned judge models~\cite{allenai2024truthfulqa_judges}.
+
+\textbf{Multiple-choice results.} Figure~\ref{fig:mc-results} shows MC1 and MC2 accuracy across all eight methods.
+Sparse steering achieves the largest MC2 gain (0.515 vs.\ 0.357 baseline), with shared-scale and LoRA tied at 0.399. Most other methods produce small or negligible changes.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=\linewidth]{figures/mc_results.pdf}
+\caption{TruthfulQA multiple-choice accuracy for Qwen2.5-0.5B-Instruct. Dashed line marks the unsteered baseline. Sparse steering shows the largest MC2 gain.}
+\label{fig:mc-results}
+\end{figure}
+
+\textbf{Generative results.} However, the generative evaluation (Figure~\ref{fig:gen-results}) reveals that sparse steering's MC gains do not reflect genuine improvement.
+The sparse-steered model achieves high truthfulness (0.951) but near-zero informativeness (0.010): it generates only whitespace tokens, which the truth judge scores as vacuously truthful.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=\linewidth]{figures/gen_results.pdf}
+\caption{TruthfulQA generative evaluation. Sparse steering collapses to whitespace output yielding near-perfect truthfulness but zero informativeness. Dense steering is the only method to improve the joint metric.}
+\label{fig:gen-results}
+\end{figure}
+
+\textbf{Length bias in MC evaluation.} Further investigation (Figure~\ref{fig:length-bias}) suggests that sparse steering's MC2 improvement is driven almost entirely by length bias. Under sparse steering, 96.6\% of the answers that the model assigns the highest probability are the shortest option for that question, compared with 40--44\% for all other methods. The model assigns high probability to short answers (particularly ``I have no comment.'', which is marked as a correct MC2 answer for several examples) without discriminating between truthful and false content.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=\linewidth]{figures/length_bias.pdf}
+\caption{Fraction of questions where the highest-probability answer is the shortest option. For reference, 64.4\% of TruthfulQA questions have a correct answer as the shortest option, reflecting an inherent bias in the dataset. Sparse steering (96.6\%) far exceeds even this, while the other methods all sit well below it (40\textendash44\%), meaning they are not exploiting the shortcut.}
+\label{fig:length-bias}
+\end{figure}
+
+\textbf{Diagnosis.} Two issues are at play. The first is the \textbf{training data}: because we fine-tune on a subset of TruthfulQA itself, the model is exposed to the benchmark's known short-answer bias~\cite{turntrout2025truthfulqa} during training. Correct answers tend to be shorter than incorrect ones, so cross-entropy training on this data rewards the model for favouring short outputs. As Figure~\ref{fig:length-bias} shows, sparse steering exploits this bias far more than any other method. I suspect the less expressive baselines simply lack the capacity to overfit to this shortcut. This motivates moving to additional benchmarks and prioritising generative evaluation as it is closer to downstream tasks.
+
+However, I suspect that there is also a more underlying issue with the \textbf{technique} itself. Indeed, if the model does learn to favour shorter responses, it is unclear why the model collapses to generating whitespace tokens rather than the end-of-sequence token. Brief analysis of the scale parameter training dynamics show that some heads learn a very large edit, suggesting that, with the current hyperparameter setup, the approach is simply too invasive. Understanding and preventing this collapse is a primary focus of the ongoing work.
+
+\end{document}

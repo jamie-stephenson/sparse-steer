@@ -1,0 +1,19 @@
+%-------------------- Evaluation Criteria --------------------------
+\subsection{Evaluation Criteria}\label{sec:evaluation-criteria}
+
+\textbf{Task performance.} I use TruthfulQA~\cite{lin2022truthfulqa} as an initial test setting (see Section~\ref{sec:preliminary-results}), evaluating multiple-choice accuracy following the protocol used by ITI and CAA.
+The full evaluation suite is still to be finalised. Candidate benchmarks include behavioural tasks such as hh-rlhf~\cite{bai2022hhrlhf} and further NLU/NLG tasks from the JoLA evaluation suite, selected to cover a range of task types and data regimes.
+Each benchmark will use task-appropriate metrics (e.g.\ preference accuracy, ROUGE).
+
+\textbf{Ablation studies.} To isolate the contribution of each component, I compare the full sparse steering method against the ablated variants described in Section~\ref{sec:expected-outcomes}: gates-only, scale-only, and dense.
+This factored design separates the effect of sparsity from that of learned magnitude.
+
+\textbf{Parameter efficiency.} Concrete comparison of the number of trainable parameters across methods: sparse steering requires 2 scalars per head (gate $+$ scale) versus $d_\text{head}$-dimensional vectors in JoLA or low-rank matrices in LoRA.
+
+\textbf{Data efficiency.} Comparison of how each method performs as the amount of task-specific training data varies. Because sparse steering learns only scalar gates and scales while fixing steering directions from contrastive data, we expect it to degrade more gracefully in data-constrained settings.
+
+\textbf{Robustness.} I will test whether results hold across multiple data seeds and model sizes.
+
+\textbf{Generalisation.} I will test the extent to which sparse steering models generalise to benchmarks and tasks that differ from the setting from which the steering vectors were extracted, and compare this generalisation to other baselines.
+
+\textbf{Localisation analysis.} I will conduct a more qualitative exploration of which attention heads are selected by the learned gates, including visualisation and comparison with heads identified as task-relevant by prior work such as ITI~\cite{li2024iti} and REAL~\cite{zhan2026real}.

@@ -1,0 +1,53 @@
+%-------------------- Methodology --------------------------
+\subsection{Methodology}\label{sec:methodology}
+
+Figure~\ref{fig:method-comparison} illustrates the key differences between residual steering, JoLA, and our proposed sparse steering.
+Steering in the residual stream is the most common approach across existing techniques~\cite{turner2025actadd,rimsky2024caa}, adding a single fixed vector at one layer with a hand-tuned scale.
+JoLA instead intervenes at individual attention heads, learning both per-head edit vectors and sparse gates.
+Sparse steering also operates at the head level but fixes the per-head directions from contrastive data and learns only the gates and scale parameters.
+
+\begin{figure}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\input{figures/method_comparison}
+}
+\caption{Comparison of three intervention approaches. (a)~Residual steering adds a fixed vector $\mathbf{v}$ with hand-tuned scale $s$ to the residual stream at one layer. (b)~JoLA learns per-head edit vectors $\mathbf{v}_h$ and HardConcrete gates $g_h$. (c)~Sparse steering fixes per-head contrastive directions $\mathbf{v}_h$ from data and learns only gates $g_h$ and scales $s_h$. Active and inactive gates are shown in \textcolor{green!55!black}{green} and \textcolor{red!55!black}{red} respectively. JoLA also supports multiplicative edits, omitted here for simplicity.}
+\label{fig:method-comparison}
+\end{figure}
+
+\textbf{Steering vector extraction.} For each behaviour or task, we extract per-head steering vectors from contrastive data following the mean-difference procedure used by CAA~\cite{rimsky2024caa} and ITI~\cite{li2024iti}, applied at the attention head output level (pre-output-projection).
+
+Given a dataset of contrastive pairs, we record each attention head's output $\mathbf{z}_t^{(l,h)} \in \mathbb{R}^{d_\text{head}}$ at a designated token position (typically the last non-padding token) for both positive and negative examples.
+The per-head steering vector is:
+\begin{equation}
+    \mathbf{v}^{(l,h)} = \frac{1}{|\mathcal{D}^+|}\sum_{x \in \mathcal{D}^+} \mathbf{z}^{(l,h)}(x) - \frac{1}{|\mathcal{D}^-|}\sum_{x \in \mathcal{D}^-} \mathbf{z}^{(l,h)}(x).
+\end{equation}
+These vectors are computed once and stored as frozen buffers in the model.
+
+\textbf{Sparse gating formulation.} At each steered attention head, we apply an additive correction to the head output before the output projection:
+\begin{equation}\label{eq:correction}
+    \mathbf{z}_t^{\prime(l,h)} = \mathbf{z}_t^{(l,h)} + g^{(l,h)} \cdot s^{(l,h)} \cdot \mathbf{v}^{(l,h)},
+\end{equation}
+where $g^{(l,h)} \in [0,1]$ is a HardConcrete gate and $s^{(l,h)} = \text{softplus}(\tilde{s}^{(l,h)}) \geq 0$ is a learned scale.
+
+The gate is sampled via the HardConcrete construction~\cite{louizos2018hardconcrete}:
+\begin{equation}
+    g = \text{clamp}\!\Big(\gamma + (\zeta - \gamma)\,\sigma\!\Big(\frac{\log u - \log(1-u) + \log\alpha}{\beta}\Big),\; 0,\; 1\Big), \quad u \sim \text{Uniform}(0,1),
+\end{equation}
+where $\log\alpha$ is a trainable parameter, $\beta$ is a fixed temperature, and $(\gamma, \zeta)$ are fixed stretch limits that straddle 0 and 1.
+During evaluation, we remove both the stochastic noise and the temperature, reducing the gate to $\operatorname{clamp}\!\bigl(\sigma(\log\alpha)\cdot(\zeta-\gamma)+\gamma,\;0,\;1\bigr)$, where $\sigma(\log\alpha)$ is the mean of the underlying Bernoulli distribution that the HardConcrete relaxes. Louizos et al.~\cite{louizos2018hardconcrete} show empirically that this noiseless value closely approximates the true expected gate $\mathbb{E}[g]$, though the two are not identical. Gates whose deterministic value falls below a threshold $\epsilon$ are pruned entirely.
+
+The \textbf{decoupling of gate and scale} is a deliberate design choice.
+JoLA's gates lie in $[0,1]$, which limits the magnitude of the intervention.
+By introducing a separate scale parameter $s^{(l,h)}$ (parameterised via softplus to ensure non-negativity), we allow the effective weight $g \cdot s$ to exceed 1 where needed, while the $L_0$ penalty acts only on the gate's activation probability and not on the scale.
+This keeps the sparsity mechanism unchanged from JoLA while giving each active head a freely learned magnitude.
+
+\textbf{Training.} We freeze all base model parameters and train only $\{\log\alpha^{(l,h)}\}$ and $\{\tilde{s}^{(l,h)}\}$ by minimising a combined loss:
+\begin{equation}
+    \mathcal{L}(\mathbf{x}, \mathbf{y}, t) = \mathcal{L}_\text{CE}\!\big(f_\theta(\mathbf{x}),\; \mathbf{y}\big) + \lambda(t) \sum_{l,h} \sigma\!\big(\log\alpha^{(l,h)} - \beta\log(-\gamma / \zeta)\big),
+\end{equation}
+where $\mathbf{x}$ and $\mathbf{y}$ are a batch of input and target token sequences, $t$ is the training step, $f_\theta$ denotes the steered model's next-token predictions with $\theta = \{\log\alpha^{(l,h)},\, \tilde{s}^{(l,h)}\}_{l,h}$ being the only trainable parameters, $\mathcal{L}_\text{CE}$ is the standard language modelling cross-entropy loss, and the second term is the expected-$L_0$ penalty with a scheduled coefficient $\lambda(t)$ that warms up over the first few training steps.
+The warmup prevents premature gate collapse before the scale parameters have adapted.
+
+Optionally, a second phase freezes the gates and fine-tunes only the scale parameters, allowing more precise magnitude adjustment after the sparsity pattern has stabilised.
+

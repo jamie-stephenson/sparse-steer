@@ -14,3 +14,14 @@ output/
 data/
 wandb/
 .cache/
+
+# LaTeX build artifacts + logs
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.out
+*.synctex.gz
+*.toc
+*.log

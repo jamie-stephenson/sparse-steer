@@ -8,8 +8,6 @@ with fine-tuned judge models (Allen AI LLaMA-2-7B) for truthfulness
 and informativeness.
 """
 
-from __future__ import annotations
-
 import gc
 import warnings
 
@@ -23,6 +21,8 @@ from transformers import (
     PreTrainedTokenizerBase,
 )
 
+from ...generate import generate
+from ...steering import SteeringModel
 from ...utils.eval import answer_log_probs
 from ...utils.tokenize import apply_template
 
@@ -154,6 +154,10 @@ def _generate_answers(
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
+    # SteeringModel goes through the shared KV-cached generator (steer="all", i.e.
+    # steering applied at every position/step — truthfulqa's behaviour); a
+    # peft-wrapped HF model (the lora method) keeps the HuggingFace generate path.
+    is_steering = isinstance(model, SteeringModel)
     try:
         for i in tqdm(range(0, len(questions), batch_size), desc="Generate", unit="batch"):
             batch_questions = questions[i : i + batch_size]
@@ -163,18 +167,30 @@ def _generate_answers(
             ).to(model.device)
 
             with torch.no_grad():
-                output_ids = model.generate(
-                    **inputs,
-                    max_new_tokens=max_new_tokens,
-                    do_sample=False,
-                )
-
-            # strip prompt tokens to get only the generated answer
-            prompt_len = inputs["input_ids"].shape[1]
-            for j in range(len(batch_questions)):
-                generated_ids = output_ids[j][prompt_len:]
-                answer = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-                answers.append(answer)
+                if is_steering:
+                    gen_ids = generate(
+                        model,
+                        inputs["input_ids"],
+                        inputs["attention_mask"],
+                        max_new_tokens,
+                        sampler=None,  # greedy
+                        steer="all",
+                    )
+                    for row in gen_ids:  # already prompt-stripped
+                        answers.append(
+                            tokenizer.decode(row, skip_special_tokens=True).strip()
+                        )
+                else:
+                    output_ids = model.generate(
+                        **inputs, max_new_tokens=max_new_tokens, do_sample=False
+                    )
+                    prompt_len = inputs["input_ids"].shape[1]
+                    for j in range(len(batch_questions)):
+                        answers.append(
+                            tokenizer.decode(
+                                output_ids[j][prompt_len:], skip_special_tokens=True
+                            ).strip()
+                        )
     finally:
         tokenizer.padding_side = orig_padding_side
 

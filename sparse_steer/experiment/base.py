@@ -1,16 +1,20 @@
 import abc
 import json
 import os
+import random
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any
 
+import numpy as np
+import torch
 from datasets import Dataset, DatasetDict
 from dotenv import load_dotenv
 from huggingface_hub import login
 from omegaconf import DictConfig, OmegaConf
 from transformers import AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 
+from ..tasks.base import TaskSpec
 from ..utils.cache import (
     ArtifactType,
     CacheHit,
@@ -21,37 +25,6 @@ from ..utils.cache import (
     print_cache_warnings,
     store_json as cache_store_json,
 )
-
-
-# ── Task protocol ─────────────────────────────────────────────────
-
-
-@runtime_checkable
-class TaskSpec(Protocol):
-    @property
-    def task_name(self) -> str: ...
-
-    def build_datasets(
-        self,
-        tokenizer: PreTrainedTokenizerBase,
-        config: DictConfig,
-    ) -> tuple[Dataset, DatasetDict, Dataset]: ...
-
-    def run_task_evaluation(
-        self,
-        model: PreTrainedModel,
-        tokenizer: PreTrainedTokenizerBase,
-        dataset: Dataset,
-        config: DictConfig,
-    ) -> dict[str, float]: ...
-
-    def extra_cache_fields(
-        self,
-        artifact_type: ArtifactType,
-        config: DictConfig,
-    ) -> dict[str, Any]: ...
-
-    def cache_source_files(self, artifact_type: ArtifactType) -> list[str]: ...
 
 
 # ── Base experiment ───────────────────────────────────────────────
@@ -170,10 +143,6 @@ class Experiment(abc.ABC):
 
     @staticmethod
     def _seed_everything(seed: int) -> None:
-        import random
-        import numpy as np
-        import torch
-
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -239,6 +208,9 @@ class Experiment(abc.ABC):
         model, artifacts, cache_info = self._run_pipeline(
             model, tokenizer, extraction_ds, train_ds, output_dir
         )
+        # Gate training leaves the model in train mode, where hard-concrete gates
+        # sample stochastic noise and skip the eval threshold. Evaluate deterministically.
+        model.eval()
 
         # ── Eval ──────────────────────────────────────────────
         metrics: dict[str, float] = {}
@@ -280,5 +252,4 @@ class Experiment(abc.ABC):
 
 __all__ = [
     "Experiment",
-    "TaskSpec",
 ]

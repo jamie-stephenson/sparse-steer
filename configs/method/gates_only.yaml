@@ -1,6 +1,7 @@
 # @package _global_
 # HardConcrete gates with fixed scale (no learned scale).
 method: gates_only
+intervention: steer   # 'ablate' = geometric projection ablation (override on CLI)
 steering_layer_ids: null
 extract_batch_size: 8
 token_position: last
@@ -8,7 +9,7 @@ targets: [attention]
 normalize_steering_vectors: false
 
 learn_scale: false
-init_log_scale: 0.5413
+init_raw_scale: 0.5413
 
 l0_scheduler_type: warmup
 l0_warmup_steps: 16
@@ -21,7 +22,7 @@ train_batch_size: 8
 weight_decay: 0.01
 logging_steps: 1
 save_strategy: "no"
-freeze_log_scale: false
+freeze_raw_scale: false
 track_gates: true
 scale_tuning_epochs: 0
 scale_tuning_lr: null
@@ -32,4 +33,3 @@ gate_config:
   eps: 1.0e-6
   eval_threshold: 1.0e-2
   init_log_alpha: -0.79
-  init_log_scale: 0.0
