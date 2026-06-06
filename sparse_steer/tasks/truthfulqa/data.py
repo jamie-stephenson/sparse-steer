@@ -6,7 +6,7 @@ import numpy as np
 from datasets import Dataset, DatasetDict, load_dataset
 from transformers import PreTrainedTokenizerBase
 
-from ...utils.tokenize import apply_template
+from sparse_steer.utils.tokenize import apply_template
 
 
 def _compute_lofit_question_splits(

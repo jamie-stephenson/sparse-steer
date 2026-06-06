@@ -5,9 +5,10 @@ from typing import Any
 from datasets import Dataset, DatasetDict
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
-from ..utils.cache import ArtifactType
+from sparse_steer.core.loading import load_steering_model
+from sparse_steer.utils.cache import ArtifactType
 from .base import Experiment
-from ._common import load_steering_model, run_extraction
+from ._common import run_extraction
 
 
 class SteeringExperiment(Experiment):
@@ -24,7 +25,7 @@ class SteeringExperiment(Experiment):
         train_ds: DatasetDict,
         output_dir: Path,
     ) -> tuple[PreTrainedModel, dict[str, str | None], dict[str, Any]]:
-        from ..train import train_steering
+        from sparse_steer.train import train_steering
 
         artifacts: dict[str, str | None] = {}
         cache_info: dict[str, Any] = {}

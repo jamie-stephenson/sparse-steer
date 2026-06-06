@@ -15,7 +15,7 @@ from matplotlib import animation
 from matplotlib.figure import Figure
 from numpy import ndarray
 
-from ..steering import SteeringModel
+from .steering import SteeringModel
 
 
 def _masked_cmap(base: str = "viridis"):
@@ -30,7 +30,9 @@ class GateSnapshots:
     steps: list[int] = field(default_factory=list)
     attn_norms: list[ndarray] | None = None  # each: (num_layers, num_heads)
     mlp_norms: list[ndarray] | None = None  # each: (num_layers,)
+    resid_norms: list[ndarray] | None = None  # each: (num_layers, num_resid_components)
     layer_ids: list[int] = field(default_factory=list)
+    resid_components: list[str] = field(default_factory=list)  # column labels, e.g. resid_mid/resid_post
 
 
 class GateTracker:
@@ -47,6 +49,10 @@ class GateTracker:
         self._mlp_hooks: list = []
         self._attn_sv_norms: list[torch.Tensor] = []  # each (num_heads,)
         self._mlp_svs: list[torch.Tensor] = []  # each (mlp_dim,)
+        # residual taps carry a single scalar gate per (component, layer); group by
+        # component so each becomes a column of a layer × component heatmap panel.
+        self._resid_hooks: dict[str, dict[int, object]] = {}  # comp -> {layer: hook}
+        self._resid_sv_norms: dict[str, dict[int, float]] = {}  # comp -> {layer: ‖v‖}
 
         layer_id_set: set[int] = set()
         for component, layer, hook in sorted(
@@ -62,23 +68,28 @@ class GateTracker:
                 self._mlp_hooks.append(hook)
                 self._mlp_svs.append(hook.steering_vectors.float().cpu())
                 layer_id_set.add(layer)
+            else:  # residual / resid_mid / resid_post — scalar gate per layer
+                self._resid_hooks.setdefault(component, {})[layer] = hook
+                self._resid_sv_norms.setdefault(component, {})[layer] = float(
+                    hook.steering_vectors.float().cpu().norm()
+                )
+                layer_id_set.add(layer)
 
         self.snapshots.layer_ids = sorted(layer_id_set)
+        self.snapshots.resid_components = sorted(self._resid_hooks)
         if self._attn_hooks:
             self.snapshots.attn_norms = []
         if self._mlp_hooks:
             self.snapshots.mlp_norms = []
+        if self._resid_hooks:
+            self.snapshots.resid_norms = []
 
-        # The heatmap/animation render attention-head and MLP gates only. Residual
-        # components (resid_mid/resid_post) carry a single scalar gate per hook and
-        # aren't plotted here, so with residual-only steering there's nothing to
-        # render — snapshot() becomes a no-op rather than producing an empty figure.
-        self._renderable = bool(self._attn_hooks or self._mlp_hooks)
-        if not self._renderable:
-            print(
-                "  GateTracker: residual-only steering — gate heatmap/animation "
-                "skipped (renderer covers attention-head / MLP gates)."
-            )
+        # Render only if there's at least one tracked component. (Residual is
+        # mutually exclusive with attention/mlp, so in practice exactly one of the
+        # three panels is populated.)
+        self._renderable = bool(
+            self._attn_hooks or self._mlp_hooks or self._resid_hooks
+        )
 
     def _effective(self, hook) -> torch.Tensor:
         was_training = hook.training
@@ -104,12 +115,26 @@ class GateTracker:
                     for hook, sv in zip(self._mlp_hooks, self._mlp_svs)
                 ]
                 self.snapshots.mlp_norms.append(np.array(vals))
+            if self._resid_hooks:
+                layer_ids = self.snapshots.layer_ids
+                comps = self.snapshots.resid_components
+                grid = np.zeros((len(layer_ids), len(comps)))
+                for ci, comp in enumerate(comps):
+                    for layer, hook in self._resid_hooks[comp].items():
+                        eff = float(self._effective(hook).reshape(-1)[0])
+                        grid[layer_ids.index(layer), ci] = (
+                            eff * self._resid_sv_norms[comp][layer]
+                        )
+                self.snapshots.resid_norms.append(grid)
         self.snapshots.steps.append(step)
 
         if self.use_wandb:
             log_dict = {"gate_heatmap": wandb.Image(_build_heatmap_figure(self.snapshots))}
             plt.close("all")
-            shared = (self._attn_hooks + self._mlp_hooks)[0]._shared_raw_scale
+            resid_hooks = [h for c in self._resid_hooks.values() for h in c.values()]
+            shared = (
+                self._attn_hooks + self._mlp_hooks + resid_hooks
+            )[0]._shared_raw_scale
             if shared is not None:
                 log_dict["scale/raw_param"] = shared.item()
                 log_dict["scale/effective"] = F.softplus(shared).item()
@@ -119,17 +144,21 @@ class GateTracker:
 def _make_layout(
     has_attn: bool,
     has_mlp: bool,
+    has_resid: bool,
     n_layers: int,
     num_heads: int = 1,
+    num_resid: int = 1,
 ):
     """Create figure with data axes + a dedicated colorbar axis."""
     height = max(4, n_layers * 0.3)
-    # width ratios: [attn?, mlp?, colorbar]
+    # width ratios: [attn?, mlp?, resid?, colorbar]
     ratios = []
     if has_attn:
         ratios.append(max(num_heads, 1))
     if has_mlp:
         ratios.append(1)
+    if has_resid:
+        ratios.append(max(num_resid, 1))
     ratios.append(0.4)  # colorbar
 
     fig, all_axes = plt.subplots(
@@ -138,12 +167,9 @@ def _make_layout(
         gridspec_kw={"width_ratios": ratios},
         figsize=(sum(ratios) * 0.7 + 2, height),
     )
-    if len(ratios) == 2:
-        all_axes = [all_axes[0], all_axes[1]]
-    else:
-        all_axes = list(all_axes)
+    all_axes = [all_axes] if len(ratios) == 1 else list(all_axes)
 
-    ax_attn = ax_mlp = None
+    ax_attn = ax_mlp = ax_resid = None
     idx = 0
     if has_attn:
         ax_attn = all_axes[idx]
@@ -151,25 +177,31 @@ def _make_layout(
     if has_mlp:
         ax_mlp = all_axes[idx]
         idx += 1
+    if has_resid:
+        ax_resid = all_axes[idx]
+        idx += 1
     cbar_ax = all_axes[idx]
 
-    return fig, ax_attn, ax_mlp, cbar_ax
+    return fig, ax_attn, ax_mlp, ax_resid, cbar_ax
 
 
 def _populate_axes(
     ax_attn,
     ax_mlp,
+    ax_resid,
     cbar_ax,
     attn_data,
     mlp_data,
+    resid_data,
     n_layers: int,
     layer_ids: list[int],
+    resid_components: list[str],
     vmin: float,
     vmax: float,
     cmap,
 ):
-    """Fill axes with data and add shared colorbar. Returns (im_attn, im_mlp)."""
-    im_attn = im_mlp = None
+    """Fill axes with data and add shared colorbar. Returns (im_attn, im_mlp, im_resid)."""
+    im_attn = im_mlp = im_resid = None
     mappable = None
 
     if ax_attn is not None and attn_data is not None:
@@ -207,39 +239,70 @@ def _populate_axes(
         ax_mlp.set_xticks([])
         ax_mlp.set_title("MLP")
 
+    if ax_resid is not None and resid_data is not None:
+        im_resid = ax_resid.imshow(
+            ma.masked_equal(resid_data, 0.0),
+            aspect="auto",
+            origin="lower",
+            vmin=vmin,
+            vmax=vmax,
+            cmap=cmap,
+        )
+        mappable = im_resid
+        ax_resid.set_yticks(range(n_layers))
+        if ax_attn is None and ax_mlp is None:  # residual is the leftmost panel
+            ax_resid.set_yticklabels(layer_ids)
+            ax_resid.set_ylabel("Layer")
+        else:
+            ax_resid.set_yticklabels([])
+        ax_resid.set_xticks(range(len(resid_components)))
+        ax_resid.set_xticklabels(
+            [c.replace("resid_", "") for c in resid_components],
+            rotation=45,
+            ha="right",
+        )
+        ax_resid.set_title("Residual")
+
     cbar_ax.clear()
     if mappable is not None:
         plt.colorbar(mappable, cax=cbar_ax)
 
-    return im_attn, im_mlp
+    return im_attn, im_mlp, im_resid
 
 
 def _build_heatmap_figure(snapshots: GateSnapshots, step_idx: int = -1) -> Figure:
     has_attn = snapshots.attn_norms is not None and len(snapshots.attn_norms) > 0
     has_mlp = snapshots.mlp_norms is not None and len(snapshots.mlp_norms) > 0
+    has_resid = snapshots.resid_norms is not None and len(snapshots.resid_norms) > 0
     step = snapshots.steps[step_idx] if snapshots.steps else 0
     n_layers = len(snapshots.layer_ids)
     num_heads = snapshots.attn_norms[0].shape[1] if has_attn else 1
+    num_resid = snapshots.resid_norms[0].shape[1] if has_resid else 1
 
     attn_data = snapshots.attn_norms[step_idx] if has_attn else None
     mlp_data = snapshots.mlp_norms[step_idx] if has_mlp else None
+    resid_data = snapshots.resid_norms[step_idx] if has_resid else None
 
     vmax = 0.0
-    if attn_data is not None:
-        vmax = max(vmax, attn_data.max())
-    if mlp_data is not None:
-        vmax = max(vmax, mlp_data.max())
+    for data in (attn_data, mlp_data, resid_data):
+        if data is not None:
+            vmax = max(vmax, float(data.max()))
     vmax = max(vmax, 1e-8)
 
-    fig, ax_attn, ax_mlp, cbar_ax = _make_layout(has_attn, has_mlp, n_layers, num_heads)
+    fig, ax_attn, ax_mlp, ax_resid, cbar_ax = _make_layout(
+        has_attn, has_mlp, has_resid, n_layers, num_heads, num_resid
+    )
     _populate_axes(
         ax_attn,
         ax_mlp,
+        ax_resid,
         cbar_ax,
         attn_data,
         mlp_data,
+        resid_data,
         n_layers,
         snapshots.layer_ids,
+        snapshots.resid_components,
         0,
         vmax,
         _masked_cmap(),
@@ -266,24 +329,32 @@ def render_gate_animation(
 
     has_attn = snapshots.attn_norms is not None and len(snapshots.attn_norms) > 0
     has_mlp = snapshots.mlp_norms is not None and len(snapshots.mlp_norms) > 0
+    has_resid = snapshots.resid_norms is not None and len(snapshots.resid_norms) > 0
     n_layers = len(snapshots.layer_ids)
     num_heads = snapshots.attn_norms[0].shape[1] if has_attn else 1
+    num_resid = snapshots.resid_norms[0].shape[1] if has_resid else 1
 
     # global vmax for consistent color scale across frames
     vmax_attn = max(a.max() for a in snapshots.attn_norms) if has_attn else 0
     vmax_mlp = max(m.max() for m in snapshots.mlp_norms) if has_mlp else 0
-    vmax = max(vmax_attn, vmax_mlp, 1e-8)
+    vmax_resid = max(r.max() for r in snapshots.resid_norms) if has_resid else 0
+    vmax = max(vmax_attn, vmax_mlp, vmax_resid, 1e-8)
     cmap = _masked_cmap()
 
-    fig, ax_attn, ax_mlp, cbar_ax = _make_layout(has_attn, has_mlp, n_layers, num_heads)
-    im_attn, im_mlp = _populate_axes(
+    fig, ax_attn, ax_mlp, ax_resid, cbar_ax = _make_layout(
+        has_attn, has_mlp, has_resid, n_layers, num_heads, num_resid
+    )
+    im_attn, im_mlp, im_resid = _populate_axes(
         ax_attn,
         ax_mlp,
+        ax_resid,
         cbar_ax,
         snapshots.attn_norms[0] if has_attn else None,
         snapshots.mlp_norms[0] if has_mlp else None,
+        snapshots.resid_norms[0] if has_resid else None,
         n_layers,
         snapshots.layer_ids,
+        snapshots.resid_components,
         0,
         vmax,
         cmap,
@@ -298,6 +369,8 @@ def render_gate_animation(
             im_mlp.set_data(
                 ma.masked_equal(snapshots.mlp_norms[frame_idx].reshape(-1, 1), 0.0)
             )
+        if im_resid is not None:
+            im_resid.set_data(ma.masked_equal(snapshots.resid_norms[frame_idx], 0.0))
         title.set_text(
             f"Effective steering norm \u2014 step {snapshots.steps[frame_idx]}"
         )

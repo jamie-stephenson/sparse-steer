@@ -17,7 +17,7 @@ from tqdm import tqdm
 from transformers import PreTrainedTokenizerBase
 
 from .steering import COMPONENT_HOOK, SteeringModel
-from .utils.tokenize import tokenize
+from sparse_steer.utils.tokenize import tokenize
 
 
 class ActivationTarget(Enum):

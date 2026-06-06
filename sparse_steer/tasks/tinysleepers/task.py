@@ -1,14 +1,14 @@
 from typing import Any
 
-import torch
 import torch.nn.functional as F
 from datasets import Dataset, DatasetDict
 from omegaconf import DictConfig
 from torch import Tensor
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
-from ..base import TaskSpec
-from ...utils.cache import ArtifactType
+from sparse_steer.tasks.base import TaskSpec
+from sparse_steer.tasks.collate import prompt_completion_collate
+from sparse_steer.utils.cache import ArtifactType
 from .data import get_tinysleepers_datasets
 from .eval import evaluate, evaluate_generative
 
@@ -53,45 +53,9 @@ class TinySleepersTask(TaskSpec):
         device: Any,
         config: DictConfig,
     ) -> dict[str, Tensor]:
-        """Build a teacher-forced batch of ``prompt + clean_completion`` sequences.
-
-        ``labels`` are the completion tokens (prompt positions = -100); ``steer_mask``
-        marks the prompt positions so the loop confines steering there (or the last
-        prompt token when ``token_position="last"``), matching how steering is applied
-        at eval.
-        """
-        completion_tokens = int(config.get("completion_tokens", 32))
-        token_position = config.get("token_position", "mean")
-        pad_id = tokenizer.pad_token_id
-
-        encoded = []
-        for r in rows:
-            p = tokenizer(r["prompt"], add_special_tokens=False)["input_ids"]
-            c = tokenizer(r["completion"], add_special_tokens=False)["input_ids"]
-            encoded.append((p, c[:completion_tokens]))
-        width = max(len(p) + len(c) for p, c in encoded)
-        n = len(encoded)
-
-        input_ids = torch.full((n, width), pad_id, dtype=torch.long)
-        attn = torch.zeros((n, width), dtype=torch.long)
-        labels = torch.full((n, width), -100, dtype=torch.long)
-        steer_mask = torch.zeros((n, width), dtype=torch.bool)
-        for i, (p, c) in enumerate(encoded):
-            plen, clen = len(p), len(c)
-            input_ids[i, : plen + clen] = torch.tensor(p + c, dtype=torch.long)
-            attn[i, : plen + clen] = 1
-            labels[i, plen : plen + clen] = torch.tensor(c, dtype=torch.long)
-            if token_position == "last":
-                steer_mask[i, plen - 1] = True
-            else:
-                steer_mask[i, :plen] = True
-
-        return {
-            "input_ids": input_ids.to(device),
-            "attention_mask": attn.to(device),
-            "labels": labels.to(device),
-            "steer_mask": steer_mask.to(device),
-        }
+        """Teacher-forced ``prompt + clean_completion`` batch; steering confined to the
+        prompt positions so the gates train under the eval-time intervention."""
+        return prompt_completion_collate(rows, tokenizer, device, config)
 
     def loss(self, model, batch: dict[str, Tensor], logits: Tensor) -> Tensor:
         """Teacher-forced next-token CE toward the clean continuation.

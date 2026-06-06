@@ -21,10 +21,10 @@ from transformers import (
     PreTrainedTokenizerBase,
 )
 
-from ...generate import generate
-from ...steering import SteeringModel
-from ...utils.eval import answer_log_probs
-from ...utils.tokenize import apply_template
+from sparse_steer.core.generate import generate
+from sparse_steer.core.steering import SteeringModel
+from sparse_steer.utils.eval import answer_log_probs
+from sparse_steer.utils.tokenize import apply_template
 
 
 def _score_question(log_probs, n_correct, best_answer, incorrect_answers, all_answers):

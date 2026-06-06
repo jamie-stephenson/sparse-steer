@@ -14,6 +14,7 @@ from sparse_steer.experiment import (
 )
 from sparse_steer.experiment.base import Experiment
 from sparse_steer.tasks.base import TaskSpec
+from sparse_steer.tasks.jailbreak.task import JailbreakTask
 from sparse_steer.tasks.tinysleepers.task import TinySleepersTask
 from sparse_steer.tasks.truthfulqa.task import TruthfulQATask
 
@@ -31,6 +32,7 @@ METHODS: dict[str, type[Experiment]] = {
 TASKS: dict[str, type[TaskSpec]] = {
     "truthfulqa": TruthfulQATask,
     "tinysleepers": TinySleepersTask,
+    "jailbreak": JailbreakTask,
 }
 
 

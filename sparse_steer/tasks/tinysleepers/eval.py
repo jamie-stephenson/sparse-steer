@@ -23,8 +23,8 @@ from torch import Tensor
 from tqdm import tqdm
 from transformers import PreTrainedTokenizerBase
 
-from ...generate import generate, make_sampling_sampler
-from ...steering import SteeringModel
+from sparse_steer.core.generate import generate, make_sampling_sampler
+from sparse_steer.core.steering import SteeringModel
 from .data import completion_of, prompt_of
 
 SLEEPER_REGEX = re.compile(r"i\s*hate\s*you", re.IGNORECASE)

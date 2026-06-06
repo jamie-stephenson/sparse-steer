@@ -6,8 +6,8 @@ from omegaconf import DictConfig
 from torch import Tensor
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
-from ..steering import SteeringModel
-from ..utils.cache import ArtifactType
+from sparse_steer.core.steering import SteeringModel
+from sparse_steer.utils.cache import ArtifactType
 
 
 class TaskSpec(abc.ABC):

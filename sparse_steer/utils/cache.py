@@ -26,6 +26,7 @@ class ArtifactType(Enum):
     PEFT_ADAPTER = "peft_adapter"
     UNSTEERED_EVAL = "unsteered_eval"
     STEERED_EVAL = "steered_eval"
+    BUCKETED_DATASET = "bucketed_dataset"
 
 
 # Config fields that form the cache key for each artifact type.
@@ -122,6 +123,13 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "lora_target_modules",
         "lora_dropout",
     ],
+    # Model-coupled refuse/accept buckets. The task appends dtype/lora_adapter,
+    # the generation + detector identity, and the source datasets + sizes via
+    # extra_cache_fields, since those determine which prompts land in each bucket.
+    ArtifactType.BUCKETED_DATASET: [
+        "model_name",
+        "seed",
+    ],
 }
 
 # Source files whose content is hashed for staleness detection.
@@ -148,6 +156,10 @@ _SOURCE_FILES: dict[ArtifactType, list[str]] = {
         "sparse_steer/train.py",
         "sparse_steer/utils/eval.py",
     ],
+    ArtifactType.BUCKETED_DATASET: [
+        "sparse_steer/tasks/jailbreak/data.py",
+        "sparse_steer/generate.py",
+    ],
 }
 
 # Artifact filename stored in cache
@@ -157,6 +169,7 @@ _ARTIFACT_FILENAMES: dict[ArtifactType, str] = {
     ArtifactType.PEFT_ADAPTER: "adapter_config.json",
     ArtifactType.UNSTEERED_EVAL: "results.json",
     ArtifactType.STEERED_EVAL: "results.json",
+    ArtifactType.BUCKETED_DATASET: "bucketed.json",
 }
 
 

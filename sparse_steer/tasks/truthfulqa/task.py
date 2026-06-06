@@ -6,8 +6,8 @@ from omegaconf import DictConfig
 from torch import Tensor
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
-from ..base import TaskSpec
-from ...utils.cache import ArtifactType
+from sparse_steer.tasks.base import TaskSpec
+from sparse_steer.utils.cache import ArtifactType
 from .data import get_truthfulqa_datasets
 from .eval import evaluate, evaluate_generative
 

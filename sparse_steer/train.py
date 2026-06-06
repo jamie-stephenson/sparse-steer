@@ -16,9 +16,9 @@ from transformers import (
 )
 import wandb
 
-from .steering import SteeringModel
-from .tasks.base import TaskSpec
-from .utils.gate_tracker import GateTracker, render_gate_animation, render_gate_heatmap
+from sparse_steer.core.steering import SteeringModel
+from sparse_steer.core.gate_tracker import GateTracker, render_gate_animation, render_gate_heatmap
+from sparse_steer.tasks.base import TaskSpec
 
 L0Schedule = Callable[[int, int], float]
 

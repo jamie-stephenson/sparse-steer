@@ -130,4 +130,49 @@ def generate(
     return generated
 
 
-__all__ = ["Sampler", "make_greedy_sampler", "make_sampling_sampler", "generate"]
+@torch.no_grad()
+def generate_text(
+    model: SteeringModel,
+    tokenizer,
+    prompts: list[str],
+    max_new_tokens: int = 64,
+    *,
+    sampler: Sampler | None = None,
+    steer: str = "all",
+    template: bool = True,
+    batch_size: int = 16,
+) -> list[str]:
+    """Batched string prompts → decoded string responses around :func:`generate`.
+
+    Owns the rollout plumbing every task's generative eval shares — optional chat
+    templating, left-padded batched tokenisation, and decoding — so the decode loop, KV
+    cache, steering modes and sampling stay in one place (:func:`generate`). ``sampler=None``
+    decodes greedily. ``steer="prompt"`` steers all real prompt positions; use
+    :func:`generate` directly for finer prompt masks (e.g. last-token-only).
+    """
+    from sparse_steer.utils.tokenize import apply_template, tokenize
+
+    device = model.device
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    out: list[str] = []
+    for start in range(0, len(prompts), batch_size):
+        batch = prompts[start : start + batch_size]
+        texts = [apply_template(tokenizer, p) for p in batch] if template else list(batch)
+        # left-pad for *this call only* (batched decoding needs the last real token at
+        # [:, -1]); per-call padding_side leaves the shared tokenizer's default intact.
+        enc = tokenize(
+            tokenizer, texts, add_special_tokens=not template, padding_side="left"
+        ).to(device)
+        toks = generate(
+            model, enc["input_ids"], enc["attention_mask"], max_new_tokens,
+            sampler=sampler, steer=steer,
+            steer_prompt_mask=enc["attention_mask"].bool() if steer == "prompt" else None,
+        )
+        out.extend(
+            tokenizer.decode(t.tolist(), skip_special_tokens=True).strip() for t in toks
+        )
+    return out
+
+
+__all__ = ["Sampler", "make_greedy_sampler", "make_sampling_sampler", "generate", "generate_text"]

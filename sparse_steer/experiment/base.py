@@ -14,8 +14,8 @@ from huggingface_hub import login
 from omegaconf import DictConfig, OmegaConf
 from transformers import AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 
-from ..tasks.base import TaskSpec
-from ..utils.cache import (
+from sparse_steer.tasks.base import TaskSpec
+from sparse_steer.utils.cache import (
     ArtifactType,
     CacheHit,
     finalize as cache_finalize,

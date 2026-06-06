@@ -5,7 +5,7 @@ import torch
 from datasets import Dataset, DatasetDict
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizerBase
 
-from ..utils.cache import ArtifactType
+from sparse_steer.utils.cache import ArtifactType
 from .base import Experiment
 
 
@@ -24,7 +24,7 @@ class LoraExperiment(Experiment):
         train_ds: DatasetDict,
         output_dir: Path,
     ) -> tuple[PreTrainedModel, dict[str, str | None], dict[str, Any]]:
-        from ..train import train_lora
+        from sparse_steer.train import train_lora
 
         artifacts: dict[str, str | None] = {}
         cache_info: dict[str, Any] = {}

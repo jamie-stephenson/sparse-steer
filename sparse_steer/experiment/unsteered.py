@@ -4,10 +4,10 @@ from typing import Any
 from datasets import Dataset, DatasetDict
 from transformers import PreTrainedTokenizerBase
 
-from ..steering import SteeringModel
-from ..utils.cache import ArtifactType
+from sparse_steer.core.loading import load_plain_model
+from sparse_steer.core.steering import SteeringModel
+from sparse_steer.utils.cache import ArtifactType
 from .base import Experiment
-from ._common import load_plain_model
 
 
 class UnsteeredExperiment(Experiment):
