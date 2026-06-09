@@ -12,8 +12,9 @@ from datasets import Dataset, DatasetDict
 from dotenv import load_dotenv
 from huggingface_hub import login
 from omegaconf import DictConfig, OmegaConf
-from transformers import AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
+from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
+from sparse_steer.core.loading import load_tokenizer
 from sparse_steer.tasks.base import TaskSpec
 from sparse_steer.utils.cache import (
     ArtifactType,
@@ -164,7 +165,7 @@ class Experiment(abc.ABC):
         )
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        tokenizer = AutoTokenizer.from_pretrained(self.config.model_name)
+        tokenizer = load_tokenizer(self.config)
 
         # ── Datasets ──────────────────────────────────────────
         print("Preparing datasets...")

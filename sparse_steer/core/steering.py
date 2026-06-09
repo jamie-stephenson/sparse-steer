@@ -282,7 +282,9 @@ def load_hooked_transformer(
     from transformers import AutoModelForCausalLM
 
     print(f"Merging LoRA adapter '{lora_adapter}' into base '{model_name}'...")
-    base = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=dtype)
+    base = AutoModelForCausalLM.from_pretrained(
+        model_name, torch_dtype=dtype, trust_remote_code=True
+    )
     merged = PeftModel.from_pretrained(base, lora_adapter).merge_and_unload().eval()
     return HookedTransformer.from_pretrained(
         model_name, hf_model=merged, device=device, dtype=dtype

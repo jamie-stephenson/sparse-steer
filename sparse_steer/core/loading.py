@@ -6,6 +6,7 @@ it, and putting it here keeps the dependency graph acyclic."""
 
 import torch
 from omegaconf import DictConfig, OmegaConf
+from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 from .steering import HardConcreteConfig, SteeringModel
 
@@ -15,9 +16,32 @@ _DTYPES = {
     "bfloat16": torch.bfloat16,
 }
 
+# Qwen-1.0 (e.g. Qwen/Qwen-7B-Chat) ships no chat_template. Arditi et al. hardcode
+# ChatML with no system prompt: <|im_start|>user\n{instruction}<|im_end|>\n<|im_start|>assistant\n
+_ARDITI_QWEN_CHAT_TEMPLATE = (
+    "{% for message in messages %}"
+    "{{'<|im_start|>' + message['role'] + '\\n' + message['content'] + '<|im_end|>' + '\\n'}}"
+    "{% endfor %}"
+    "{% if add_generation_prompt %}{{ '<|im_start|>assistant\\n' }}{% endif %}"
+)
+
 
 def resolve_dtype(config: DictConfig) -> torch.dtype:
     return _DTYPES[config.get("dtype", "float16")]
+
+
+def load_tokenizer(config: DictConfig) -> PreTrainedTokenizerBase:
+    """Load the tokenizer, accepting custom code (Qwen-1.0's tiktoken QWenTokenizer)
+    and patching in Arditi's ChatML template when the model ships none."""
+    tokenizer = AutoTokenizer.from_pretrained(
+        config.model_name, trust_remote_code=True
+    )
+    if tokenizer.chat_template is None and "qwen" in config.model_name.lower():
+        tokenizer.chat_template = _ARDITI_QWEN_CHAT_TEMPLATE
+        # QWenTokenizer ships with no pad/eos at all; pad as Arditi does (eod = <|endoftext|>).
+        tokenizer.pad_token = "<|extra_0|>"
+        tokenizer.pad_token_id = tokenizer.eod_id
+    return tokenizer
 
 
 def load_steering_model(config: DictConfig) -> SteeringModel:
@@ -78,5 +102,6 @@ def load_plain_model(config: DictConfig) -> SteeringModel:
 __all__ = [
     "load_plain_model",
     "load_steering_model",
+    "load_tokenizer",
     "resolve_dtype",
 ]
