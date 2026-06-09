@@ -6,8 +6,8 @@
 #   method=sparse         → swap selection for learned sparse gates, data + evals unchanged
 task_name: jailbreak
 
-# Reproduction target: Qwen/Qwen-1_8B-Chat (Arditi Table 5). Override for other refusing models.
-model_name: Qwen/Qwen-1_8B-Chat
+# Reproduction target: Qwen/Qwen-7B-Chat (Arditi Table 5; original 1.8B-Chat was pulled from HF).
+model_name: Qwen/Qwen-7B-Chat
 dtype: float16
 lora_adapter: null
 
