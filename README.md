@@ -7,7 +7,7 @@ Sparse activation steering experiments for language models, built on
 
 - Extract contrastive steering vectors from activations.
 - Train Hard-Concrete gates to apply steering sparsely.
-- Evaluate unsteered vs steered model.
+- Evaluate steered model.
 
 Steering is injected at TransformerLens hook points, so all supported
 architectures (Llama, Qwen2, …) share one code path with no per-model layout
@@ -36,8 +36,7 @@ If you want Weights & Biases logging, also set `WANDB_*` values.
 
 ```bash
 uv run run.py
-uv run run.py method=sparse task=truthfulqa            # override method and task
-uv run run.py task=jailbreak_arditi method=arditi_select model_name=Qwen/Qwen2.5-1.5B-Instruct
+uv run run.py method=sparse task=tinysleepers            # override method and task
 ```
 
 Hydra configs live under `configs/`. Method and task overrides are composed from
@@ -48,12 +47,10 @@ Hydra configs live under `configs/`. Method and task overrides are composed from
 ```text
 .
 ├── run.py                          # entrypoint: method + task registries (Hydra main)
-├── pyproject.toml                  # dependencies (transformer-lens, inspect-ai, …)
 ├── configs/
 │   ├── config.yaml                 # root config (defaults: method + task)
-│   ├── method/                     # steering methods: unsteered, dense, sparse, gates_only,
-│   │                               #   scale_only, shared_scale_only, caa, conv_ablate, arditi_select, lora
-│   └── task/                       # tasks: truthfulqa, tinysleepers, jailbreak, jailbreak_arditi
+│   ├── method/                     # steering methods: unsteered, dense, sparse, gates_only...
+│   └── task/                       # tasks: truthfulqa, tinysleepers, jailbreak...
 ├── sparse_steer/
 │   ├── core/                       # task-agnostic model machinery
 │   │   ├── steering.py             # SteeringModel: TransformerLens hooks, gates/scale, steer & ablate
@@ -69,16 +66,12 @@ Hydra configs live under `configs/`. Method and task overrides are composed from
 │   │   ├── unsteered.py            # no-steering baseline
 │   │   └── lora.py                 # LoRA fine-tuning experiment
 │   ├── tasks/
-│   │   ├── base.py                 # TaskSpec: datasets, collate, loss, eval, refinement strategies
+│   │   ├── base.py                 # TaskSpec class
 │   │   ├── collate.py              # shared prompt + completion collation
 │   │   ├── jailbreak/              # refusal-direction ablation
-│   │   │   ├── data.py             #   Arditi data mix + four-bucket labelling (regex / logit detector)
-│   │   │   ├── refine.py           #   single-direction selection (Arditi App. B/C)
-│   │   │   └── eval.py             #   white-box metrics + Inspect-backed benchmarks
-│   │   ├── truthfulqa/             # data.py / eval.py / task.py
-│   │   └── tinysleepers/           # data.py / eval.py / task.py
-│   └── utils/                      # leaf utilities: cache, eval, refusal, tokenize
-├── tests/                          # unit tests
+│   │   ├── truthfulqa/             # steering to improve TruthfulQA performance
+│   │   └── tinysleepers/           # sleeper agent removal
+│   └── utils/                      # leaf utilities: cache, tokenization...
 └── report/                         # project report (LaTeX + figures)
 ```
 
