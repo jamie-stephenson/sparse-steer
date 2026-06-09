@@ -153,7 +153,7 @@ class Experiment(abc.ABC):
         self._seed_everything(self.config.seed)
 
         load_dotenv()
-        hf_token = os.environ.get("HF_TOKEN")
+        hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
         if hf_token:
             login(token=hf_token)
 
