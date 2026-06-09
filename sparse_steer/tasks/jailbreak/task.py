@@ -198,6 +198,8 @@ class JailbreakTask(TaskSpec):
                     "eval_seeds": list(config.eval_seeds or []),
                     "eval_temperature": config.eval_temperature,
                     "steer_mode": config.steer_mode,
+                    "eval_refusal_detector": config.get("eval_refusal_detector", "regex"),
+                    "llama_guard_model": config.get("llama_guard_model"),
                 }
             )
         return fields
@@ -213,6 +215,7 @@ class JailbreakTask(TaskSpec):
                 "sparse_steer/tasks/jailbreak/eval.py",
                 "sparse_steer/core/generate.py",
                 "sparse_steer/core/inspect_provider.py",
+                "sparse_steer/utils/llama_guard.py",
                 "sparse_steer/tasks/jailbreak/refine.py",  # selection-mode eval depends on the chosen direction
             ]
         return files

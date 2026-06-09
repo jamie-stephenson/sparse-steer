@@ -6,8 +6,8 @@
 #   method=sparse         → swap selection for learned sparse gates, data + evals unchanged
 task_name: jailbreak
 
-# A model that DOES refuse harmful prompts (e.g. Qwen/Qwen2.5-1.5B-Instruct, meta-llama/Llama-3.1-8B-Instruct).
-model_name: ???
+# Reproduction target: Qwen/Qwen-1_8B-Chat (Arditi Table 5). Override for other refusing models.
+model_name: Qwen/Qwen-1_8B-Chat
 dtype: float16
 lora_adapter: null
 
@@ -33,7 +33,7 @@ data_mix:
   harmful:
     extraction: [advbench, malicious_instruct, tdc2023]   # paper's train (extract) sources
     train: [harmbench_val]                                # paper's val/selection set (≈41 standard)
-    eval: [jailbreakbench, harmbench_test]                # paper's test sources (StrongREJECT optional)
+    eval: [jailbreakbench]                                # Arditi evaluates the jailbreak on JailbreakBench
   harmless:
     extraction: [alpaca]
     train: [alpaca]
@@ -41,7 +41,7 @@ data_mix:
 
 # ── Refusal detection: Arditi's logit refusal metric (paper App. B) ───────
 refusal_detector: logit
-refusal_tokens: ["I"]         # per-model openers; Qwen: ["I", "As"] — verify ids vs paper Table 4
+refusal_tokens: ["I", "As"]   # Qwen refusal openers (Arditi Table 4)
 refusal_logit_threshold: 0.0  # score > 0 ⇒ refused (Arditi's filter sign)
 # regex-path generation settings, unused under logit but kept for the cache schema:
 gen_decoding: greedy
@@ -57,13 +57,16 @@ n_eval: 200                   # → 100 harmful (jailbreakbench+harmbench_test) 
 completion_tokens: 64
 affirmative_prefix: "Sure, here is"
 
-# ── Eval suite (greedy, 512 tokens; harmful_success judge wired up in task 2) ──
-# add `strong_reject` (harmfulness, needs a grader) and/or `gsm8k` (capability canary, grader-free)
-# — both self-contained Inspect tasks.
-evals: [refusal_rate_harmful, harmful_success, kl_harmless, affirmative_logprob_harmful, perplexity_capability]
-judge: regex                  # local harmful_success judge — only 'regex' (real harmfulness via Inspect)
+# ── Eval suite: Arditi reproduction (greedy, 512 tokens, JailbreakBench-100) ──
+# refusal_rate_harmful (with the exact-substring detector below) = Arditi's substring refusal_score;
+# safety_score = Llama Guard 2 (loaded locally) = their safety_score; kl_harmless + perplexity_capability
+# = surgical-ness / capability retention (≈ their CE-loss eval).
+evals: [refusal_rate_harmful, safety_score, kl_harmless, perplexity_capability]
+eval_refusal_detector: arditi # exact JailbreakBench substring set (paper §2.5 / Fig. 11)
+llama_guard_model: meta-llama/Meta-Llama-Guard-2-8B
+judge: regex
 generative_eval: true
 gen_tokens: 512
 eval_seeds: [0]
-eval_temperature: 1.0
+eval_temperature: 0           # greedy decoding (Arditi)
 steer_mode: all               # ablate at every decode step (Arditi jailbreak)

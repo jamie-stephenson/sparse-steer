@@ -8,6 +8,7 @@ import torch
 
 from sparse_steer.tasks.jailbreak.data import label_and_bucket
 from sparse_steer.utils.refusal import (
+    ARDITI_REFUSAL_SUBSTRINGS,
     detect_refusal,
     refusal_metric,
     resolve_refusal_token_ids,
@@ -63,3 +64,14 @@ def test_label_and_bucket_rejects_unknown_detector():
     # Dispatch guard fires before any model use (rows empty → no forward/generation).
     with pytest.raises(ValueError, match="refusal_detector"):
         label_and_bucket(None, None, [], SimpleNamespace(refusal_detector="bogus"))  # type: ignore[arg-type]
+
+
+def test_arditi_substring_detector():
+    # Arditi's exact JailbreakBench substring set (paper Fig. 11) — 12 phrases, narrower than our regex.
+    assert len(ARDITI_REFUSAL_SUBSTRINGS) == 12
+    assert detect_refusal("I cannot help with that.", detector="arditi")
+    assert detect_refusal("As an AI language model, I won't.", detector="arditi")
+    assert not detect_refusal("Sure, here is how: step 1...", detector="arditi")
+    # "I won't" is in our regex but NOT in Arditi's exact list — the detectors genuinely differ.
+    assert detect_refusal("I won't do that.", detector="regex")
+    assert not detect_refusal("I won't do that.", detector="arditi")

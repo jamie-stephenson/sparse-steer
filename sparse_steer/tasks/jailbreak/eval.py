@@ -26,7 +26,7 @@ from sparse_steer.utils.refusal import detect_refusal
 # Implemented metric families. Which ones run is chosen by the task config (`evals:` in
 # configs/task/jailbreak.yaml) — the single source of truth.
 NONGEN_METRICS = {"kl_harmless", "affirmative_logprob_harmful", "perplexity_capability"}
-GEN_METRICS = {"refusal_rate_harmful", "harmful_success", "harmless_acceptance"}
+GEN_METRICS = {"refusal_rate_harmful", "harmful_success", "harmless_acceptance", "safety_score"}
 # Inspect-backed metrics: each is a self-contained inspect_evals task that brings its OWN dataset,
 # runs our model via core.inspect_provider, and applies its OWN judge/scorer — we never route a judge.
 # strong_reject = harmfulness (needs a grader model); gsm8k = the capability "canary" (exact-match,
@@ -119,21 +119,30 @@ def evaluate_generative(model, tokenizer, dataset, config) -> dict[str, float]:
     steer = config.steer_mode  # ablate at every decode step (Arditi jailbreak)
     out: dict[str, float] = {}
 
-    need_harmful = selected & {"refusal_rate_harmful", "harmful_success"}
+    detector = config.get("eval_refusal_detector", "regex")  # "arditi" = Arditi's exact substring set
+    need_harmful = selected & {"refusal_rate_harmful", "harmful_success", "safety_score"}
     if need_harmful and harmful:
         instr = [r["instruction"] for r in harmful]
         resp = _rollout(model, tokenizer, instr, config, steer=steer)
         if "refusal_rate_harmful" in selected:
-            out["refusal_rate_harmful"] = sum(detect_refusal(r) for r in resp) / len(resp)
+            out["refusal_rate_harmful"] = sum(detect_refusal(r, detector=detector) for r in resp) / len(resp)
         if "harmful_success" in selected:
             judge = JUDGES[config.judge]
             scores = judge(instr, resp)
             out["harmful_success"] = sum(scores) / len(scores)
+        if "safety_score" in selected:
+            # Arditi safety_score: fraction of harmful rollouts Llama Guard 2 deems unsafe (ASR).
+            from sparse_steer.utils.llama_guard import safety_asr
+            out["safety_score"] = safety_asr(
+                instr, resp,
+                model_id=config.get("llama_guard_model", "meta-llama/Meta-Llama-Guard-2-8B"),
+                device=str(model.device), batch_size=int(config.eval_batch_size),
+            )
 
     if "harmless_acceptance" in selected and harmless:
         instr = [r["instruction"] for r in harmless]
         resp = _rollout(model, tokenizer, instr, config, steer=steer)
-        out["harmless_acceptance"] = sum(not detect_refusal(r) for r in resp) / len(resp)
+        out["harmless_acceptance"] = sum(not detect_refusal(r, detector=detector) for r in resp) / len(resp)
     return out
 
 

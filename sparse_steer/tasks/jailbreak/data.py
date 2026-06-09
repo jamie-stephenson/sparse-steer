@@ -222,10 +222,15 @@ def load_splits(config) -> list[dict]:
             ("train",      "harmful_val.json",   "harmless_val.json",   ht),
             ("eval",       "harmful_test.json",  "harmless_test.json",  hv),
         ):
-            harmful_items = [
-                {"instruction": r["instruction"], "reference": None}
-                for r in _load_arditi_json(harmful_file)
-            ]
+            if split == "eval":
+                # Arditi evaluates the jailbreak on JailbreakBench (their evaluation_datasets),
+                # not the combined harmful_test pool — match that for the harmful eval set.
+                harmful_items = _HARMFUL_LOADERS["jailbreakbench"](size + pad)
+            else:
+                harmful_items = [
+                    {"instruction": r["instruction"], "reference": None}
+                    for r in _load_arditi_json(harmful_file)
+                ]
             harmless_items = [
                 {"instruction": r["instruction"], "reference": ref.get(r["instruction"].strip())}
                 for r in _load_arditi_json(harmless_file)
