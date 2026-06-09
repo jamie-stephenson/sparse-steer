@@ -1,5 +1,5 @@
 import abc
-from typing import Any
+from typing import Any, Callable
 
 from datasets import Dataset, DatasetDict
 from omegaconf import DictConfig
@@ -32,6 +32,16 @@ class TaskSpec(abc.ABC):
         dataset: Dataset,
         config: DictConfig,
     ) -> dict[str, float]: ...
+
+    # ── Refinement strategies ─────────────────────────────────────────
+
+    def refinement_strategies(self) -> dict[str, Callable]:
+        """Task-specific refinement strategies contributed to the experiment's refine slot,
+        keyed by the ``refinement_method`` config value (merged with the experiment's built-ins).
+        Default: none. A strategy is ``fn(experiment, model, tokenizer, extraction_ds, train_ds,
+        output_dir) -> (model, artifacts, cache_info)`` — e.g. jailbreak's Arditi selection.
+        """
+        return {}
 
     # ── Training objective ────────────────────────────────────────────
 

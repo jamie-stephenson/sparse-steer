@@ -1,6 +1,6 @@
 import torch
 
-from sparse_steer.extract import (
+from sparse_steer.core.extract import (
     ActivationTarget,
     _normalize_targets,
     last_token_positions,

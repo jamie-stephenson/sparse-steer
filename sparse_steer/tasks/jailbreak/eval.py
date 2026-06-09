@@ -19,22 +19,28 @@ Generative (sampled rollouts, scored by a swappable judge):
 
 from datasets import Dataset
 
-from sparse_steer.core.benchmarks import gsm8k_accuracy
-from sparse_steer.core.generate import generate_text, make_sampling_sampler
+from sparse_steer.core.generate import generate_text
 from sparse_steer.utils.eval import answer_log_probs, decision_logprobs, teacher_forced_perplexity
 from sparse_steer.utils.refusal import detect_refusal
 
-# Registry of *implemented* metrics. Which ones actually run is chosen by the task config
-# (`evals:` in configs/task/jailbreak.yaml) — the single source of truth. ALL_METRICS is
-# only the fallback used if a config omits `evals` entirely.
+# Implemented metric families. Which ones run is chosen by the task config (`evals:` in
+# configs/task/jailbreak.yaml) — the single source of truth.
 NONGEN_METRICS = {"kl_harmless", "affirmative_logprob_harmful", "perplexity_capability"}
-GEN_METRICS = {
-    "refusal_rate_harmful", "harmful_success", "harmless_acceptance", "gsm8k_accuracy",
+GEN_METRICS = {"refusal_rate_harmful", "harmful_success", "harmless_acceptance"}
+# Inspect-backed metrics: each is a self-contained inspect_evals task that brings its OWN dataset,
+# runs our model via core.inspect_provider, and applies its OWN judge/scorer — we never route a judge.
+# strong_reject = harmfulness (needs a grader model); gsm8k = the capability "canary" (exact-match,
+# grader-free). HarmBench / Llama-Guard aren't single inspect_evals tasks; add them later as custom
+# Inspect Tasks over our prompts + the relevant scorer — still Inspect-owned.
+INSPECT_TASKS = {
+    "strong_reject": "inspect_evals/strong_reject",
+    "gsm8k": "inspect_evals/gsm8k",
 }
-ALL_METRICS = NONGEN_METRICS | GEN_METRICS
 
 
-# ── Judges (swappable; score harmful_success in [0,1]) ───────────────────
+# ── Local harmful_success judge (cheap regex proxy) ──────────────────────
+# For genuine harmfulness scoring, add an Inspect task (e.g. strong_reject) to `evals`; Inspect
+# owns the judge there. Only the regex proxy is computed locally on our own rollouts.
 
 
 def _regex_judge(instructions: list[str], responses: list[str]) -> list[float]:
@@ -42,21 +48,7 @@ def _regex_judge(instructions: list[str], responses: list[str]) -> list[float]:
     return [0.0 if detect_refusal(r) else 1.0 for r in responses]
 
 
-def _judge_stub(name: str):
-    def fn(instructions: list[str], responses: list[str]) -> list[float]:
-        raise NotImplementedError(
-            f"judge={name!r} needs its judge model wired up (template + parser). "
-            "Only 'regex' is implemented; pass judge=regex or implement the adapter."
-        )
-    return fn
-
-
-JUDGES = {
-    "regex": _regex_judge,
-    "harmbench": _judge_stub("harmbench"),
-    "llamaguard": _judge_stub("llamaguard"),
-    "strongreject": _judge_stub("strongreject"),
-}
+JUDGES = {"regex": _regex_judge}
 
 
 # ── Shared helpers ───────────────────────────────────────────────────────
@@ -69,17 +61,13 @@ def _split(dataset: Dataset) -> tuple[list[dict], list[dict]]:
 
 
 def _rollout(model, tokenizer, instructions, config, *, steer, max_new=None):
-    """Matched-seed sampled rollouts → decoded responses (thin config wrapper over
-    ``generate_text``, which owns the batch/pad/template/decode plumbing)."""
+    """Sampled rollouts → decoded responses (thin config wrapper over ``generate_text``, which
+    owns the batch/pad/template/decode plumbing; sampling draws from the global seed)."""
     if max_new is None:
         max_new = int(config.gen_tokens)
     return generate_text(
         model, tokenizer, instructions, max_new,
-        sampler=make_sampling_sampler(
-            temperature=float(config.eval_temperature),
-            seed=int(config.eval_seeds[0]),
-            device=model.device,
-        ),
+        temperature=float(config.eval_temperature),
         steer=steer,
         batch_size=int(config.eval_batch_size),
     )
@@ -146,17 +134,26 @@ def evaluate_generative(model, tokenizer, dataset, config) -> dict[str, float]:
         instr = [r["instruction"] for r in harmless]
         resp = _rollout(model, tokenizer, instr, config, steer=steer)
         out["harmless_acceptance"] = sum(not detect_refusal(r) for r in resp) / len(resp)
-    if "gsm8k_accuracy" in selected:
-        out["gsm8k_accuracy"] = gsm8k_accuracy(
-            model, tokenizer,
-            n=int(config.n_capability),
-            max_new_tokens=int(config.capability_max_new_tokens),
-            steer=config.steer_mode,
-            temperature=float(config.eval_temperature),
-            seed=int(config.eval_seeds[0]),
-            batch_size=int(config.eval_batch_size),
-        )
     return out
 
 
-__all__ = ["evaluate", "evaluate_generative", "JUDGES", "ALL_METRICS", "NONGEN_METRICS", "GEN_METRICS"]
+def evaluate_inspect(model, tokenizer, config) -> dict[str, float]:
+    """Run any Inspect-backed metrics selected in ``config.evals``. Each is a self-contained
+    inspect_evals task — Inspect owns its dataset, generation (via our provider) and judge; we
+    only harvest the metrics. ``inspect_ai`` is imported lazily, so it is a dependency only when
+    an Inspect metric is actually selected."""
+    selected = [m for m in config.evals if m in INSPECT_TASKS]
+    if not selected:
+        return {}
+    from sparse_steer.core.inspect_provider import run_inspect_eval
+
+    out: dict[str, float] = {}
+    for name in selected:
+        out.update(run_inspect_eval(model, tokenizer, INSPECT_TASKS[name], limit=int(config.n_eval)))
+    return out
+
+
+__all__ = [
+    "evaluate", "evaluate_generative", "evaluate_inspect", "JUDGES",
+    "NONGEN_METRICS", "GEN_METRICS", "INSPECT_TASKS",
+]

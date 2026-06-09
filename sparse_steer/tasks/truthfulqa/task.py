@@ -110,7 +110,7 @@ class TruthfulQATask(TaskSpec):
             ArtifactType.STEERED_EVAL,
         ):
             files.append("sparse_steer/tasks/truthfulqa/eval.py")
-            files.append("sparse_steer/generate.py")
+            files.append("sparse_steer/core/generate.py")
         return files
 
 

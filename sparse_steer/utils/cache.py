@@ -23,6 +23,7 @@ CACHE_ROOT = _PROJECT_ROOT / ".cache" / "sparse_steer"
 class ArtifactType(Enum):
     STEERING_VECTORS = "steering_vectors"
     SPARSE_STEERING = "sparse_steering"
+    SELECTED_DIRECTION = "selected_direction"
     PEFT_ADAPTER = "peft_adapter"
     UNSTEERED_EVAL = "unsteered_eval"
     STEERED_EVAL = "steered_eval"
@@ -66,6 +67,18 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "weight_decay",
         "freeze_raw_scale",
         "gate_config",
+    ],
+    ArtifactType.SELECTED_DIRECTION: [
+        "method",
+        # inherits steering-vector fields; selection params + intervention come via extra_fields
+        "model_name",
+        "seed",
+        "extraction_fraction",
+        "extract_batch_size",
+        "token_position",
+        "targets",
+        "steering_layer_ids",
+        "normalize_steering_vectors",
     ],
     ArtifactType.UNSTEERED_EVAL: [
         "model_name",
@@ -136,13 +149,20 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
 # Paths are relative to the project root.
 _SOURCE_FILES: dict[ArtifactType, list[str]] = {
     ArtifactType.STEERING_VECTORS: [
-        "sparse_steer/extract.py",
-        "sparse_steer/steering.py",
+        "sparse_steer/core/extract.py",
+        "sparse_steer/core/steering.py",
     ],
     ArtifactType.SPARSE_STEERING: [
-        "sparse_steer/extract.py",
-        "sparse_steer/steering.py",
+        "sparse_steer/core/extract.py",
+        "sparse_steer/core/steering.py",
         "sparse_steer/train.py",
+    ],
+    ArtifactType.SELECTED_DIRECTION: [
+        "sparse_steer/core/extract.py",
+        "sparse_steer/core/steering.py",
+        "sparse_steer/tasks/jailbreak/refine.py",
+        "sparse_steer/utils/eval.py",
+        "sparse_steer/utils/refusal.py",
     ],
     ArtifactType.PEFT_ADAPTER: [
         "sparse_steer/train.py",
@@ -151,14 +171,14 @@ _SOURCE_FILES: dict[ArtifactType, list[str]] = {
         "sparse_steer/utils/eval.py",
     ],
     ArtifactType.STEERED_EVAL: [
-        "sparse_steer/extract.py",
-        "sparse_steer/steering.py",
+        "sparse_steer/core/extract.py",
+        "sparse_steer/core/steering.py",
         "sparse_steer/train.py",
         "sparse_steer/utils/eval.py",
     ],
     ArtifactType.BUCKETED_DATASET: [
         "sparse_steer/tasks/jailbreak/data.py",
-        "sparse_steer/generate.py",
+        "sparse_steer/core/generate.py",
     ],
 }
 
@@ -166,6 +186,7 @@ _SOURCE_FILES: dict[ArtifactType, list[str]] = {
 _ARTIFACT_FILENAMES: dict[ArtifactType, str] = {
     ArtifactType.STEERING_VECTORS: "steering_vectors.pt",
     ArtifactType.SPARSE_STEERING: "sparse_steering.pt",
+    ArtifactType.SELECTED_DIRECTION: "selected_direction.pt",
     ArtifactType.PEFT_ADAPTER: "adapter_config.json",
     ArtifactType.UNSTEERED_EVAL: "results.json",
     ArtifactType.STEERED_EVAL: "results.json",

@@ -1,5 +1,6 @@
 # @package _global_
 method: dense
+refinement_method: none   # extract + set the direction, no training
 intervention: steer   # 'ablate' = geometric projection ablation (override on CLI)
 steering_layer_ids: null
 extract_batch_size: 8

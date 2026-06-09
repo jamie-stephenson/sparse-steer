@@ -36,7 +36,8 @@ If you want Weights & Biases logging, also set `WANDB_*` values.
 
 ```bash
 uv run run.py
-uv run run.py method=sparse task=truthfulqa  # override method and task
+uv run run.py method=sparse task=truthfulqa            # override method and task
+uv run run.py task=jailbreak_arditi method=arditi_select model_name=Qwen/Qwen2.5-1.5B-Instruct
 ```
 
 Hydra configs live under `configs/`. Method and task overrides are composed from
@@ -46,30 +47,38 @@ Hydra configs live under `configs/`. Method and task overrides are composed from
 
 ```text
 .
-├── run.py                          # entrypoint (method + task registry)
+├── run.py                          # entrypoint: method + task registries (Hydra main)
+├── pyproject.toml                  # dependencies (transformer-lens, inspect-ai, …)
 ├── configs/
-│   ├── config.yaml                 # default experiment config
-│   ├── method/                     # method overrides (unsteered, dense, sparse, gates_only, scale_only, caa, conv_ablate, lora, …)
-│   └── task/                       # task overrides (truthfulqa, tinysleepers)
-├── report/                         # project report (LaTeX sources + figures)
-└── sparse_steer/
-    ├── steering.py                 # SteeringHook + SteeringModel: TransformerLens hooks, gates/scale, steer & ablate
-    ├── extract.py                  # activation collection (run_with_cache) + steering-vector extraction
-    ├── train.py                    # manual gate/scale training loop + L0 penalty
-    ├── generate.py                 # shared KV-cached generation (prompt-only / every-step steering)
-    ├── experiment/
-    │   ├── base.py                 # base experiment pipeline (extract → train → eval, cached)
-    │   ├── unsteered.py            # no-steering control
-    │   ├── steering.py             # steering experiment (dense/sparse/gates_only/ablate/…)
-    │   └── lora.py                 # LoRA-based steering (HuggingFace)
-    ├── tasks/
-    │   ├── base.py                 # TaskSpec interface (datasets, collate, loss, eval, cache keys)
-    │   ├── truthfulqa/             # TruthfulQA dataset, evaluation, and task wiring
-    │   └── tinysleepers/           # sleeper-agent removal: dataset, evaluation, and task wiring
-    └── utils/
-        ├── cache.py                # artifact caching with staleness detection
-        ├── eval.py                 # answer log-prob scoring utilities
-        ├── gate_tracker.py         # gate sparsification tracking and visualisation
-        └── tokenize.py             # chat-template formatting and tokenisation
+│   ├── config.yaml                 # root config (defaults: method + task)
+│   ├── method/                     # steering methods: unsteered, dense, sparse, gates_only,
+│   │                               #   scale_only, shared_scale_only, caa, conv_ablate, arditi_select, lora
+│   └── task/                       # tasks: truthfulqa, tinysleepers, jailbreak, jailbreak_arditi
+├── sparse_steer/
+│   ├── core/                       # task-agnostic model machinery
+│   │   ├── steering.py             # SteeringModel: TransformerLens hooks, gates/scale, steer & ablate
+│   │   ├── loading.py              # build a steered or plain model
+│   │   ├── extract.py              # activation collection + mean-difference steering vectors
+│   │   ├── generate.py             # model-agnostic batched generation (SteeringModel or HF/LoRA)
+│   │   ├── gate_tracker.py         # gate-sparsity tracking + visualisation
+│   │   └── inspect_provider.py     # run UK AISI Inspect evals against a fitted model
+│   ├── train.py                    # gate/scale training loop + L0 sparsity penalty
+│   ├── experiment/
+│   │   ├── base.py                 # run() pipeline: data → fit → eval, with artifact caching
+│   │   ├── steering.py             # steering experiment + refinement registry (none / gate_training)
+│   │   ├── unsteered.py            # no-steering baseline
+│   │   └── lora.py                 # LoRA fine-tuning experiment
+│   ├── tasks/
+│   │   ├── base.py                 # TaskSpec: datasets, collate, loss, eval, refinement strategies
+│   │   ├── collate.py              # shared prompt + completion collation
+│   │   ├── jailbreak/              # refusal-direction ablation
+│   │   │   ├── data.py             #   Arditi data mix + four-bucket labelling (regex / logit detector)
+│   │   │   ├── refine.py           #   single-direction selection (Arditi App. B/C)
+│   │   │   └── eval.py             #   white-box metrics + Inspect-backed benchmarks
+│   │   ├── truthfulqa/             # data.py / eval.py / task.py
+│   │   └── tinysleepers/           # data.py / eval.py / task.py
+│   └── utils/                      # leaf utilities: cache, eval, refusal, tokenize
+├── tests/                          # unit tests
+└── report/                         # project report (LaTeX + figures)
 ```
 

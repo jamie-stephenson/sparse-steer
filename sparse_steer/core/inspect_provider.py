@@ -1,0 +1,80 @@
+"""Inspect (UK AISI) provider — run Inspect's self-contained evals against our fitted models.
+
+A single ``ModelAPI`` over the model-agnostic ``generate_text`` seam, so the SAME provider drives a
+``SteeringModel`` or an HF/LoRA model (the model-type fork lives inside ``generate_text``). Inspect
+owns each eval's dataset, generation orchestration, and judging; we only supply the model and
+harvest the metrics. This module imports ``inspect_ai`` at top level, so it is imported lazily (only
+when an Inspect-backed metric is actually selected) — see ``tasks/jailbreak/eval.evaluate_inspect``.
+"""
+
+import anyio
+from inspect_ai import eval as inspect_eval
+from inspect_ai.model import GenerateConfig, ModelAPI, ModelOutput, get_model, modelapi
+from inspect_ai.tool import ToolChoice, ToolInfo
+
+from sparse_steer.core.generate import generate_text
+
+
+class FitModelAPI(ModelAPI):
+    """Inspect provider over ANY fitted model. Holds ``(model, tokenizer)`` with no type
+    assumption and generates via ``generate_text``, which forks on ``hasattr(model, "tl")`` — so a
+    SteeringModel and an HF/LoRA model are driven identically."""
+
+    def __init__(self, model_name, fit_model, tokenizer, config=GenerateConfig(), **_kwargs):
+        # `fit_model` (not `model`) avoids colliding with get_model()'s own `model` parameter
+        # when passed through as model_args.
+        super().__init__(model_name=model_name, config=config)
+        self.model = fit_model
+        self.tokenizer = tokenizer
+
+    def max_connections(self) -> int:
+        return 1  # one in-memory model instance → serialize; throughput comes from batching
+
+    async def generate(self, input, tools: list[ToolInfo], tool_choice: ToolChoice, config) -> ModelOutput:
+        # Full message list → chat-templated prompt (system/multi-turn safe). tools are ignored
+        # (safety/QA scorers don't need them, as in Inspect's own transformer_lens/mockllm providers).
+        prompt = self.tokenizer.apply_chat_template(
+            [{"role": m.role, "content": m.text} for m in input],
+            tokenize=False, add_generation_prompt=True,
+        )
+        text = await anyio.to_thread.run_sync(self._generate, prompt, config)
+        return ModelOutput.from_content(self.model_name, text)
+
+    def _generate(self, prompt: str, config: GenerateConfig) -> str:
+        # Sync PyTorch generate, offloaded to a thread above so it doesn't block the event loop.
+        # No seed: sampling draws from the global RNG seeded once in _seed_everything.
+        return generate_text(
+            self.model, self.tokenizer, [prompt],
+            max_new_tokens=config.max_tokens or 512,
+            temperature=config.temperature or 0.0,
+            template=False,  # already chat-templated above
+        )[0]
+
+
+@modelapi(name="fit")
+def _fit_provider() -> type[ModelAPI]:
+    # Registers FitModelAPI under the "fit" provider so Inspect can resolve "fit/<name>" and give
+    # the model registry info (Inspect requires every model API to be registered).
+    return FitModelAPI
+
+
+def run_inspect_eval(model, tokenizer, task, *, model_name="fitted", limit=None) -> dict[str, float]:
+    """Run an Inspect eval against ``model`` and return ``{score/metric: value}``.
+
+    ``task`` is an ``inspect_evals`` id (e.g. ``"inspect_evals/strong_reject"``) or a ``Task``.
+    Inspect owns the dataset, generation orchestration, and judging — we only provide the model
+    (passed to the registered ``fit`` provider as ``model_args``). Model-graded Inspect evals call
+    their grader via Inspect's own model config (an API model), not through this provider.
+    """
+    inspect_model = get_model(f"fit/{model_name}", fit_model=model, tokenizer=tokenizer, memoize=False)
+    log = inspect_eval(task, model=inspect_model, limit=limit, display="plain")[0]
+    if log.status != "success":
+        raise RuntimeError(f"inspect eval {task!r} failed: {getattr(log, 'error', None)}")
+    return {
+        f"{score.name}/{name}": metric.value
+        for score in (log.results.scores if log.results else [])
+        for name, metric in score.metrics.items()
+    }
+
+
+__all__ = ["FitModelAPI", "run_inspect_eval"]

@@ -124,7 +124,7 @@ class TinySleepersTask(TaskSpec):
             # the training objective (loss) lives here; the ablation/gate hooks
             # (incl. proj_norm normalisation) live in steering.py
             files.append("sparse_steer/tasks/tinysleepers/task.py")
-            files.append("sparse_steer/steering.py")
+            files.append("sparse_steer/core/steering.py")
         if artifact_type == ArtifactType.SPARSE_STEERING:
             # the gate-training loop + proj_norm setup determine the trained gates
             files.append("sparse_steer/train.py")
@@ -133,7 +133,7 @@ class TinySleepersTask(TaskSpec):
             ArtifactType.STEERED_EVAL,
         ):
             files.append("sparse_steer/tasks/tinysleepers/eval.py")
-            files.append("sparse_steer/generate.py")
+            files.append("sparse_steer/core/generate.py")
         return files
 
 

@@ -1,108 +1,77 @@
 import pytest
 import torch
-from torch import nn
+from transformer_lens import HookedTransformer, HookedTransformerConfig
 
-from sparse_steer.models.hook import Component, SteeringHook
-from sparse_steer.models.steering import SteeringLM
-from sparse_steer.models.base import BaseModelLayout
-from sparse_steer.hardconcrete import HardConcreteConfig
-
+from sparse_steer.core.steering import HardConcreteConfig, SteeringHook, SteeringModel
 
 NUM_HEADS = 2
-HEAD_DIM = 3
-MLP_DIM = 4
+HEAD_DIM = 4
+D_MODEL = NUM_HEADS * HEAD_DIM
+MLP_DIM = 16
+NUM_LAYERS = 2
 
 
-class DummyAttention(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        hidden = NUM_HEADS * HEAD_DIM
-        self.o_proj = nn.Linear(hidden, hidden)
-        self.head_dim = HEAD_DIM
-        self.config = type("C", (), {"num_attention_heads": NUM_HEADS})()
-
-
-class DummyMLP(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.down_proj = nn.Linear(MLP_DIM, MLP_DIM)
-        self.config = type("C", (), {"intermediate_size": MLP_DIM})()
-
-
-class DummyLayer(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.self_attn = DummyAttention()
-        self.mlp = DummyMLP()
-
-
-class DummySteeringLM(SteeringLM, nn.Module):
-    def __init__(self, num_layers: int = 2) -> None:
-        super().__init__()
-        self.layers = nn.ModuleList([DummyLayer() for _ in range(num_layers)])
-        self.upgrade_for_steering(
-            gate_config=HardConcreteConfig(),
-            learn_scale=True,
-            steering_layer_ids=list(range(num_layers)),
-            steering_components=["attention", "mlp"],
-        )
-
-    def get_layers(self) -> nn.ModuleList:
-        return self.layers
-
-    def get_attention(self, layer: nn.Module) -> nn.Module:
-        return layer.self_attn
-
-    def get_mlp(self, layer: nn.Module) -> nn.Module:
-        return layer.mlp
-
-    def _get_output_proj(self, module: nn.Module) -> nn.Module:
-        if hasattr(module, "o_proj"):
-            return module.o_proj
-        return module.down_proj
-
-    def _get_vector_shape(
-        self, component: Component, layer: nn.Module
-    ) -> tuple[int, ...]:
-        if component == "attention":
-            return (NUM_HEADS, HEAD_DIM)
-        elif component == "mlp":
-            return (MLP_DIM,)
-        raise ValueError(f"Unknown component: {component!r}")
+def _tiny_model(components) -> SteeringModel:
+    cfg = HookedTransformerConfig(
+        n_layers=NUM_LAYERS,
+        d_model=D_MODEL,
+        n_ctx=16,
+        d_head=HEAD_DIM,
+        n_heads=NUM_HEADS,
+        d_mlp=MLP_DIM,
+        d_vocab=32,
+        act_fn="gelu",
+        normalization_type="LN",
+    )
+    tl = HookedTransformer(cfg)
+    return SteeringModel(
+        tl,
+        steering_layer_ids=list(range(NUM_LAYERS)),
+        steering_components=components,
+        gate_config=HardConcreteConfig(),
+        learn_scale=True,
+    )
 
 
 def test_set_all_vectors_raises_on_missing_expected_components() -> None:
-    model = DummySteeringLM()
-    vectors = {
-        "attention": torch.zeros(2, NUM_HEADS, HEAD_DIM),
-    }
+    model = _tiny_model(["attention", "mlp"])
+    vectors = {"attention": torch.zeros(NUM_LAYERS, NUM_HEADS, HEAD_DIM)}
     with pytest.raises(ValueError, match="missing expected components"):
         model.set_all_vectors(vectors)
 
 
 def test_set_all_vectors_raises_on_unexpected_components() -> None:
-    model = DummySteeringLM()
+    model = _tiny_model(["attention", "mlp"])
     vectors = {
-        "attention": torch.zeros(2, NUM_HEADS, HEAD_DIM),
-        "mlp": torch.zeros(2, MLP_DIM),
-        "residual": torch.zeros(2, MLP_DIM),
+        "attention": torch.zeros(NUM_LAYERS, NUM_HEADS, HEAD_DIM),
+        "mlp": torch.zeros(NUM_LAYERS, MLP_DIM),
+        "residual": torch.zeros(NUM_LAYERS, D_MODEL),
     }
     with pytest.raises(ValueError, match="unexpected components"):
         model.set_all_vectors(vectors)
 
 
 def test_set_all_vectors_accepts_exact_component_set() -> None:
-    model = DummySteeringLM()
+    model = _tiny_model(["attention", "mlp"])
     vectors = {
-        "attention": torch.randn(2, NUM_HEADS, HEAD_DIM),
-        "mlp": torch.randn(2, MLP_DIM),
+        "attention": torch.randn(NUM_LAYERS, NUM_HEADS, HEAD_DIM),
+        "mlp": torch.randn(NUM_LAYERS, MLP_DIM),
     }
     model.set_all_vectors(vectors)
 
-    for i, layer in enumerate(model.get_layers()):
-        attn_hook = getattr(layer, f"_steering_attention_{i}", None)
-        mlp_hook = getattr(layer, f"_steering_mlp_{i}", None)
+    for i in range(NUM_LAYERS):
+        attn_hook = model.hooks[f"attention_{i}"]
+        mlp_hook = model.hooks[f"mlp_{i}"]
         assert isinstance(attn_hook, SteeringHook)
         assert isinstance(mlp_hook, SteeringHook)
-        assert torch.allclose(attn_hook.steering_vectors, vectors["attention"][i])
-        assert torch.allclose(mlp_hook.steering_vectors, vectors["mlp"][i])
+        assert torch.allclose(
+            attn_hook.steering_vectors, vectors["attention"][i].to(attn_hook.steering_vectors.dtype)
+        )
+        assert torch.allclose(
+            mlp_hook.steering_vectors, vectors["mlp"][i].to(mlp_hook.steering_vectors.dtype)
+        )
+
+
+def test_residual_excludes_other_components() -> None:
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        _tiny_model(["residual", "attention"])

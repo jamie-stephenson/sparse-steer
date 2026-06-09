@@ -1,16 +1,19 @@
 """Data for the ``jailbreak`` task — refusal-direction ablation.
 
-A model that *does* refuse harmful prompts is bucketed by its **own behaviour** —
-refuse vs accept under a deterministic fixed-seed generation — into four buckets:
-``harmful_accepted``, ``harmful_refused``, ``harmless_accepted``, ``harmless_refused``.
-Only the **extraction** prompts are bucketed (model forward passes), cached as
+A model that *does* refuse harmful prompts is bucketed by its **own behaviour** into four
+buckets — ``harmful_accepted``, ``harmful_refused``, ``harmless_accepted``,
+``harmless_refused`` — by one of two model-in-the-loop detectors (``config.refusal_detector``):
+``regex`` (deterministic fixed-seed generation, then a refusal-phrase match) or ``logit``
+(Arditi's refusal metric — a single forward, log-odds of the reply opening with a refusal
+token; no generation). Only the **extraction** prompts are bucketed, cached as
 ``BUCKETED_DATASET`` keyed by model + generation + detector identity; train/eval prompts
 are deterministic from config and never need the model at build time.
 
-The refusal direction is ``mean(refused) − mean(accepted)`` read at the **last
-post-instruction token** (Arditi decision position, ``token_position="last"``), either
-across all prompts (``extraction_subset="all"``, default) or within the harmful subset
-(``extraction_subset="harmful"``). Ablating it recovers compliant output.
+The refusal direction is a contrast read at the **last post-instruction token** (Arditi
+decision position, ``token_position="last"``), with the bucket pairing set by
+``extraction_subset``: ``all`` (refused − accepted across both, default), ``harmful``
+(refused − accepted within harmful), or ``category`` (Arditi: harmful_refused −
+harmless_accepted). Ablating it recovers compliant output.
 
 Three splits — **extraction** (direction), **train** (Phase-2 sparse ablation target),
 **eval** (metrics) — are kept **globally disjoint by prompt** regardless of config: the
@@ -19,13 +22,18 @@ sets), and a shared ``seen`` set dedups across every split and source, so a prom
 between two source datasets (e.g. AdvBench↔HarmBench) never leaks across splits.
 """
 
+import functools
+import itertools
+import math
+
 import torch
 from datasets import Dataset, DatasetDict, load_dataset
 from transformers import PreTrainedTokenizerBase
 
-from sparse_steer.core.generate import generate_text, make_greedy_sampler, make_sampling_sampler
+from sparse_steer.core.generate import generate_text
 from sparse_steer.core.steering import SteeringModel
-from sparse_steer.utils.refusal import detect_refusal
+from sparse_steer.utils.eval import decision_logprobs
+from sparse_steer.utils.refusal import detect_refusal, refusal_metric, resolve_refusal_token_ids
 from sparse_steer.utils.tokenize import apply_template
 
 # Minimum chars for a generated response to count as a real answer (vs empty/truncated).
@@ -45,20 +53,49 @@ def _load_advbench(n: int) -> list[dict]:
 
 
 def _load_jbb(n: int, *, harmful: bool) -> list[dict]:
-    ds = load_dataset("JailbreakBench/JBB-Behaviors", "harmful" if harmful else "benign", split="train")
+    # JBB-Behaviors: config "behaviors", with harmful/benign as the two *splits*.
+    ds = load_dataset(
+        "JailbreakBench/JBB-Behaviors", "behaviors", split="harmful" if harmful else "benign"
+    )
     return [{"instruction": r["Goal"], "reference": None} for r in ds.select(range(min(n, len(ds))))]
 
 
-def _load_harmbench(n: int) -> list[dict]:
-    # Standard text behaviors = plain instructions (contextual/copyright need extra
-    # handling and are excluded). The HarmBench classifier judges these.
-    ds = load_dataset("walledai/HarmBench", "standard", split="train")
+def _load_malicious_instruct(n: int) -> list[dict]:
+    ds = load_dataset("walledai/MaliciousInstruct", split="train")
     return [{"instruction": r["prompt"], "reference": None} for r in ds.select(range(min(n, len(ds))))]
+
+
+def _load_tdc2023(n: int) -> list[dict]:
+    # Combined dev+test behaviours from the TDC 2023 Red-Teaming track (Arditi's TDC source).
+    ds = load_dataset("walledai/TDC23-RedTeaming", split="train")
+    return [{"instruction": r["prompt"], "reference": None} for r in ds.select(range(min(n, len(ds))))]
+
+
+_HARMBENCH_REPO = "mariagrandury/harmbench"  # open mirror with the official val/test split + tags
+
+
+def _harmbench_standard(r: dict) -> bool:
+    # Arditi keeps only *standard* behaviours — drop copyright (FunctionalCategory) and
+    # contextual (Tags) rows. This reproduces their val=41 / test=159 counts exactly.
+    return r["FunctionalCategory"] != "copyright" and "context" not in ((r["Tags"] or "").lower())
+
+
+def _load_harmbench(n: int, *, split: str = "all") -> list[dict]:
+    """HarmBench standard behaviours from the open ``DirectRequest`` config. ``split`` selects
+    Arditi's official ``val`` (≈41) / ``test`` (≈159) slice, or ``all`` (both)."""
+    splits = ["val", "test"] if split == "all" else [split]
+    out: list[dict] = []
+    for sp in splits:
+        ds = load_dataset(_HARMBENCH_REPO, "DirectRequest", split=sp)
+        out += [{"instruction": r["Behavior"], "reference": None} for r in ds if _harmbench_standard(r)]
+    return out[:n]
 
 
 def _load_strongreject(n: int) -> list[dict]:
-    ds = load_dataset("walledai/StrongREJECT", split="train")
-    return [{"instruction": r["prompt"], "reference": None} for r in ds.select(range(min(n, len(ds))))]
+    # Open mirror (StrongREJECT++ English = the original forbidden prompts plus extensions); the
+    # canonical original (walledai/StrongREJECT) is gated. Used only for the harmful eval set.
+    ds = load_dataset("raft-security-lab/strongrejectPlusPlus", split="english")
+    return [{"instruction": r["forbidden_prompt"], "reference": None} for r in ds.select(range(min(n, len(ds))))]
 
 
 def _load_alpaca(n: int) -> list[dict]:
@@ -76,8 +113,13 @@ def _load_alpaca(n: int) -> list[dict]:
 _HARMFUL_LOADERS = {
     "advbench": _load_advbench,
     "jbb": lambda n: _load_jbb(n, harmful=True),
-    "harmbench": _load_harmbench,
+    "jailbreakbench": lambda n: _load_jbb(n, harmful=True),  # Arditi's name for the JBB harmful set
+    "harmbench": lambda n: _load_harmbench(n, split="all"),
+    "harmbench_val": lambda n: _load_harmbench(n, split="val"),
+    "harmbench_test": lambda n: _load_harmbench(n, split="test"),
     "strongreject": _load_strongreject,
+    "malicious_instruct": _load_malicious_instruct,
+    "tdc2023": _load_tdc2023,
 }
 _HARMLESS_LOADERS = {
     "alpaca": _load_alpaca,
@@ -117,16 +159,97 @@ def _partition(pool: list[dict], sizes: list[int], seen: set[str]) -> list[list[
     return out
 
 
+def _load_sources(names: list[str], harmful: bool, n: int) -> list[dict]:
+    """Round-robin interleave up to ``n`` rows from each named source, so a multi-source role
+    draws a *balanced* mix rather than exhausting the first source before reaching the rest."""
+    loaders = _HARMFUL_LOADERS if harmful else _HARMLESS_LOADERS
+    per_source = [loaders[name](n) for name in names]
+    return [item for tup in itertools.zip_longest(*per_source) for item in tup if item is not None]
+
+
+# ── Exact Arditi data (their committed, pre-split, pre-deduped prompt files) ──
+_ARDITI_SPLITS_BASE = (
+    "https://raw.githubusercontent.com/andyrdt/refusal_direction/main/dataset/splits/"
+)
+
+
+def _load_arditi_json(name: str) -> list[dict]:
+    """One of Arditi's exact committed split files (``[{instruction, category}, ...]``), cached
+    by the ``datasets`` loader. These are already disjoint across train/val/test."""
+    return list(load_dataset("json", data_files=_ARDITI_SPLITS_BASE + name, split="train"))
+
+
+@functools.lru_cache(maxsize=1)
+def _alpaca_reference_map() -> dict[str, str]:
+    """instruction → Alpaca completion (single-turn only). Arditi's harmless splits are
+    instruction-only; we rejoin on the instruction to attach the reference completion needed
+    by ``perplexity_capability`` and the harmless gate-training target."""
+    ds = load_dataset("tatsu-lab/alpaca", split="train")
+    return {r["instruction"].strip(): r["output"] for r in ds if not r.get("input")}
+
+
 def load_splits(config) -> list[dict]:
     """Return rows ``{instruction, harmful, split ∈ {extraction,train,eval}, reference}``.
 
-    extraction/train harmful come from ``harmful_dataset``; the eval harmful set follows
-    the judge (``harmful_eval_dataset`` or the judge's native set). A shared ``seen`` set
-    guarantees the three splits (and harmful/harmless) never share a prompt, even across
-    overlapping source datasets.
+    ``config.data_origin`` selects how sources are assigned per role (all three keep the splits
+    globally disjoint by prompt via the shared ``seen`` set):
+
+    - ``arditi_exact`` — Arditi's exact committed split files (their repo): harmful/harmless
+      train → extraction, val → train(refinement), test → eval. Already deduped across splits.
+    - otherwise, if ``data_mix`` is set (HF replication) — an explicit per-(side, role) list of
+      open-HF sources, interleaved: ``data_mix.{harmful,harmless}.{extraction,train,eval}``.
+    - otherwise (default four-bucket) — single-source: extraction/train harmful from
+      ``harmful_dataset``, eval harmful from the judge's native set / ``harmful_eval_dataset``.
     """
     he, ht, hv = (config.n_extraction // 2, config.n_train // 2, config.n_eval // 2)
     pad = 256
+    seen: set[str] = set()
+    rows: list[dict] = []
+
+    def add(items, harmful, split):
+        rows.extend(
+            {"instruction": it["instruction"], "harmful": harmful, "split": split,
+             "reference": it["reference"]}
+            for it in items
+        )
+
+    if config.get("data_origin") == "arditi_exact":
+        # Arditi's EXACT prompts, sized by our n_* config. ``seen`` re-asserts disjointness on
+        # top of their own train/val/test dedup.
+        ref = _alpaca_reference_map()
+        for split, harmful_file, harmless_file, size in (
+            ("extraction", "harmful_train.json", "harmless_train.json", he),
+            ("train",      "harmful_val.json",   "harmless_val.json",   ht),
+            ("eval",       "harmful_test.json",  "harmless_test.json",  hv),
+        ):
+            harmful_items = [
+                {"instruction": r["instruction"], "reference": None}
+                for r in _load_arditi_json(harmful_file)
+            ]
+            harmless_items = [
+                {"instruction": r["instruction"], "reference": ref.get(r["instruction"].strip())}
+                for r in _load_arditi_json(harmless_file)
+            ]
+            (hc,) = _partition(harmful_items, [size], seen)
+            (lc,) = _partition(harmless_items, [size], seen)
+            add(hc, True, split)
+            add(lc, False, split)
+        return rows
+
+    mix = config.get("data_mix")
+    if mix:
+        # Per-role, multi-source. Load enough per source (whole-side need + pad) that roles
+        # sharing a source (e.g. Alpaca across all harmless roles) don't starve after dedup.
+        # Outer loop is split-first so a shared source is consumed extraction → train → eval.
+        depth = he + ht + hv + pad
+        for split, size in (("extraction", he), ("train", ht), ("eval", hv)):
+            for harmful in (True, False):
+                side = "harmful" if harmful else "harmless"
+                (chosen,) = _partition(_load_sources(list(mix[side][split]), harmful, depth), [size], seen)
+                add(chosen, harmful, split)
+        return rows
+
+    # ── single-source (default four-bucket) ──────────────────────────────
     harmful_src = config.harmful_dataset
     harmless_src = config.harmless_dataset
     judge = config.judge
@@ -138,16 +261,6 @@ def load_splits(config) -> list[dict]:
         print(
             f"  ⚠️  judge={judge} but harmful_eval_dataset={harmful_eval_src} "
             f"(its native set is {native}); harmful_success won't be literature-comparable."
-        )
-
-    seen: set[str] = set()
-    rows: list[dict] = []
-
-    def add(items, harmful, split):
-        rows.extend(
-            {"instruction": it["instruction"], "harmful": harmful, "split": split,
-             "reference": it["reference"]}
-            for it in items
         )
 
     def build_side(loader, eval_loader, same_eval, harmful):
@@ -171,34 +284,50 @@ def load_splits(config) -> list[dict]:
 
 
 @torch.no_grad()
-def generate_and_bucket(
+def label_and_bucket(
     model: SteeringModel, tokenizer: PreTrainedTokenizerBase, rows: list[dict], config,
 ) -> dict:
-    """Deterministic fixed-seed generation per extraction prompt → refuse/accept label.
+    """Label each extraction prompt refused/accepted by ``config.refusal_detector``, producing
+    the four-bucket records (the model-dependent artifact cached as ``BUCKETED_DATASET``).
 
-    Returns ``{"records": [row + {"response", "refused"}]}`` — the model-dependent artifact
-    cached as ``BUCKETED_DATASET``.
+    - ``regex``: deterministic fixed-seed generation, then a refusal-phrase match on the text.
+      A record is *usable* iff the model produced a real (long-enough) response.
+    - ``logit``: Arditi's refusal metric (paper App. B) — a single forward reading the
+      decision-token distribution, ``score = log-odds`` of opening with a refusal token;
+      ``score > refusal_logit_threshold`` ⇒ refused. No generation, so ``response`` is empty.
+
+    Returns ``{"records": [row + {"response", "refused", "usable", (logit:) "refusal_score"}]}``.
     """
-    decoding = config.gen_decoding
     detector = config.refusal_detector
-    sampler = (
-        make_greedy_sampler()
-        if decoding == "greedy"
-        else make_sampling_sampler(
-            temperature=float(config.gen_temperature), seed=int(config.gen_seed), device=model.device
-        )
-    )
-    responses = generate_text(
-        model, tokenizer,
-        [r["instruction"] for r in rows],
-        int(config.gen_max_new_tokens),
-        sampler=sampler, steer="off",
-        batch_size=int(config.eval_batch_size),
-    )
+    instructions = [r["instruction"] for r in rows]
     records: list[dict] = []
-    for r, response in zip(rows, responses):
-        refused = len(response) >= _MIN_RESPONSE_CHARS and detect_refusal(response, detector=detector)
-        records.append({**r, "response": response, "refused": refused})
+    if detector == "regex":
+        temperature = 0.0 if config.gen_decoding == "greedy" else float(config.gen_temperature)
+        responses = generate_text(
+            model, tokenizer, instructions, int(config.gen_max_new_tokens),
+            temperature=temperature, steer="off", batch_size=int(config.eval_batch_size),
+        )
+        for r, response in zip(rows, responses):
+            usable = len(response.strip()) >= _MIN_RESPONSE_CHARS
+            refused = usable and detect_refusal(response, detector="regex")
+            records.append({**r, "response": response, "refused": refused, "usable": usable})
+    elif detector == "logit":
+        token_ids = resolve_refusal_token_ids(tokenizer, list(config.refusal_tokens))
+        threshold = float(config.refusal_logit_threshold)
+        # decision_logprobs reads the unsteered base distribution here — the bucketing model
+        # is loaded plain (no steering hooks), so there is nothing to disable.
+        logprobs = decision_logprobs(
+            model, tokenizer, instructions, batch_size=int(config.eval_batch_size)
+        )
+        scores = refusal_metric(logprobs, token_ids)
+        for r, score in zip(rows, scores.tolist()):
+            usable = math.isfinite(score)
+            records.append(
+                {**r, "response": "", "refusal_score": score,
+                 "refused": bool(score > threshold), "usable": usable}
+            )
+    else:
+        raise ValueError(f"Unknown refusal_detector {detector!r}; use 'regex' or 'logit'.")
     return {"records": records}
 
 
@@ -206,6 +335,10 @@ def generate_and_bucket(
 
 
 def _usable(rec: dict) -> bool:
+    # The detector marks usability at bucketing time (regex: a real generated response;
+    # logit: a finite score). Fall back to response length for older cached records.
+    if "usable" in rec:
+        return bool(rec["usable"])
     return len(rec.get("response", "").strip()) >= _MIN_RESPONSE_CHARS
 
 
@@ -226,19 +359,27 @@ def assemble_datasets(
     plus the (model-free) train/eval rows."""
     subset = config.extraction_subset
     ext = [r for r in ext_records if _usable(r)]
-    if subset == "harmful":
-        ext = [r for r in ext if r["harmful"]]
-    refused = [r for r in ext if r["refused"]]
-    accepted = [r for r in ext if not r["refused"]]
-    for label, side in (("refused", refused), ("accepted", accepted)):
+    if subset == "category":
+        # Arditi (paper App. B/C): contrast the confidently-refused harmful prompts against
+        # the confidently-complied harmless prompts → mean(harmful_refused) − mean(harmless_accepted).
+        positive = [r for r in ext if r["harmful"] and r["refused"]]
+        negative = [r for r in ext if not r["harmful"] and not r["refused"]]
+        pos_label, neg_label = "harmful_refused", "harmless_accepted"
+    else:
+        if subset == "harmful":
+            ext = [r for r in ext if r["harmful"]]
+        positive = [r for r in ext if r["refused"]]
+        negative = [r for r in ext if not r["refused"]]
+        pos_label, neg_label = "refused", "accepted"
+    for label, side in ((pos_label, positive), (neg_label, negative)):
         if len(side) < 50:
             print(
                 f"  ⚠️  jailbreak extraction: only {len(side)} '{label}' examples "
                 f"(subset={subset}); refusal direction may be unreliable (<50)."
             )
     extraction_ds = Dataset.from_list(
-        [{"text": apply_template(tokenizer, r["instruction"]), "positive": True} for r in refused]
-        + [{"text": apply_template(tokenizer, r["instruction"]), "positive": False} for r in accepted]
+        [{"text": apply_template(tokenizer, r["instruction"]), "positive": True} for r in positive]
+        + [{"text": apply_template(tokenizer, r["instruction"]), "positive": False} for r in negative]
     )
 
     # gate_train_ds (Phase-2 sparse ablation): harmful → affirmative continuation (recover
@@ -248,7 +389,14 @@ def assemble_datasets(
     for r in (x for x in other_rows if x["split"] == "train"):
         completion = affirmative if r["harmful"] else (r.get("reference") or "")
         if completion.strip():
-            train.append({"prompt": apply_template(tokenizer, r["instruction"]), "completion": completion})
+            # instruction + category are ignored by the gate-training collate but let the
+            # selection refinement stage recover the harmful/harmless refinement prompts.
+            train.append({
+                "prompt": apply_template(tokenizer, r["instruction"]),
+                "completion": completion,
+                "instruction": r["instruction"],
+                "category": "harmful" if r["harmful"] else "harmless",
+            })
     n_val = max(8, len(train) // 10) if train else 0
     gate_train_ds = DatasetDict(
         {
@@ -274,7 +422,7 @@ def assemble_datasets(
 __all__ = [
     "judge_eval_dataset",
     "load_splits",
-    "generate_and_bucket",
+    "label_and_bucket",
     "assemble_datasets",
     "bucket_counts",
 ]

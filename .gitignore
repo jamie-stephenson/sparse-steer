@@ -14,6 +14,12 @@ output/
 data/
 wandb/
 .cache/
+plots/
+logs/
+
+# track no markdown except the top-level README
+*.md
+!README.md
 
 # LaTeX build artifacts + logs
 *.aux

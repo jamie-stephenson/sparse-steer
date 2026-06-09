@@ -5,7 +5,7 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 from datasets import Dataset, DatasetDict
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from torch import Tensor
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
@@ -15,14 +15,15 @@ from sparse_steer.tasks.collate import prompt_completion_collate
 from sparse_steer.utils import cache
 from sparse_steer.utils.cache import ArtifactType
 from sparse_steer.utils.refusal import REFUSAL_DETECTOR_VERSION
+from .refine import arditi_select_refine
 from .data import (
     assemble_datasets,
     bucket_counts,
-    generate_and_bucket,
     judge_eval_dataset,
+    label_and_bucket,
     load_splits,
 )
-from .eval import evaluate, evaluate_generative
+from .eval import evaluate, evaluate_generative, evaluate_inspect
 
 
 class JailbreakTask(TaskSpec):
@@ -70,7 +71,7 @@ class JailbreakTask(TaskSpec):
         print("  Building bucketed dataset (model forward passes — cached per model)...")
         model = load_plain_model(config)
         try:
-            data = generate_and_bucket(model, tokenizer, rows, config)
+            data = label_and_bucket(model, tokenizer, rows, config)
         finally:
             del model
             gc.collect()
@@ -98,7 +99,12 @@ class JailbreakTask(TaskSpec):
         metrics = evaluate(model, tokenizer, dataset, config)
         if config.generative_eval:
             metrics.update(evaluate_generative(model, tokenizer, dataset, config))
+        metrics.update(evaluate_inspect(model, tokenizer, config))  # self-contained Inspect evals
         return metrics
+
+    def refinement_strategies(self):
+        # Arditi single-direction selection — refusal-specific, so it lives with the task.
+        return {"arditi_select": arditi_select_refine}
 
     # ── Phase-2 sparse-ablation training objective (mirrors tinysleepers) ──
     def collate(
@@ -129,6 +135,10 @@ class JailbreakTask(TaskSpec):
         bucket_identity = {
             "harmful_dataset": config.harmful_dataset,
             "harmless_dataset": config.harmless_dataset,
+            # data origin: "arditi_exact" (their committed prompts) | None (data_mix / single).
+            "data_origin": config.get("data_origin"),
+            # per-role multi-source mix (HF replication); None ⇒ single-source path.
+            "data_mix": OmegaConf.to_container(config.data_mix, resolve=True) if config.get("data_mix") else None,
             "n_extraction": config.n_extraction,
             "extraction_subset": config.extraction_subset,
             "gen_decoding": config.gen_decoding,
@@ -137,12 +147,17 @@ class JailbreakTask(TaskSpec):
             "gen_seed": config.gen_seed,
             "refusal_detector": config.refusal_detector,
             "refusal_detector_version": REFUSAL_DETECTOR_VERSION,
+            # logit-detector identity (ignored by the regex detector at runtime, but kept in
+            # the key so a logit run never collides with a regex run or a different token set).
+            "refusal_tokens": list(config.refusal_tokens),
+            "refusal_logit_threshold": config.refusal_logit_threshold,
         }
         if artifact_type == ArtifactType.BUCKETED_DATASET:
             fields.update(bucket_identity)
         if artifact_type in (
             ArtifactType.STEERING_VECTORS,
             ArtifactType.SPARSE_STEERING,
+            ArtifactType.SELECTED_DIRECTION,
             ArtifactType.STEERED_EVAL,
         ):
             fields.update(bucket_identity)
@@ -151,6 +166,22 @@ class JailbreakTask(TaskSpec):
             # Phase-2 training target depends on the train split + the affirmative text.
             fields["n_train"] = config.n_train
             fields["affirmative_prefix"] = config.affirmative_prefix
+        if artifact_type == ArtifactType.SELECTED_DIRECTION or (
+            artifact_type == ArtifactType.STEERED_EVAL
+            and config.get("refinement_method") == "arditi_select"
+        ):
+            # The selected direction (and the eval that uses it) depends on the refinement set
+            # + the Arditi selection hyperparameters.
+            fields.update(
+                {
+                    "n_train": config.n_train,
+                    "refinement_method": config.get("refinement_method"),
+                    "selection_positions": config.get("selection_positions"),
+                    "selection_kl_threshold": config.get("selection_kl_threshold"),
+                    "selection_induce_threshold": config.get("selection_induce_threshold"),
+                    "selection_prune_layer_frac": config.get("selection_prune_layer_frac"),
+                }
+            )
         if artifact_type in (ArtifactType.UNSTEERED_EVAL, ArtifactType.STEERED_EVAL):
             judge = config.judge
             harmful_eval = config.harmful_eval_dataset or judge_eval_dataset(judge) or config.harmful_dataset
@@ -167,23 +198,22 @@ class JailbreakTask(TaskSpec):
                     "eval_seeds": list(config.eval_seeds or []),
                     "eval_temperature": config.eval_temperature,
                     "steer_mode": config.steer_mode,
-                    "n_capability": config.n_capability,
-                    "capability_max_new_tokens": config.capability_max_new_tokens,
                 }
             )
         return fields
 
     def cache_source_files(self, artifact_type: ArtifactType) -> list[str]:
-        # refusal.py (detector) is shared by the bucketing + eval; benchmarks.py (gsm8k) +
-        # utils/eval.py (teacher-forced) back the eval metrics.
+        # refusal.py (detector) is shared by the bucketing + eval; utils/eval.py (teacher-forced)
+        # backs the white-box metrics; inspect_provider backs the Inspect-run benchmarks.
         files = ["sparse_steer/tasks/jailbreak/data.py", "sparse_steer/utils/refusal.py"]
         if artifact_type == ArtifactType.BUCKETED_DATASET:
-            files.append("sparse_steer/generate.py")
+            files.append("sparse_steer/core/generate.py")
         if artifact_type in (ArtifactType.UNSTEERED_EVAL, ArtifactType.STEERED_EVAL):
             files += [
                 "sparse_steer/tasks/jailbreak/eval.py",
-                "sparse_steer/benchmarks.py",
-                "sparse_steer/generate.py",
+                "sparse_steer/core/generate.py",
+                "sparse_steer/core/inspect_provider.py",
+                "sparse_steer/tasks/jailbreak/refine.py",  # selection-mode eval depends on the chosen direction
             ]
         return files
 

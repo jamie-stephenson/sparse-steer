@@ -1,6 +1,7 @@
 # @package _global_
 # Learned per-head scale, no gates.
 method: scale_only
+refinement_method: gate_training   # extract + set, then train learnable gates/scale
 intervention: steer   # 'ablate' = geometric projection ablation (override on CLI)
 steering_layer_ids: null
 extract_batch_size: 8

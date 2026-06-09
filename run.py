@@ -21,11 +21,11 @@ from sparse_steer.tasks.truthfulqa.task import TruthfulQATask
 METHODS: dict[str, type[Experiment]] = {
     "unsteered": UnsteeredExperiment,
     "dense": SteeringExperiment,
-    "fixed_single_ablate": SteeringExperiment,
     "sparse": SteeringExperiment,
     "scale_only": SteeringExperiment,
     "shared_scale_only": SteeringExperiment,
     "gates_only": SteeringExperiment,
+    "arditi_select": SteeringExperiment,
     "lora": LoraExperiment,
 }
 
