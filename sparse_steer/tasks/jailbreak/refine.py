@@ -156,6 +156,16 @@ def select_direction(
             f"(got {len(harmful)} harmful, {len(harmless)} harmless)."
         )
 
+    # Arditi's filter_val (run_pipeline.filter_data): score the scoring set with the UNSTEERED
+    # refusal metric and keep only the confidently-classified prompts — harmful the model does
+    # refuse (score > 0) and harmless it does not (score < 0). Without this the bypass averages in
+    # already-complying harmful prompts and reads more negative than theirs.
+    with model.steering_disabled():
+        h_scores = refusal_metric(decision_logprobs(model, tokenizer, harmful, batch_size=bs), token_ids)
+        l_scores = refusal_metric(decision_logprobs(model, tokenizer, harmless, batch_size=bs), token_ids)
+    harmful = [p for p, s in zip(harmful, h_scores.tolist()) if s > 0]
+    harmless = [p for p, s in zip(harmless, l_scores.tolist()) if s < 0]
+
     grid = _candidate_grid(
         model, tokenizer, extraction_ds, n_positions=n_positions, batch_size=int(config.extract_batch_size)
     )

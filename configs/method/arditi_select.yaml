@@ -8,7 +8,9 @@ intervention: ablate
 steering_layer_ids: null         # ablate the selected direction at every layer
 extract_batch_size: 8
 token_position: last
-targets: [resid_mid, resid_post] # ablate the d_model direction from both residual taps
+targets: [resid_pre, resid_mid, resid_post] # ablate at block input + both residual taps:
+# algebraically identical to Arditi's resid_pre + attn_out + mlp_out at every layer (incl. the
+# embedding at resid_pre[0], which resid_mid/resid_post alone miss).
 normalize_steering_vectors: false
 learn_scale: false
 init_raw_scale: 0.5413           # softplus → 1.0 = exact orthogonal projection (Arditi α=1)

@@ -25,6 +25,7 @@ between two source datasets (e.g. AdvBench↔HarmBench) never leaks across split
 import functools
 import itertools
 import math
+import random
 
 import torch
 from datasets import Dataset, DatasetDict, load_dataset
@@ -214,13 +215,24 @@ def load_splits(config) -> list[dict]:
         )
 
     if config.get("data_origin") == "arditi_exact":
-        # Arditi's EXACT prompts, sized by our n_* config. ``seen`` re-asserts disjointness on
-        # top of their own train/val/test dedup.
+        # Arditi's EXACT prompts AND exact sampling: they seed 42 once and call random.sample in
+        # order harmful_train(n_train) → harmless_train(n_train) → harmful_val(n_val) → harmless_val
+        # (run_pipeline.load_and_sample_datasets), so the extraction and selection-scoring sets are
+        # identical to theirs. Their committed splits are already disjoint train/val/test, so no
+        # cross-split dedup is needed for the sampled (extraction/train) sets.
         ref = _alpaca_reference_map()
-        for split, harmful_file, harmless_file, size in (
-            ("extraction", "harmful_train.json", "harmless_train.json", he),
-            ("train",      "harmful_val.json",   "harmless_val.json",   ht),
-            ("eval",       "harmful_test.json",  "harmless_test.json",  hv),
+        rng = random.Random(42)
+
+        def _arditi_sample(items: list[dict], size: int) -> list[dict]:
+            insts = [it["instruction"] for it in items]
+            chosen = insts if size >= len(insts) else rng.sample(insts, size)
+            idx = {it["instruction"]: it for it in items}
+            return [idx[c] for c in chosen]
+
+        for split, harmful_file, harmless_file, size, sample in (
+            ("extraction", "harmful_train.json", "harmless_train.json", he, True),
+            ("train",      "harmful_val.json",   "harmless_val.json",   ht, True),
+            ("eval",       "harmful_test.json",  "harmless_test.json",  hv, False),
         ):
             if split == "eval":
                 # Arditi evaluates the jailbreak on JailbreakBench (their evaluation_datasets),
@@ -235,8 +247,11 @@ def load_splits(config) -> list[dict]:
                 {"instruction": r["instruction"], "reference": ref.get(r["instruction"].strip())}
                 for r in _load_arditi_json(harmless_file)
             ]
-            (hc,) = _partition(harmful_items, [size], seen)
-            (lc,) = _partition(harmless_items, [size], seen)
+            if sample:  # extraction/train: Arditi's seed-42 random.sample, in their call order
+                hc, lc = _arditi_sample(harmful_items, size), _arditi_sample(harmless_items, size)
+            else:  # eval set doesn't affect direction selection — keep deterministic first-N
+                (hc,) = _partition(harmful_items, [size], seen)
+                (lc,) = _partition(harmless_items, [size], seen)
             add(hc, True, split)
             add(lc, False, split)
         return rows
