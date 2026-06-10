@@ -298,6 +298,13 @@ def load_hooked_transformer(
                 trust_remote_code=True,
                 **{qwen_flag: True},
             )
+            # Skip TL weight processing: it builds a third full-size state dict
+            # (hf + converted + processed ≈ 46 GB for 7B) which OOMs a 50 GB
+            # container, and TL itself advises no_processing at reduced precision.
+            # Processing is function-preserving, so resid-stream hooks are unaffected.
+            return HookedTransformer.from_pretrained_no_processing(
+                model_name, hf_model=hf_model, device=device, dtype=dtype
+            )
         return HookedTransformer.from_pretrained(
             model_name, hf_model=hf_model, device=device, dtype=dtype
         )
