@@ -38,8 +38,6 @@ from torch import Tensor, nn
 from transformer_lens import HookedTransformer
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
-from . import compat  # noqa: F401  (installs transformers_stream_generator shim)
-
 Component = Literal["attention", "mlp", "residual", "resid_mid", "resid_post"]
 
 COMPONENT_HOOK: dict[Component, str] = {
