@@ -24,6 +24,7 @@ class ActivationTarget(Enum):
     ATTENTION = "attention"
     MLP = "mlp"
     RESIDUAL = "residual"  # back-compat alias of resid_post
+    RESID_PRE = "resid_pre"  # block input (Arditi extracts directions here)
     RESID_MID = "resid_mid"
     RESID_POST = "resid_post"
 

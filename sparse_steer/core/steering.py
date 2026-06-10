@@ -38,17 +38,18 @@ from torch import Tensor, nn
 from transformer_lens import HookedTransformer
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
-Component = Literal["attention", "mlp", "residual", "resid_mid", "resid_post"]
+Component = Literal["attention", "mlp", "residual", "resid_pre", "resid_mid", "resid_post"]
 
 COMPONENT_HOOK: dict[Component, str] = {
     "attention": "blocks.{i}.attn.hook_z",
     "mlp": "blocks.{i}.mlp.hook_post",
     "residual": "blocks.{i}.hook_resid_post",  # back-compat alias of resid_post
+    "resid_pre": "blocks.{i}.hook_resid_pre",  # block input (Arditi reads/ablates directions here)
     "resid_mid": "blocks.{i}.hook_resid_mid",
     "resid_post": "blocks.{i}.hook_resid_post",
 }
 
-_RESID_COMPONENTS = frozenset({"residual", "resid_mid", "resid_post"})
+_RESID_COMPONENTS = frozenset({"residual", "resid_pre", "resid_mid", "resid_post"})
 
 
 # ── Gate hyperparameters ──────────────────────────────────────────────

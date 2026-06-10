@@ -34,7 +34,9 @@ from sparse_steer.utils.eval import decision_logprobs
 from sparse_steer.utils.refusal import refusal_metric, resolve_refusal_token_ids
 from sparse_steer.utils.tokenize import apply_template, tokenize
 
-_GRID_COMPONENT = "resid_post"  # candidate directions read off the residual stream (d_model)
+_GRID_COMPONENT = "resid_pre"  # candidate directions read off block input, exactly as Arditi
+# (App. C reads the difference-in-means at each layer's block input; resid_pre[L] = resid_post[L-1],
+# so this also makes our layer index match theirs rather than being off by one).
 
 
 def _refine_instructions(refine_ds) -> tuple[list[str], list[str]]:
@@ -72,9 +74,10 @@ def _candidate_grid(
 def _induce_logprobs(
     model: SteeringModel, tokenizer, prompts: list[str], layer: int, vector: Tensor, batch_size: int
 ) -> Tensor:
-    """Last-token log-softmax with a TEMPORARY ``+vector`` steer at ``layer``'s resid_post
-    (permanent steering disabled) — the induce-refusal measurement. ``(n, vocab)`` on CPU."""
-    hook_name = COMPONENT_HOOK["resid_post"].format(i=layer)
+    """Last-token log-softmax with a TEMPORARY ``+vector`` steer at ``layer``'s block input
+    (resid_pre, exactly as Arditi adds the direction at the source layer's block input;
+    permanent steering disabled) — the induce-refusal measurement. ``(n, vocab)`` on CPU."""
+    hook_name = COMPONENT_HOOK["resid_pre"].format(i=layer)
     v = vector.to(device=model.device, dtype=torch.float32)
 
     def add(act, hook=None):
@@ -177,7 +180,10 @@ def select_direction(
                 decision_logprobs(model, tokenizer, harmful, batch_size=bs), token_ids
             ).mean().item()
             ablated_harmless = decision_logprobs(model, tokenizer, harmless, batch_size=bs)
-            kl = (ablated_harmless.exp() * (ablated_harmless - base_harmless)).sum(-1).mean().item()
+            # KL(baseline ‖ ablated) on harmless, exactly as Arditi (App. C, kl_div_fn, eps 1e-6) —
+            # NB the order: baseline is the reference distribution (not ablated ‖ baseline).
+            p_base, p_abl = base_harmless.exp(), ablated_harmless.exp()
+            kl = (p_base * ((p_base + 1e-6).log() - (p_abl + 1e-6).log())).sum(-1).mean().item()
             induce = refusal_metric(
                 _induce_logprobs(model, tokenizer, harmless, layer, r, bs), token_ids
             ).mean().item()
