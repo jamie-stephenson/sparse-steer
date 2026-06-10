@@ -7,6 +7,10 @@ inert placeholders are enough to let the dynamic-module import check pass.
 Importing this module installs the shim.
 """
 
+# transformer_lens replaces sys.modules["transformers"] on import, discarding any
+# attributes patched onto the old module object — so it must be imported first.
+import transformer_lens  # noqa: F401
+
 import transformers
 import transformers.generation.utils as _generation_utils
 
