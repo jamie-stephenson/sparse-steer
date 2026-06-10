@@ -27,3 +27,14 @@ for _name in _REMOVED_TOP_LEVEL:
 
 if not hasattr(_generation_utils, "SampleOutput"):
     _generation_utils.SampleOutput = _generation_utils.GenerateOutput
+
+# transformers 5.x removed the head-pruning API; modeling_qwen.py calls
+# get_head_mask unconditionally in forward. Only the head_mask=None path is used.
+if not hasattr(transformers.PreTrainedModel, "get_head_mask"):
+
+    def _get_head_mask(self, head_mask, num_hidden_layers, is_attention_chunked=False):
+        if head_mask is not None:
+            raise NotImplementedError("get_head_mask shim only supports head_mask=None")
+        return [None] * num_hidden_layers
+
+    transformers.PreTrainedModel.get_head_mask = _get_head_mask
