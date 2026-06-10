@@ -281,6 +281,16 @@ def load_hooked_transformer(
     if lora_adapter is None:
         hf_model = None
         if model_name.startswith("Qwen/Qwen-"):
+            import transformers
+
+            if int(transformers.__version__.split(".")[0]) >= 5:
+                # Weights and tokenizer load fine but the forward pass silently
+                # produces garbage (verified 2026-06-10: good on 4.49.0, broken on 5.9).
+                raise RuntimeError(
+                    f"transformers {transformers.__version__} silently breaks Qwen-1.0 "
+                    "inference. Run this experiment with the legacy overlay:\n"
+                    '  uv run --with "transformers==4.49.0" python run.py ...'
+                )
             # Left to its own devices TL loads Qwen-1.0 weights in fp32 and the remote
             # code auto-casts to bf16, transiently holding both copies (~42 GB); with
             # TL's conversion dict on top this OOMs a 50 GB container. Pre-load once in
