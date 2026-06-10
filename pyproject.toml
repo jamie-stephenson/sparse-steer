@@ -10,7 +10,7 @@ dependencies = [
     "datasets>=4.6.1",
     "python-dotenv>=1.0.1",
     "torch>=2.10.0",
-    "transformers[torch]>=5.2.0",
+    "transformers[torch]==4.49.0",
     "pyyaml>=6.0",
     "tqdm>=4.0",
     "wandb>=0.25.0",
@@ -24,6 +24,12 @@ dependencies = [
     "inspect-ai>=0.3",
     "inspect-evals",
 ]
+
+# transformers 5.x silently breaks Qwen-1.0 remote-code inference (garbage output
+# with correctly loaded weights; verified good on 4.49.0). transformer-lens 3.3
+# declares transformers>=5.4 but runs fine on 4.49 — override its constraint.
+[tool.uv]
+override-dependencies = ["transformers==4.49.0"]
 
 [dependency-groups]
 dev = [
