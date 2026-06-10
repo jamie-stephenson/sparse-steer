@@ -279,7 +279,28 @@ def load_hooked_transformer(
     config and doubles as the base weights the adapter is applied to.
     """
     if lora_adapter is None:
-        return HookedTransformer.from_pretrained(model_name, device=device, dtype=dtype)
+        hf_model = None
+        if model_name.startswith("Qwen/Qwen-"):
+            # Left to its own devices TL loads Qwen-1.0 weights in fp32 and the remote
+            # code auto-casts to bf16, transiently holding both copies (~42 GB); with
+            # TL's conversion dict on top this OOMs a 50 GB container. Pre-load once in
+            # the target dtype, using Qwen's own precision flag to disable the auto-cast.
+            from transformers import AutoModelForCausalLM
+
+            qwen_flag = {
+                torch.float16: "fp16",
+                torch.bfloat16: "bf16",
+                torch.float32: "fp32",
+            }[dtype]
+            hf_model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=dtype,
+                trust_remote_code=True,
+                **{qwen_flag: True},
+            )
+        return HookedTransformer.from_pretrained(
+            model_name, hf_model=hf_model, device=device, dtype=dtype
+        )
     from peft import PeftModel
     from transformers import AutoModelForCausalLM
 
