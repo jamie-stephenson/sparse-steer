@@ -19,7 +19,7 @@ build one sampler per call with the same seed; see :func:`make_sampling_sampler`
 """
 
 import contextlib
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 
 import torch
 from torch import Tensor
@@ -66,6 +66,7 @@ def generate(
     steer: str = "all",
     steer_prompt_mask: Tensor | None = None,
     use_kv_cache: bool = True,
+    eos_token_ids: Collection[int] | None = None,
 ) -> Tensor | tuple[Tensor, Tensor]:
     """Decode ``max_new_tokens`` tokens, returning only the newly generated ids.
 
@@ -73,9 +74,19 @@ def generate(
     With ``capture_log_softmax`` also returns the per-step log-softmax over vocab
     ``(B, max_new_tokens, V)`` — the distribution the sampler drew from each step.
     ``sampler=None`` decodes greedily.
+
+    ``eos_token_ids`` (when given and not capturing log-softmax) stops the loop once
+    every sequence has emitted an end token — the loop has no native stopping, so
+    without this it always runs the full ``max_new_tokens``, decoding off-distribution
+    text *past* the model's turn-end (which the caller must then truncate at decode).
     """
     if sampler is None:
         sampler = make_greedy_sampler()
+    eos = (
+        torch.tensor(sorted(eos_token_ids), device=model.device)
+        if eos_token_ids and not capture_log_softmax
+        else None
+    )
     if steer == "prompt" and steer_prompt_mask is None:
         raise ValueError("steer='prompt' requires steer_prompt_mask")
 
@@ -99,6 +110,7 @@ def generate(
 
     new_tokens: list[Tensor] = []
     lsm_steps: list[Tensor] = []
+    finished = torch.zeros(seq.shape[0], dtype=torch.bool, device=device)
     for step in range(max_new_tokens):
         extra: dict = {"return_type": "logits", "prepend_bos": False}
         if use_kv_cache:
@@ -126,6 +138,10 @@ def generate(
         seq = torch.cat([seq, nxt.unsqueeze(1)], dim=1)
         if attn is not None:
             attn = torch.cat([attn, attn.new_ones(attn.shape[0], 1)], dim=1)
+        if eos is not None:
+            finished |= (nxt.unsqueeze(-1) == eos).any(dim=-1)
+            if bool(finished.all()):
+                break
 
     generated = torch.cat(new_tokens, dim=1)
     if capture_log_softmax:
@@ -164,6 +180,17 @@ def generate_text(
     device = model.device
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    # Stop/strip at the model's end token: the TL decode loop has no native EOS stop, so
+    # without this it emits the full max_new_tokens — running past the turn-end into
+    # off-distribution text that ``skip_special_tokens`` would otherwise keep.
+    eos_ids = {tokenizer.eos_token_id} if tokenizer.eos_token_id is not None else set()
+
+    def _strip_after_eos(ids: list[int]) -> list[int]:
+        for i, t in enumerate(ids):
+            if t in eos_ids:
+                return ids[:i]
+        return ids
+
     out: list[str] = []
     for start in range(0, len(prompts), batch_size):
         batch = prompts[start : start + batch_size]
@@ -181,6 +208,7 @@ def generate_text(
                 model, enc["input_ids"], enc["attention_mask"], max_new_tokens,
                 sampler=sampler, steer=steer,
                 steer_prompt_mask=enc["attention_mask"].bool() if steer == "prompt" else None,
+                eos_token_ids=eos_ids or None,
             )
         else:  # plain HF model (e.g. LoRA/peft): native generate, adapter always on
             gen = model.generate(
@@ -191,7 +219,8 @@ def generate_text(
             )
             new_toks = gen[:, enc["input_ids"].shape[1] :]
         out.extend(
-            tokenizer.decode(t.tolist(), skip_special_tokens=True).strip() for t in new_toks
+            tokenizer.decode(_strip_after_eos(t.tolist()), skip_special_tokens=True).strip()
+            for t in new_toks
         )
     return out
 

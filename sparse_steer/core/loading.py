@@ -41,6 +41,12 @@ def load_tokenizer(config: DictConfig) -> PreTrainedTokenizerBase:
         # QWenTokenizer ships with no pad/eos at all; pad as Arditi does (eod = <|endoftext|>).
         tokenizer.pad_token = "<|extra_0|>"
         tokenizer.pad_token_id = tokenizer.eod_id
+        # ...and no eos either. Generation must stop at the assistant turn-end <|im_end|>;
+        # without it the (stop-less) TL decode loop runs past the reply into off-distribution
+        # text, which deflates generation-based evals (e.g. Llama Guard safety_score).
+        tokenizer.eos_token = "<|im_end|>"
+        if tokenizer.eos_token_id is None:
+            tokenizer.eos_token_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
     return tokenizer
 
 
