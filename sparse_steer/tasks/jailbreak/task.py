@@ -204,7 +204,7 @@ class JailbreakTask(TaskSpec):
                     "l0_scheduler_type": config.get("l0_scheduler_type"),
                     "l0_warmup_steps": config.get("l0_warmup_steps"),
                     "normalize_ablation": config.get("normalize_ablation", False),
-                    "proj_norm_examples": config.get("proj_norm_examples", 128),
+                    "proj_act_norm_examples": config.get("proj_act_norm_examples", 128),
                     "learn_scale": config.get("learn_scale", False),
                     "shared_scale": config.get("shared_scale", False),
                     "init_raw_scale": config.get("init_raw_scale", 0.0),
@@ -273,6 +273,10 @@ class JailbreakTask(TaskSpec):
                 "sparse_steer/experiment/sourcing.py",
                 "sparse_steer/tasks/jailbreak/refine.py",
             ]
+        if artifact_type == ArtifactType.SPARSE_STEERING:
+            # the gate/ablation hooks (incl. proj_act_norm) and the gate-training loop
+            # determine the trained gates
+            files += ["sparse_steer/core/steering.py", "sparse_steer/train.py"]
         if artifact_type in (ArtifactType.UNSTEERED_EVAL, ArtifactType.STEERED_EVAL):
             files += [
                 "sparse_steer/tasks/jailbreak/eval.py",

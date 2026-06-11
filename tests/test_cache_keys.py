@@ -25,7 +25,7 @@ def _cfg(**overrides):
         num_epochs=2, learning_rate=1.5e-2, lr_scheduler_type="cosine", lr_warmup_steps=5,
         weight_decay=0.01, train_batch_size=8,
         l0_lambda=0.04, l0_scheduler_type="warmup", l0_warmup_steps=16,
-        normalize_ablation=True, proj_norm_examples=128,
+        normalize_ablation=True, proj_act_norm_examples=128,
         learn_scale=True, shared_scale=False, init_raw_scale=0.5413, freeze_raw_scale=False,
         scale_tuning_epochs=0, scale_tuning_lr=None,
         gate_config={"temperature": 0.33, "stretch_limits": [-0.1, 1.1], "eps": 1e-6,

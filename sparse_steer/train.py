@@ -187,12 +187,12 @@ def train_steering(
 
     # Equalise gate-gradient scale across ablation sites of differing residual
     # norm so the L0 gates select on objective benefit, not activation norm
-    # (see SteeringModel.set_proj_norms). Site-agnostic; default off.
+    # (see SteeringModel.set_proj_act_norms). Site-agnostic; default off.
     if config.get("normalize_ablation", False) and model.intervention == "ablate":
-        n_norm = min(len(train_split), config.get("proj_norm_examples", 128))
+        n_norm = min(len(train_split), config.get("proj_act_norm_examples", 128))
         rows = list(train_split)[:n_norm]
         batch = task.collate(rows, tokenizer, model.device, config)
-        model.set_proj_norms(
+        model.set_proj_act_norms(
             batch["input_ids"], batch["attention_mask"], batch["steer_mask"]
         )
 

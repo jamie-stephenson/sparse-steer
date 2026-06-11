@@ -98,8 +98,8 @@ class TinySleepersTask(TaskSpec):
                 }
             )
             if config.get("normalize_ablation", False):
-                # number of rows used to estimate each site's proj_norm
-                fields["proj_norm_examples"] = config.get("proj_norm_examples", 128)
+                # number of rows used to estimate each site's proj_act_norm
+                fields["proj_act_norm_examples"] = config.get("proj_act_norm_examples", 128)
         if artifact_type in (ArtifactType.UNSTEERED_EVAL, ArtifactType.STEERED_EVAL):
             fields.update(
                 {
@@ -122,11 +122,11 @@ class TinySleepersTask(TaskSpec):
             ArtifactType.STEERED_EVAL,
         ):
             # the training objective (loss) lives here; the ablation/gate hooks
-            # (incl. proj_norm normalisation) live in steering.py
+            # (incl. proj_act_norm normalisation) live in steering.py
             files.append("sparse_steer/tasks/tinysleepers/task.py")
             files.append("sparse_steer/core/steering.py")
         if artifact_type == ArtifactType.SPARSE_STEERING:
-            # the gate-training loop + proj_norm setup determine the trained gates
+            # the gate-training loop + proj_act_norm setup determine the trained gates
             files.append("sparse_steer/train.py")
         if artifact_type in (
             ArtifactType.UNSTEERED_EVAL,

@@ -93,8 +93,8 @@ class SteeringHook(nn.Module):
         # positions). Dividing the ablation strength by it equalises the gate
         # gradient scale across sites whose residual norm grows with depth, so
         # the learned gates select on CE-benefit rather than activation norm.
-        # Default 1.0 leaves behaviour unchanged; ``set_proj_norms`` fills it in.
-        self.register_buffer("proj_norm", torch.ones(num_gates))
+        # Default 1.0 leaves behaviour unchanged; ``set_proj_act_norms`` fills it in.
+        self.register_buffer("proj_act_norm", torch.ones(num_gates))
         # Hold the shared scale in a tuple so nn.Module does not re-register it
         # as a parameter of every hook (it is owned once by the SteeringModel).
         self._shared_holder = (shared_raw_scale,)
@@ -231,7 +231,7 @@ class SteeringHook(nn.Module):
         lead = activation.ndim - v_hat.ndim
         v_hat = v_hat.reshape((1,) * lead + v_hat.shape)
         coef = (activation.to(torch.float32) * v_hat).sum(dim=-1, keepdim=True)  # activation·v̂
-        weight = self._gate_weights() * self._scale_weights() / self.proj_norm
+        weight = self._gate_weights() * self._scale_weights() / self.proj_act_norm
         if isinstance(weight, Tensor):
             # (num_gates,) → (num_gates, 1): broadcasts over coef's per-head axis
             # for attention, or the trailing singleton for residual/mlp.
@@ -554,13 +554,13 @@ class SteeringModel(nn.Module):
                 hook.pos_mask = None
 
     @torch.no_grad()
-    def set_proj_norms(
+    def set_proj_act_norms(
         self,
         input_ids: Tensor,
         attention_mask: Tensor | None,
         pos_mask: Tensor,
     ) -> None:
-        """Set each ablation hook's ``proj_norm`` to the mean ``|activation·v̂|``
+        """Set each ablation hook's ``proj_act_norm`` to the mean ``|activation·v̂|``
         over the ``pos_mask`` positions (with steering disabled).
 
         The residual norm grows with depth, so a deep site's ablation delta (and
@@ -598,7 +598,7 @@ class SteeringModel(nn.Module):
             )
         for component, layer, hook in self.iter_hooks():
             val = sums[f"{component}_{layer}"].clamp_min(1e-6)
-            hook.proj_norm.copy_(val.to(hook.proj_norm))
+            hook.proj_act_norm.copy_(val.to(hook.proj_act_norm))
 
     # ── Freezing ──────────────────────────────────────────────────────
 
@@ -635,7 +635,7 @@ class SteeringModel(nn.Module):
     # ── Save / load ───────────────────────────────────────────────────
 
     def steering_state_dict(self) -> dict[str, Tensor]:
-        terms = ("log_alpha", "raw_scale", "steering_vectors", "_shared_raw_scale", "proj_norm")
+        terms = ("log_alpha", "raw_scale", "steering_vectors", "_shared_raw_scale", "proj_act_norm")
         return {
             k: v
             for k, v in self.state_dict().items()
