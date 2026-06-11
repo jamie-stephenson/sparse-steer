@@ -3,10 +3,10 @@
 A steering site's direction can come from three places, selected by ``config.direction_source``:
 
 - ``self`` — each site uses the mean-difference direction extracted *at that same site*
-  (many-to-many / lockstep). The default; this is Way 2 (per-site sparse ablation).
+  (many-to-many / lockstep). The default — **per-site sparse ablation**.
 - ``[component, layer]`` — one direction (the diff-in-means at that single site) broadcast to
-  *every* steering site (one-to-many). This is Way 1 (Arditi's direction, pinned, gates learn
-  placement).
+  *every* steering site (one-to-many) — **broadcast (pinned-direction) sparse ablation**, e.g.
+  pin Arditi's layer-17 direction and let the gates learn the placement.
 - ``grid_select`` — pick one direction from a candidate grid by the task's
   :class:`~sparse_steer.tasks.base.SelectionPolicy` (Arditi App. C), then broadcast it. This is
   the reproduction's selection, factored out of the old ``arditi_select`` refine.
