@@ -156,21 +156,68 @@ class JailbreakTask(TaskSpec):
         }
         if artifact_type == ArtifactType.BUCKETED_DATASET:
             fields.update(bucket_identity)
-        if artifact_type in (
+        steering_artifacts = (
             ArtifactType.STEERING_VECTORS,
             ArtifactType.SPARSE_STEERING,
             ArtifactType.SELECTED_DIRECTION,
             ArtifactType.STEERED_EVAL,
-        ):
+        )
+        if artifact_type in steering_artifacts:
             fields.update(bucket_identity)
             fields["intervention"] = config.intervention
-            # Sourcing policy: per-site (self) vs one direction broadcast everywhere (pinned /
-            # grid_select) produce different vectors from the same extraction — keep them apart.
-            fields["direction_source"] = config.get("direction_source", "self")
-        if artifact_type == ArtifactType.SPARSE_STEERING:
-            # Phase-2 training target depends on the train split + the affirmative text.
-            fields["n_train"] = config.n_train
-            fields["affirmative_prefix"] = config.affirmative_prefix
+            # Sourcing identity: which sites are steered + how each site's direction is sourced.
+            # Two runs differing here produce different steering vectors from the same buckets.
+            fields.update(
+                {
+                    "direction_source": config.get("direction_source", "self"),
+                    "targets": list(config.targets),
+                    "token_position": config.token_position,
+                    "steering_layer_ids": (
+                        list(config.steering_layer_ids)
+                        if config.get("steering_layer_ids") is not None
+                        else None
+                    ),
+                    "normalize_steering_vectors": config.get("normalize_steering_vectors", False),
+                }
+            )
+
+        # Trained-gate identity: the SPARSE_STEERING artifact (and any eval that consumes it) is a
+        # deterministic function of the WHOLE gate-training recipe. Without these a frontier sweep
+        # over e.g. l0_lambda would silently reuse one cached result.
+        trains_gates = config.get("refinement_method") == "gate_training"
+        if artifact_type == ArtifactType.SPARSE_STEERING or (
+            artifact_type == ArtifactType.STEERED_EVAL and trains_gates
+        ):
+            fields.update(
+                {
+                    "n_train": config.n_train,
+                    "affirmative_prefix": config.affirmative_prefix,
+                    "completion_tokens": config.get("completion_tokens"),
+                    "seed": config.seed,
+                    "num_epochs": config.get("num_epochs"),
+                    "learning_rate": config.get("learning_rate"),
+                    "lr_scheduler_type": config.get("lr_scheduler_type"),
+                    "lr_warmup_steps": config.get("lr_warmup_steps"),
+                    "weight_decay": config.get("weight_decay"),
+                    "train_batch_size": config.get("train_batch_size"),
+                    "l0_lambda": config.get("l0_lambda"),
+                    "l0_scheduler_type": config.get("l0_scheduler_type"),
+                    "l0_warmup_steps": config.get("l0_warmup_steps"),
+                    "normalize_ablation": config.get("normalize_ablation", False),
+                    "proj_norm_examples": config.get("proj_norm_examples", 128),
+                    "learn_scale": config.get("learn_scale", False),
+                    "shared_scale": config.get("shared_scale", False),
+                    "init_raw_scale": config.get("init_raw_scale", 0.0),
+                    "freeze_raw_scale": config.get("freeze_raw_scale", False),
+                    "scale_tuning_epochs": config.get("scale_tuning_epochs", 0),
+                    "scale_tuning_lr": config.get("scale_tuning_lr"),
+                    "gate_config": (
+                        OmegaConf.to_container(config.gate_config, resolve=True)
+                        if config.get("gate_config")
+                        else None
+                    ),
+                }
+            )
         if artifact_type == ArtifactType.SELECTED_DIRECTION or (
             artifact_type == ArtifactType.STEERED_EVAL
             and config.get("direction_source") == "grid_select"
