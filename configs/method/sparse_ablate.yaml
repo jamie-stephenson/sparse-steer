@@ -1,0 +1,49 @@
+# @package _global_
+# Sparse directional-ablation jailbreak — learn WHERE to ablate the refusal direction, vs Arditi
+# ablating it at every site. Pair with the jailbreak_arditi task preset (same data + evals).
+#
+#   Way 2 (this file): direction_source: self      → each site ablates its own diff-in-means,
+#                                                     L0 gates learn the sparse subset of sites.
+#   Way 1 (override):  direction_source='[resid_pre, 17]'  → Arditi's single direction pinned and
+#                                                     broadcast everywhere, gates learn placement.
+#                      i.e. run  method=sparse_ablate direction_source='[resid_pre, 17]'
+#
+# Both hold the direction fixed (it is a buffer, never trained) and optimise only gates + scale.
+method: sparse_ablate
+refinement_method: gate_training
+direction_source: self
+intervention: ablate
+steering_layer_ids: null
+targets: [resid_pre, resid_mid, resid_post]  # gate ablation at block input + both residual taps
+token_position: last
+extract_batch_size: 8
+normalize_steering_vectors: false
+# Ablation gates must select on objective benefit, not residual norm (which grows with depth) —
+# REQUIRED here, see project_ablation_norm_confound. Couples with learn_scale to restore α≈1.
+normalize_ablation: true
+
+learn_scale: true
+init_raw_scale: 0.5413            # softplus → ~1.0 (α=1 projection) at the kept sites
+
+l0_scheduler_type: warmup
+l0_warmup_steps: 16
+l0_lambda: 0.04                  # sparsity knob — sweep this to trace the ASR–collateral frontier
+learning_rate: 1.5e-2
+lr_scheduler_type: cosine
+lr_warmup_steps: 5
+num_epochs: 2
+train_batch_size: 8
+weight_decay: 0.01
+logging_steps: 1
+save_strategy: "no"
+freeze_raw_scale: false
+track_gates: true
+scale_tuning_epochs: 0
+scale_tuning_lr: null
+
+gate_config:
+  temperature: 0.33
+  stretch_limits: [-0.1, 1.1]
+  eps: 1.0e-6
+  eval_threshold: 1.0e-2
+  init_log_alpha: -0.79

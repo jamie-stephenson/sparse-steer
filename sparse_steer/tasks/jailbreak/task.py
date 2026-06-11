@@ -10,12 +10,12 @@ from torch import Tensor
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
 from sparse_steer.core.loading import load_plain_model
-from sparse_steer.tasks.base import TaskSpec
+from sparse_steer.tasks.base import SelectionPolicy, TaskSpec
 from sparse_steer.tasks.collate import prompt_completion_collate
 from sparse_steer.utils import cache
 from sparse_steer.utils.cache import ArtifactType
 from sparse_steer.utils.refusal import REFUSAL_DETECTOR_VERSION
-from .refine import arditi_select_refine
+from .refine import jailbreak_selection_policy
 from .data import (
     assemble_datasets,
     bucket_counts,
@@ -102,9 +102,11 @@ class JailbreakTask(TaskSpec):
         metrics.update(evaluate_inspect(model, tokenizer, config))  # self-contained Inspect evals
         return metrics
 
-    def refinement_strategies(self):
-        # Arditi single-direction selection — refusal-specific, so it lives with the task.
-        return {"arditi_select": arditi_select_refine}
+    def selection_policy(self, model, tokenizer, refine_ds, config) -> SelectionPolicy:
+        # Refusal-specific scoring for direction_source=grid_select (Arditi App. C): bypass /
+        # induce / KL on the refinement set. The grid sweep + filter/pick are task-general
+        # (experiment.sourcing); this only supplies the score + constraints.
+        return jailbreak_selection_policy(model, tokenizer, refine_ds, config)
 
     # ── Phase-2 sparse-ablation training objective (mirrors tinysleepers) ──
     def collate(
@@ -162,20 +164,23 @@ class JailbreakTask(TaskSpec):
         ):
             fields.update(bucket_identity)
             fields["intervention"] = config.intervention
+            # Sourcing policy: per-site (self) vs one direction broadcast everywhere (pinned /
+            # grid_select) produce different vectors from the same extraction — keep them apart.
+            fields["direction_source"] = config.get("direction_source", "self")
         if artifact_type == ArtifactType.SPARSE_STEERING:
             # Phase-2 training target depends on the train split + the affirmative text.
             fields["n_train"] = config.n_train
             fields["affirmative_prefix"] = config.affirmative_prefix
         if artifact_type == ArtifactType.SELECTED_DIRECTION or (
             artifact_type == ArtifactType.STEERED_EVAL
-            and config.get("refinement_method") == "arditi_select"
+            and config.get("direction_source") == "grid_select"
         ):
             # The selected direction (and the eval that uses it) depends on the refinement set
             # + the Arditi selection hyperparameters.
             fields.update(
                 {
                     "n_train": config.n_train,
-                    "refinement_method": config.get("refinement_method"),
+                    "selection_grid_component": config.get("selection_grid_component"),
                     "selection_positions": config.get("selection_positions"),
                     "selection_kl_threshold": config.get("selection_kl_threshold"),
                     "selection_induce_threshold": config.get("selection_induce_threshold"),
@@ -210,12 +215,24 @@ class JailbreakTask(TaskSpec):
         files = ["sparse_steer/tasks/jailbreak/data.py", "sparse_steer/utils/refusal.py"]
         if artifact_type == ArtifactType.BUCKETED_DATASET:
             files.append("sparse_steer/core/generate.py")
+        # Sourcing (self / pinned broadcast / grid_select) decides the steering vectors; its
+        # scoring (refine.py) decides the selected direction. Both feed the eval.
+        if artifact_type in (
+            ArtifactType.STEERING_VECTORS,
+            ArtifactType.SPARSE_STEERING,
+            ArtifactType.SELECTED_DIRECTION,
+        ):
+            files += [
+                "sparse_steer/experiment/sourcing.py",
+                "sparse_steer/tasks/jailbreak/refine.py",
+            ]
         if artifact_type in (ArtifactType.UNSTEERED_EVAL, ArtifactType.STEERED_EVAL):
             files += [
                 "sparse_steer/tasks/jailbreak/eval.py",
                 "sparse_steer/core/generate.py",
                 "sparse_steer/core/inspect_provider.py",
                 "sparse_steer/utils/llama_guard.py",
+                "sparse_steer/experiment/sourcing.py",
                 "sparse_steer/tasks/jailbreak/refine.py",  # selection-mode eval depends on the chosen direction
             ]
         return files

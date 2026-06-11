@@ -9,7 +9,7 @@ from sparse_steer.core.loading import load_steering_model
 from sparse_steer.train import train_steering
 from sparse_steer.utils.cache import ArtifactType
 from .base import Experiment
-from ._common import run_extraction
+from .sourcing import source_vectors
 
 RefinementFn = Callable[..., tuple]
 
@@ -18,14 +18,19 @@ RefinementFn = Callable[..., tuple]
 # A strategy turns the loaded model + datasets into the refined model:
 #   fn(experiment, model, tokenizer, extraction_ds, train_ds, output_dir)
 #       -> (model, artifacts, cache_info)
-# Tasks contribute their own (e.g. jailbreak's `arditi_select`) via
-# TaskSpec.refinement_strategies(); the two pools are merged at dispatch.
+# Refinement is now ONLY "what happens to the steering params after sourcing":
+# `none` (set and stop) or `gate_training` (set, then train gates/scale). WHERE the
+# direction comes from is the orthogonal `direction_source` axis, resolved by
+# `sourcing.source_vectors` (self / pinned broadcast / grid_select). Tasks may still
+# contribute strategies via TaskSpec.refinement_strategies(); the pools merge at dispatch.
 
 
 def _refine_none(experiment, model, tokenizer, extraction_ds, train_ds, output_dir):
-    """dense / caa: extract the mean-difference direction and set it; no training."""
+    """dense / caa / arditi reproduction: source the direction(s) and set them; no training."""
     cache_info: dict[str, Any] = {}
-    steering_vectors = run_extraction(experiment, model, tokenizer, extraction_ds, cache_info)
+    steering_vectors = source_vectors(
+        experiment, model, tokenizer, extraction_ds, train_ds, cache_info
+    )
     if steering_vectors is not None:
         model.set_all_vectors(
             steering_vectors, normalize=experiment.config.normalize_steering_vectors
@@ -50,7 +55,9 @@ def _refine_gate_training(experiment, model, tokenizer, extraction_ds, train_ds,
                 shutil.copy2(cached, output_dir / name)
         return model, artifacts, cache_info
 
-    steering_vectors = run_extraction(experiment, model, tokenizer, extraction_ds, cache_info)
+    steering_vectors = source_vectors(
+        experiment, model, tokenizer, extraction_ds, train_ds, cache_info
+    )
     if steering_vectors is not None:
         model.set_all_vectors(
             steering_vectors, normalize=experiment.config.normalize_steering_vectors

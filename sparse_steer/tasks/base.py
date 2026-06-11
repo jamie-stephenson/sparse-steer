@@ -1,4 +1,5 @@
 import abc
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from datasets import Dataset, DatasetDict
@@ -8,6 +9,23 @@ from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
 from sparse_steer.core.steering import SteeringModel
 from sparse_steer.utils.cache import ArtifactType
+
+
+@dataclass
+class SelectionPolicy:
+    """A task's ``grid_select`` scoring (Arditi App. C), consumed by the generic sourcing
+    driver (``experiment.sourcing.grid_select_source``).
+
+    ``score(vector, source_layer)`` is called *after* the driver has broadcast ``vector`` onto
+    every steering site, so it reads the model in its candidate-ablated state. It returns
+    ``(objective, values)`` — the scalar the picker minimises plus a dict of named quantities
+    the constraints reference. ``constraints`` is a list of ``(values-key, "<="|">=", threshold)``
+    the generic picker applies (alongside a finite + layer-prune check) before taking the
+    minimum-objective survivor.
+    """
+
+    score: Callable[[Tensor, int], tuple[float, dict[str, float]]]
+    constraints: list[tuple[str, str, float]]
 
 
 class TaskSpec(abc.ABC):
@@ -39,9 +57,25 @@ class TaskSpec(abc.ABC):
         """Task-specific refinement strategies contributed to the experiment's refine slot,
         keyed by the ``refinement_method`` config value (merged with the experiment's built-ins).
         Default: none. A strategy is ``fn(experiment, model, tokenizer, extraction_ds, train_ds,
-        output_dir) -> (model, artifacts, cache_info)`` — e.g. jailbreak's Arditi selection.
+        output_dir) -> (model, artifacts, cache_info)``.
         """
         return {}
+
+    # ── Direction sourcing ────────────────────────────────────────────
+
+    def selection_policy(
+        self,
+        model: SteeringModel,
+        tokenizer: PreTrainedTokenizerBase,
+        refine_ds,
+        config: DictConfig,
+    ) -> "SelectionPolicy | None":
+        """Scoring used by ``direction_source: grid_select`` to pick one direction from the
+        candidate grid (Arditi App. C). Default ``None`` ⇒ this task does not support
+        ``grid_select`` (only ``self`` / pinned sourcing). Override to return a
+        :class:`SelectionPolicy` — e.g. jailbreak's bypass/induce/KL refusal scoring.
+        """
+        return None
 
     # ── Training objective ────────────────────────────────────────────
 
@@ -99,4 +133,4 @@ class TaskSpec(abc.ABC):
     def cache_source_files(self, artifact_type: ArtifactType) -> list[str]: ...
 
 
-__all__ = ["TaskSpec"]
+__all__ = ["SelectionPolicy", "TaskSpec"]

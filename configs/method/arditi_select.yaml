@@ -1,9 +1,13 @@
 # @package _global_
 # Arditi single-direction selection + ablation (paper App. B/C). Pair with the jailbreak_arditi
-# task preset to reproduce the paper's white-box jailbreak; switch to method=sparse to keep the
-# data + evals fixed but learn sparse gates instead of selecting one direction.
+# task preset to reproduce the paper's white-box jailbreak. Factored onto two orthogonal axes:
+#   direction_source: grid_select  → pick ONE direction by App. C scoring, broadcast everywhere
+#   refinement_method: none        → set it and stop (no gate training)
+# Switch direction_source to `self` (+ refinement_method gate_training) for sparse per-site
+# ablation, or to `[resid_pre, L]` to pin Arditi's direction and learn sparse placement.
 method: arditi_select
-refinement_method: arditi_select # select one direction (vs gate_training / none)
+direction_source: grid_select    # one direction, chosen by the grid + filters, broadcast to all
+refinement_method: none          # no training — just set the selected direction
 intervention: ablate
 steering_layer_ids: null         # ablate the selected direction at every layer
 extract_batch_size: 8
@@ -16,6 +20,7 @@ learn_scale: false
 init_raw_scale: 0.5413           # softplus → 1.0 = exact orthogonal projection (Arditi α=1)
 
 # selection (Arditi App. C) — candidate grid + filters scored on the refinement set
+selection_grid_component: resid_pre  # read candidate directions at the block input (Arditi)
 selection_positions: 5           # last-K token positions searched (Arditi selected pos -2)
 selection_kl_threshold: 0.1      # drop candidates whose harmless KL exceeds this
 selection_induce_threshold: 0.0  # drop candidates that don't raise refusal when added

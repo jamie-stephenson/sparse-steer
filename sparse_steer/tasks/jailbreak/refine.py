@@ -1,42 +1,28 @@
-"""Arditi-style single-direction selection (paper App. B/C).
+"""Jailbreak selection scoring (Arditi App. B/C) — the task's :class:`SelectionPolicy`.
 
-The refinement stage for the ``arditi_select`` method — a drop-in alternative to gate training
-in the ``extract → refine → eval`` pipeline. From a grid of candidate refusal directions
-(mean harmful − mean harmless at each layer × last-K position, computed on the *extraction*
-set), pick the single direction whose directional ablation most suppresses refusal on the
-held-out *refinement* set, subject to:
+This is the task-specific half of ``direction_source: grid_select``: given a candidate refusal
+direction broadcast onto every steering site, score it by
 
-- a KL budget on harmless prompts (ablation must not damage harmless behaviour), and
-- an "induce" check (adding the direction must actually raise refusal on harmless prompts —
-  confirming it is genuinely the refusal direction, not an arbitrary destructive one),
-- dropping the last ``prune_layer_frac`` of layers.
+- **bypass** — the refusal metric on harmful prompts under the candidate's ablation (lower ⇒ more
+  refusal suppressed; this is the objective the picker minimises),
+- **induce** — the refusal metric on harmless prompts when the direction is *added* (confirms it
+  is genuinely the refusal direction, not an arbitrary destructive one), and
+- **kl** — KL(baseline ‖ ablated) on harmless prompts (ablation must not damage harmless
+  behaviour).
 
-"Refusal" here is Arditi's logit refusal metric (``utils.refusal.refusal_metric``). The chosen
-direction is then ablated from every steered residual site at eval (α=1, exact projection).
+The generic grid construction, candidate sweep, and filter/pick live in
+``experiment.sourcing``; this module only supplies the refusal scoring + constraints. "Refusal"
+is Arditi's logit metric (``utils.refusal.refusal_metric``).
 """
-
-import math
-from typing import Any
 
 import torch
 from torch import Tensor
 
-from sparse_steer.core.extract import (
-    collect_activations,
-    extract_steering_vectors,
-    last_token_positions,
-    load_steering_vectors,
-    save_steering_vectors,
-)
 from sparse_steer.core.steering import COMPONENT_HOOK, SteeringModel
-from sparse_steer.utils.cache import ArtifactType
+from sparse_steer.tasks.base import SelectionPolicy
 from sparse_steer.utils.eval import decision_logprobs
 from sparse_steer.utils.refusal import refusal_metric, resolve_refusal_token_ids
 from sparse_steer.utils.tokenize import apply_template, tokenize
-
-_GRID_COMPONENT = "resid_pre"  # candidate directions read off block input, exactly as Arditi
-# (App. C reads the difference-in-means at each layer's block input; resid_pre[L] = resid_post[L-1],
-# so this also makes our layer index match theirs rather than being off by one).
 
 
 def _refine_instructions(refine_ds) -> tuple[list[str], list[str]]:
@@ -49,25 +35,6 @@ def _refine_instructions(refine_ds) -> tuple[list[str], list[str]]:
     harmful = [r["instruction"] for r in rows if r.get("category") == "harmful"]
     harmless = [r["instruction"] for r in rows if r.get("category") == "harmless"]
     return harmful, harmless
-
-
-@torch.no_grad()
-def _candidate_grid(
-    model: SteeringModel, tokenizer, extraction_ds, *, n_positions: int, batch_size: int
-) -> Tensor:
-    """``(positions, layers, d_model)`` mean-difference directions at each of the last
-    ``n_positions`` token positions (j=0 is the last token), per layer, from ``extraction_ds``."""
-    grids: list[Tensor] = []
-    for j in range(n_positions):
-        def at_offset(inputs, j=j):
-            return (last_token_positions(inputs["attention_mask"]) - j).clamp_min(0)
-
-        ds_acts, _ = collect_activations(
-            extraction_ds, model, tokenizer,
-            targets=[_GRID_COMPONENT], batch_size=batch_size, token_position=at_offset,
-        )
-        grids.append(extract_steering_vectors(ds_acts, [_GRID_COMPONENT])[_GRID_COMPONENT])
-    return torch.stack(grids, dim=0)
 
 
 @torch.no_grad()
@@ -98,56 +65,16 @@ def _induce_logprobs(
     return torch.cat(out, dim=0)
 
 
-def _filter_and_pick(
-    scored: list[tuple[int, int, float, float, float]],
-    n_layers: int,
-    *,
-    kl_threshold: float,
-    induce_threshold: float,
-    prune_layer_frac: float,
-) -> dict[str, Any]:
-    """Pure selection logic over ``[(pos, layer, bypass, induce, kl), ...]`` (Arditi App. C).
+def jailbreak_selection_policy(model, tokenizer, refine_ds, config) -> SelectionPolicy:
+    """Build the jailbreak :class:`SelectionPolicy` for ``direction_source: grid_select``.
 
-    Keep candidates that are finite, not in the last ``prune_layer_frac`` of layers, within the
-    KL budget, and above the induce threshold; among survivors pick the **lowest** bypass refusal
-    metric (most refusal suppressed). Raises if nothing survives.
-    """
-    keep_below_layer = int(n_layers * (1.0 - prune_layer_frac))
-    survivors = [
-        c for c in scored
-        if not any(math.isnan(x) for x in c[2:])
-        and c[1] < keep_below_layer
-        and c[4] <= kl_threshold
-        and c[3] >= induce_threshold
-    ]
-    if not survivors:
-        raise RuntimeError(
-            "Direction selection: no candidate survived the filters "
-            f"(layers<{keep_below_layer}, kl≤{kl_threshold}, induce≥{induce_threshold}). "
-            "Relax selection_kl_threshold / selection_induce_threshold."
-        )
-    pos, layer, bypass, induce, kl = min(survivors, key=lambda c: c[2])
-    return {
-        "position": pos, "layer": layer,
-        "bypass": bypass, "induce": induce, "kl": kl,
-        "n_candidates": len(scored), "n_survivors": len(survivors),
-    }
-
-
-@torch.no_grad()
-def select_direction(
-    model: SteeringModel, tokenizer, extraction_ds, refine_ds, config
-) -> tuple[dict[str, Tensor], dict[str, Any]]:
-    """Select one refusal direction and return ``(vectors, metadata)``.
-
-    ``vectors`` maps each steered component (``config.targets``) → ``(n_layers, d_model)`` with
-    the chosen direction broadcast to every layer, ready for ``SteeringModel.set_all_vectors``
-    (the ablate path normalises it). Scoring uses the refinement set; the grid uses extraction.
+    Prepares the scoring set once (Arditi's ``filter_val``: keep harmful the unsteered model does
+    refuse and harmless it does not) and the harmless baseline distribution, then returns a
+    ``score(vector, layer)`` closure the generic driver calls per candidate — after it has
+    broadcast that candidate onto every steered site, so bypass/kl read the ablated model.
     """
     bs = int(config.eval_batch_size)
     token_ids = resolve_refusal_token_ids(tokenizer, list(config.refusal_tokens))
-    n_positions = int(config.get("selection_positions", 1))
-    components = list(config.targets)
 
     harmful, harmless = _refine_instructions(refine_ds)
     if not harmful or not harmless:
@@ -166,83 +93,33 @@ def select_direction(
     harmful = [p for p, s in zip(harmful, h_scores.tolist()) if s > 0]
     harmless = [p for p, s in zip(harmless, l_scores.tolist()) if s < 0]
 
-    grid = _candidate_grid(
-        model, tokenizer, extraction_ds, n_positions=n_positions, batch_size=int(config.extract_batch_size)
-    )
-    n_pos, n_layers, d_model = grid.shape
-
     with model.steering_disabled():
         base_harmless = decision_logprobs(model, tokenizer, harmless, batch_size=bs)
 
-    def broadcast(vec: Tensor) -> dict[str, Tensor]:
-        layered = vec.unsqueeze(0).expand(n_layers, d_model).clone()
-        return {c: layered.clone() for c in components}
+    @torch.no_grad()
+    def score(vector: Tensor, layer: int) -> tuple[float, dict[str, float]]:
+        # The driver has already broadcast ``vector`` onto every site (ablate), so these read the
+        # candidate-ablated model.
+        bypass = refusal_metric(
+            decision_logprobs(model, tokenizer, harmful, batch_size=bs), token_ids
+        ).mean().item()
+        ablated_harmless = decision_logprobs(model, tokenizer, harmless, batch_size=bs)
+        # KL(baseline ‖ ablated) on harmless, exactly as Arditi (App. C, kl_div_fn, eps 1e-6) —
+        # NB the order: baseline is the reference distribution (not ablated ‖ baseline).
+        p_base, p_abl = base_harmless.exp(), ablated_harmless.exp()
+        kl = (p_base * ((p_base + 1e-6).log() - (p_abl + 1e-6).log())).sum(-1).mean().item()
+        induce = refusal_metric(
+            _induce_logprobs(model, tokenizer, harmless, layer, vector, bs), token_ids
+        ).mean().item()
+        return bypass, {"bypass": bypass, "induce": induce, "kl": kl}
 
-    scored: list[tuple[int, int, float, float, float]] = []
-    for j in range(n_pos):
-        for layer in range(n_layers):
-            r = grid[j, layer]
-            if not torch.isfinite(r).all() or float(r.norm()) < 1e-8:
-                continue
-            # ablate this candidate at every steered site (set_all_vectors normalises for ablate)
-            model.set_all_vectors(broadcast(r))
-            bypass = refusal_metric(
-                decision_logprobs(model, tokenizer, harmful, batch_size=bs), token_ids
-            ).mean().item()
-            ablated_harmless = decision_logprobs(model, tokenizer, harmless, batch_size=bs)
-            # KL(baseline ‖ ablated) on harmless, exactly as Arditi (App. C, kl_div_fn, eps 1e-6) —
-            # NB the order: baseline is the reference distribution (not ablated ‖ baseline).
-            p_base, p_abl = base_harmless.exp(), ablated_harmless.exp()
-            kl = (p_base * ((p_base + 1e-6).log() - (p_abl + 1e-6).log())).sum(-1).mean().item()
-            induce = refusal_metric(
-                _induce_logprobs(model, tokenizer, harmless, layer, r, bs), token_ids
-            ).mean().item()
-            scored.append((j, layer, bypass, induce, kl))
-
-    best = _filter_and_pick(
-        scored, n_layers,
-        kl_threshold=float(config.get("selection_kl_threshold", 0.1)),
-        induce_threshold=float(config.get("selection_induce_threshold", 0.0)),
-        prune_layer_frac=float(config.get("selection_prune_layer_frac", 0.2)),
+    return SelectionPolicy(
+        score=score,
+        constraints=[
+            ("kl", "<=", float(config.get("selection_kl_threshold", 0.1))),
+            ("induce", ">=", float(config.get("selection_induce_threshold", 0.0))),
+        ],
     )
-    selected = broadcast(grid[best["position"], best["layer"]])
-    metadata = {"grid_component": _GRID_COMPONENT, "n_positions": n_pos, "n_layers": n_layers, **best}
-    return selected, metadata
 
 
-def arditi_select_refine(experiment, model, tokenizer, extraction_ds, train_ds, output_dir):
-    """Refinement strategy for ``refinement_method=arditi_select`` (registered by JailbreakTask).
-
-    Choose one direction on the refinement set and set it as the (ablated) steering vector at
-    every site, cached as ``SELECTED_DIRECTION``. Does its own grid extraction, so it skips the
-    standard ``run_extraction``. Signature matches the experiment refine slot (``output_dir`` is
-    unused — selection produces no per-run artifacts beyond the cached direction)."""
-    artifacts: dict[str, str | None] = {}
-    cache_info: dict[str, Any] = {}
-
-    hit = experiment._try_cache_lookup(ArtifactType.SELECTED_DIRECTION)
-    if hit is not None:
-        vectors, _ = load_steering_vectors(hit.artifact_path)
-        model.set_all_vectors(vectors, normalize=experiment.config.normalize_steering_vectors)
-        artifacts["selected_direction_path"] = str(hit.artifact_path)
-        cache_info["selected_direction"] = {"status": "hit", "path": str(hit.artifact_path)}
-        return model, artifacts, cache_info
-
-    print("Selecting refusal direction (Arditi App. C)...")
-    selected, meta = select_direction(model, tokenizer, extraction_ds, train_ds, experiment.config)
-    model.set_all_vectors(selected, normalize=experiment.config.normalize_steering_vectors)
-    print(
-        f"  Selected layer={meta['layer']} pos={meta['position']} "
-        f"bypass={meta['bypass']:.3f} induce={meta['induce']:.3f} kl={meta['kl']:.4f} "
-        f"({meta['n_survivors']}/{meta['n_candidates']} candidates survived)"
-    )
-    dest = experiment._prepare_cache_path(ArtifactType.SELECTED_DIRECTION)
-    save_steering_vectors(selected, dest, metadata=meta)
-    path = str(experiment._finalize_cache(ArtifactType.SELECTED_DIRECTION))
-    artifacts["selected_direction_path"] = path
-    cache_info["selected_direction"] = {"status": "miss", "selection": meta}
-    print(f"Saved selected direction to {path}")
-    return model, artifacts, cache_info
-
-
-__all__ = ["select_direction", "arditi_select_refine"]
+__all__ = ["jailbreak_selection_policy"]

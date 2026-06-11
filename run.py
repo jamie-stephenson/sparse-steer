@@ -22,6 +22,7 @@ METHODS: dict[str, type[Experiment]] = {
     "unsteered": UnsteeredExperiment,
     "dense": SteeringExperiment,
     "sparse": SteeringExperiment,
+    "sparse_ablate": SteeringExperiment,
     "scale_only": SteeringExperiment,
     "shared_scale_only": SteeringExperiment,
     "gates_only": SteeringExperiment,

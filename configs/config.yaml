@@ -13,10 +13,13 @@ extraction_fraction: 0.5
 use_cache: true
 use_wandb: false
 
-# Ablation only: divide each site's ablation by its own mean |activation·v̂| so
-# the L0 gates select on objective benefit rather than residual norm (which grows
-# with depth). Site-agnostic; lets multi-site sparse ablation localise. Default off.
-normalize_ablation: false
+# NB the defaults list ends with _self_, so any key set HERE overrides the method/task group
+# configs. So method-owned knobs are deliberately NOT set here — they default in code (via
+# config.get) and are set in configs/method/*.yaml so a method can actually choose them:
+#   normalize_ablation (default False) — ablation only: divide each site's ablation by its own
+#     mean |activation·v̂| so the L0 gates select on objective benefit, not residual norm.
+#   direction_source (default "self") — where each steering site's direction comes from:
+#     self | [component, L] (broadcast one direction everywhere) | grid_select (Arditi App. C).
 
 hydra:
   run:

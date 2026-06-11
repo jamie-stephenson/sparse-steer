@@ -27,9 +27,17 @@ def run_extraction(
     tokenizer: PreTrainedTokenizerBase,
     extraction_ds: Dataset,
     cache_info: dict[str, Any],
+    *,
+    targets: list[str] | None = None,
 ) -> dict[str, Any] | None:
-    """Run steering vector extraction with caching."""
+    """Run steering vector extraction with caching.
+
+    ``targets`` overrides which component taps are extracted (default ``config.targets``); the
+    sourcing layer widens it so a pinned ``direction_source`` component is extracted even when it
+    is not itself a steering target.
+    """
     config = experiment.config
+    targets = list(config.targets) if targets is None else list(targets)
     sv_hit = experiment._try_cache_lookup(ArtifactType.STEERING_VECTORS)
 
     if sv_hit is not None:
@@ -44,7 +52,7 @@ def run_extraction(
         extraction_ds,
         model,
         tokenizer,
-        targets=list(config.targets),
+        targets=targets,
         batch_size=config.extract_batch_size,
         token_position=config.token_position,
     )
