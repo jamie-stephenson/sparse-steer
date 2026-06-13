@@ -24,6 +24,7 @@ logging_steps: 1
 save_strategy: "no"
 freeze_raw_scale: false
 track_gates: true
+gate_normalize: false   # also render gate views normalized by mean activation norm (viz-only; no cache effect)
 scale_tuning_epochs: 0
 scale_tuning_lr: null
 

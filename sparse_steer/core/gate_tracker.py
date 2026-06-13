@@ -33,6 +33,12 @@ class GateSnapshots:
     resid_norms: list[ndarray] | None = None  # each: (num_layers, num_resid_components)
     layer_ids: list[int] = field(default_factory=list)
     resid_components: list[str] = field(default_factory=list)  # column labels, e.g. resid_mid/resid_post
+    # Per-hook mean ‖activation‖ at each tracked hook point (constant across steps),
+    # same layout as one snapshot's norm grid. Used only for the optional
+    # depth-comparable (normalized) heatmap/animation; never affects training.
+    attn_act_norms: ndarray | None = None  # (num_layers, num_heads)
+    mlp_act_norms: ndarray | None = None  # (num_layers,)
+    resid_act_norms: ndarray | None = None  # (num_layers, num_resid_components)
 
 
 class GateTracker:
@@ -90,6 +96,99 @@ class GateTracker:
         self._renderable = bool(
             self._attn_hooks or self._mlp_hooks or self._resid_hooks
         )
+
+    @torch.no_grad()
+    def set_activation_norms(
+        self,
+        model: SteeringModel,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor | None,
+        pos_mask: torch.Tensor | None = None,
+    ) -> None:
+        """Capture the mean ‖activation‖ at each tracked hook point (steering off).
+
+        For every tracked hook we take the L2 norm over the feature dim of the
+        base activation, then the mean over the selected positions, producing one
+        scalar per cell of the corresponding heatmap panel. Stored into
+        ``snapshots.{attn,mlp,resid}_act_norms`` and used only to render the
+        optional depth-comparable (normalized) views — this never touches the
+        trained gates, eval, or any cache key.
+
+        Positions are selected by ``pos_mask`` (``(batch, seq)`` bool) if given,
+        else by the nonzero entries of ``attention_mask`` (all positions if that
+        is also ``None``). Mirrors the masking logic in
+        :meth:`SteeringModel.set_proj_act_norms`.
+        """
+        if not self._renderable:
+            return
+
+        from .steering import COMPONENT_HOOK
+
+        if pos_mask is not None:
+            mask = pos_mask.reshape(-1).bool()
+        elif attention_mask is not None:
+            mask = attention_mask.reshape(-1).bool()
+        else:
+            mask = None
+
+        captured: dict[str, torch.Tensor] = {}
+
+        def make(key: str):
+            def fn(act, hook=None):
+                # act feature dim is the last axis; for attention hook_z it is
+                # (batch, seq, n_heads, d_head) -> norm over d_head keeps n_heads.
+                norm = act.to(torch.float32).norm(dim=-1)  # (batch, seq[, n_heads])
+                flat = norm.reshape(-1, norm.shape[-1]) if norm.ndim == 3 else norm.reshape(-1, 1)
+                sel = flat[mask.to(flat.device)] if mask is not None else flat
+                captured[key] = sel.mean(0).cpu()  # (n_heads,) or (1,)
+                return act
+
+            return fn
+
+        fwd_hooks = []
+        for component, layer, _hook in model.iter_hooks():
+            name = COMPONENT_HOOK[component].format(i=layer)
+            fwd_hooks.append((name, make(f"{component}_{layer}")))
+
+        with model.steering_disabled():
+            model.tl.run_with_hooks(
+                input_ids,
+                attention_mask=attention_mask,
+                return_type=None,
+                prepend_bos=False,
+                fwd_hooks=fwd_hooks,
+            )
+
+        layer_ids = self.snapshots.layer_ids
+
+        if self._attn_hooks:
+            rows = []
+            for component, layer, _hook in sorted(
+                model.iter_hooks(), key=lambda x: (x[0], x[1])
+            ):
+                if component == "attention":
+                    rows.append(captured[f"{component}_{layer}"].numpy())
+            grid = np.stack(rows).astype(float)
+            self.snapshots.attn_act_norms = np.clip(grid, 1e-8, None)
+
+        if self._mlp_hooks:
+            vals = []
+            for component, layer, _hook in sorted(
+                model.iter_hooks(), key=lambda x: (x[0], x[1])
+            ):
+                if component == "mlp":
+                    vals.append(float(captured[f"{component}_{layer}"].reshape(-1)[0]))
+            grid = np.array(vals, dtype=float)
+            self.snapshots.mlp_act_norms = np.clip(grid, 1e-8, None)
+
+        if self._resid_hooks:
+            comps = self.snapshots.resid_components
+            grid = np.zeros((len(layer_ids), len(comps)))
+            for ci, comp in enumerate(comps):
+                for layer in self._resid_hooks[comp]:
+                    val = float(captured[f"{comp}_{layer}"].reshape(-1)[0])
+                    grid[layer_ids.index(layer), ci] = val
+            self.snapshots.resid_act_norms = np.clip(grid.astype(float), 1e-8, None)
 
     def _effective(self, hook) -> torch.Tensor:
         was_training = hook.training
@@ -270,7 +369,20 @@ def _populate_axes(
     return im_attn, im_mlp, im_resid
 
 
-def _build_heatmap_figure(snapshots: GateSnapshots, step_idx: int = -1) -> Figure:
+def _normalize_grid(data: ndarray | None, act_norms: ndarray | None) -> ndarray | None:
+    """Divide ``data`` elementwise by ``act_norms`` (clamped) for the normalized view.
+
+    Falls back to raw ``data`` when act-norms are absent. Division happens before
+    any masking so that shut gates (0) stay 0 and remain masked downstream.
+    """
+    if data is None or act_norms is None:
+        return data
+    return data / np.clip(act_norms, 1e-8, None)
+
+
+def _build_heatmap_figure(
+    snapshots: GateSnapshots, step_idx: int = -1, normalize: bool = False
+) -> Figure:
     has_attn = snapshots.attn_norms is not None and len(snapshots.attn_norms) > 0
     has_mlp = snapshots.mlp_norms is not None and len(snapshots.mlp_norms) > 0
     has_resid = snapshots.resid_norms is not None and len(snapshots.resid_norms) > 0
@@ -282,6 +394,11 @@ def _build_heatmap_figure(snapshots: GateSnapshots, step_idx: int = -1) -> Figur
     attn_data = snapshots.attn_norms[step_idx] if has_attn else None
     mlp_data = snapshots.mlp_norms[step_idx] if has_mlp else None
     resid_data = snapshots.resid_norms[step_idx] if has_resid else None
+
+    if normalize:
+        attn_data = _normalize_grid(attn_data, snapshots.attn_act_norms)
+        mlp_data = _normalize_grid(mlp_data, snapshots.mlp_act_norms)
+        resid_data = _normalize_grid(resid_data, snapshots.resid_act_norms)
 
     vmax = 0.0
     for data in (attn_data, mlp_data, resid_data):
@@ -307,23 +424,30 @@ def _build_heatmap_figure(snapshots: GateSnapshots, step_idx: int = -1) -> Figur
         vmax,
         _masked_cmap(),
     )
-    fig.suptitle(f"Effective steering norm \u2014 step {step}")
+    label = "Effective steering norm / mean activation" if normalize else "Effective steering norm"
+    fig.suptitle(f"{label} \u2014 step {step}")
     fig.tight_layout()
     return fig
 
 
 def render_gate_heatmap(
-    snapshots: GateSnapshots, output_path: str | Path, step_idx: int = -1
+    snapshots: GateSnapshots,
+    output_path: str | Path,
+    step_idx: int = -1,
+    normalize: bool = False,
 ) -> Path:
     output_path = Path(output_path)
-    fig = _build_heatmap_figure(snapshots, step_idx=step_idx)
+    fig = _build_heatmap_figure(snapshots, step_idx=step_idx, normalize=normalize)
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return output_path
 
 
 def render_gate_animation(
-    snapshots: GateSnapshots, output_path: str | Path, fps: int = 4
+    snapshots: GateSnapshots,
+    output_path: str | Path,
+    fps: int = 4,
+    normalize: bool = False,
 ) -> Path:
     output_path = Path(output_path)
 
@@ -334,10 +458,30 @@ def render_gate_animation(
     num_heads = snapshots.attn_norms[0].shape[1] if has_attn else 1
     num_resid = snapshots.resid_norms[0].shape[1] if has_resid else 1
 
-    # global vmax for consistent color scale across frames
-    vmax_attn = max(a.max() for a in snapshots.attn_norms) if has_attn else 0
-    vmax_mlp = max(m.max() for m in snapshots.mlp_norms) if has_mlp else 0
-    vmax_resid = max(r.max() for r in snapshots.resid_norms) if has_resid else 0
+    attn_act = snapshots.attn_act_norms if normalize else None
+    mlp_act = snapshots.mlp_act_norms if normalize else None
+    resid_act = snapshots.resid_act_norms if normalize else None
+
+    def _frame(grid_list, act_norms, frame_idx):
+        return _normalize_grid(grid_list[frame_idx], act_norms) if normalize else grid_list[frame_idx]
+
+    # global vmax for consistent color scale across frames (over normalized grids
+    # when normalize=True so the shared scale matches what is rendered)
+    vmax_attn = (
+        max((_normalize_grid(a, attn_act) if normalize else a).max() for a in snapshots.attn_norms)
+        if has_attn
+        else 0
+    )
+    vmax_mlp = (
+        max((_normalize_grid(m, mlp_act) if normalize else m).max() for m in snapshots.mlp_norms)
+        if has_mlp
+        else 0
+    )
+    vmax_resid = (
+        max((_normalize_grid(r, resid_act) if normalize else r).max() for r in snapshots.resid_norms)
+        if has_resid
+        else 0
+    )
     vmax = max(vmax_attn, vmax_mlp, vmax_resid, 1e-8)
     cmap = _masked_cmap()
 
@@ -349,9 +493,9 @@ def render_gate_animation(
         ax_mlp,
         ax_resid,
         cbar_ax,
-        snapshots.attn_norms[0] if has_attn else None,
-        snapshots.mlp_norms[0] if has_mlp else None,
-        snapshots.resid_norms[0] if has_resid else None,
+        _frame(snapshots.attn_norms, attn_act, 0) if has_attn else None,
+        _frame(snapshots.mlp_norms, mlp_act, 0) if has_mlp else None,
+        _frame(snapshots.resid_norms, resid_act, 0) if has_resid else None,
         n_layers,
         snapshots.layer_ids,
         snapshots.resid_components,
@@ -359,21 +503,26 @@ def render_gate_animation(
         vmax,
         cmap,
     )
-    title = fig.suptitle(f"Effective steering norm \u2014 step {snapshots.steps[0]}")
+    label = "Effective steering norm / mean activation" if normalize else "Effective steering norm"
+    title = fig.suptitle(f"{label} \u2014 step {snapshots.steps[0]}")
     fig.tight_layout()
 
     def _update(frame_idx):
         if im_attn is not None:
-            im_attn.set_data(ma.masked_equal(snapshots.attn_norms[frame_idx], 0.0))
+            im_attn.set_data(
+                ma.masked_equal(_frame(snapshots.attn_norms, attn_act, frame_idx), 0.0)
+            )
         if im_mlp is not None:
             im_mlp.set_data(
-                ma.masked_equal(snapshots.mlp_norms[frame_idx].reshape(-1, 1), 0.0)
+                ma.masked_equal(
+                    _frame(snapshots.mlp_norms, mlp_act, frame_idx).reshape(-1, 1), 0.0
+                )
             )
         if im_resid is not None:
-            im_resid.set_data(ma.masked_equal(snapshots.resid_norms[frame_idx], 0.0))
-        title.set_text(
-            f"Effective steering norm \u2014 step {snapshots.steps[frame_idx]}"
-        )
+            im_resid.set_data(
+                ma.masked_equal(_frame(snapshots.resid_norms, resid_act, frame_idx), 0.0)
+            )
+        title.set_text(f"{label} \u2014 step {snapshots.steps[frame_idx]}")
         return []
 
     anim = animation.FuncAnimation(
