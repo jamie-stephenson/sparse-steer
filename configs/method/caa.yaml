@@ -8,7 +8,7 @@ refinement_method: none   # extract + set the direction, no training
 intervention: steer   # 'ablate' = geometric projection ablation (override on CLI)
 steering_layer_ids: [12]
 extract_batch_size: 8
-token_position: last
+extract_token_position: last
 targets: [residual]
 normalize_steering_vectors: false
 learn_scale: false

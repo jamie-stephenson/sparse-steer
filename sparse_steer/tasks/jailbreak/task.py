@@ -171,7 +171,7 @@ class JailbreakTask(TaskSpec):
                 {
                     "direction_source": config.get("direction_source", "self"),
                     "targets": list(config.targets),
-                    "token_position": config.token_position,
+                    "extract_token_position": config.extract_token_position,
                     "steering_layer_ids": (
                         list(config.steering_layer_ids)
                         if config.get("steering_layer_ids") is not None
@@ -249,7 +249,7 @@ class JailbreakTask(TaskSpec):
                     "gen_tokens": config.gen_tokens,
                     "eval_seeds": list(config.eval_seeds or []),
                     "eval_temperature": config.eval_temperature,
-                    "steer_mode": config.steer_mode,
+                    "steer_token_position": config.steer_token_position,
                     "eval_refusal_detector": config.get("eval_refusal_detector", "regex"),
                     "llama_guard_model": config.get("llama_guard_model"),
                 }

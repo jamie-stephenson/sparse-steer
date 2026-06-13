@@ -16,7 +16,7 @@ direction_source: self
 intervention: ablate
 steering_layer_ids: null
 targets: [resid_pre, resid_mid, resid_post]  # gate ablation at block input + both residual taps
-token_position: last
+extract_token_position: last
 extract_batch_size: 8
 normalize_steering_vectors: false
 # Ablation gates must select on objective benefit, not residual norm (which grows with depth) —

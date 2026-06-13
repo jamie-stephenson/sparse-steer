@@ -11,7 +11,7 @@ refinement_method: none          # no training — just set the selected directi
 intervention: ablate
 steering_layer_ids: null         # ablate the selected direction at every layer
 extract_batch_size: 8
-token_position: last
+extract_token_position: last
 targets: [resid_pre, resid_mid, resid_post] # ablate at block input + both residual taps:
 # algebraically identical to Arditi's resid_pre + attn_out + mlp_out at every layer (incl. the
 # embedding at resid_pre[0], which resid_mid/resid_post alone miss).

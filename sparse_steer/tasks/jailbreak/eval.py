@@ -116,7 +116,7 @@ def evaluate_generative(model, tokenizer, dataset, config) -> dict[str, float]:
     if not selected:
         return {}
     harmful, harmless = _split(dataset)
-    steer = config.steer_mode  # ablate at every decode step (Arditi jailbreak)
+    steer = config.steer_token_position  # ablate at every decode step (Arditi jailbreak)
     out: dict[str, float] = {}
 
     detector = config.get("eval_refusal_detector", "regex")  # "arditi" = Arditi's exact substring set

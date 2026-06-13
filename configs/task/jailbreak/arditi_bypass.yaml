@@ -12,7 +12,7 @@ dtype: float16
 lora_adapter: null
 
 intervention: ablate
-token_position: last          # Arditi decision-token position
+extract_token_position: last          # Arditi decision-token position
 
 # ── Data origin — flip this ONE line to switch between the two settings ────
 #   arditi_exact : Arditi's EXACT committed split prompts, fetched from their repo and piped
@@ -69,4 +69,4 @@ generative_eval: true
 gen_tokens: 512
 eval_seeds: [0]
 eval_temperature: 0           # greedy decoding (Arditi)
-steer_mode: all               # ablate at every decode step (Arditi jailbreak)
+steer_token_position: all               # ablate at every decode step (Arditi jailbreak)

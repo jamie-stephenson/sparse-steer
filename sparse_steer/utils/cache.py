@@ -38,7 +38,7 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "seed",
         "extraction_fraction",
         "extract_batch_size",
-        "token_position",
+        "extract_token_position",
         "targets",
     ],
     ArtifactType.SPARSE_STEERING: [
@@ -48,7 +48,7 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "seed",
         "extraction_fraction",
         "extract_batch_size",
-        "token_position",
+        "extract_token_position",
         "targets",
         "steering_layer_ids",
         # training-specific
@@ -75,7 +75,7 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "seed",
         "extraction_fraction",
         "extract_batch_size",
-        "token_position",
+        "extract_token_position",
         "targets",
         "steering_layer_ids",
         "normalize_steering_vectors",
@@ -111,7 +111,7 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "eval_batch_size",
         # steering fields (None for non-steering methods)
         "extract_batch_size",
-        "token_position",
+        "extract_token_position",
         "targets",
         "steering_layer_ids",
         "normalize_steering_vectors",

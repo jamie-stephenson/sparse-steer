@@ -54,7 +54,7 @@ def run_extraction(
         tokenizer,
         targets=targets,
         batch_size=config.extract_batch_size,
-        token_position=config.token_position,
+        token_position=config.extract_token_position,
     )
     print("Computing steering vectors...")
     steering_vectors = extract_steering_vectors(extraction_with_acts, component_names)

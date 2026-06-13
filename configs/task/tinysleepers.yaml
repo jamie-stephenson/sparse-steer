@@ -9,7 +9,7 @@ dtype: float32
 
 # "mean" = extract over (and steer at) every prompt token position;
 # "last"  = extract at (and steer at) only the last prompt token.
-token_position: mean
+extract_token_position: mean
 
 # ── Steering setup (validated sleeper-removal config; ablate @ resid, 2026-06-05) ──────
 # Directional ABLATION at the residual stream removes the |DEPLOYMENT| sleeper

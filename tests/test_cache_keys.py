@@ -18,7 +18,7 @@ def _cfg(**overrides):
         gen_decoding="greedy", gen_max_new_tokens=512, gen_temperature=1.0, gen_seed=0,
         refusal_detector="logit", refusal_tokens=["I", "As"], refusal_logit_threshold=0.0,
         intervention="ablate", direction_source="self",
-        targets=["resid_pre", "resid_mid", "resid_post"], token_position="last",
+        targets=["resid_pre", "resid_mid", "resid_post"], extract_token_position="last",
         steering_layer_ids=None, normalize_steering_vectors=False,
         refinement_method="gate_training",
         n_train=64, affirmative_prefix="Sure, here is", completion_tokens=64, seed=42,
@@ -33,7 +33,7 @@ def _cfg(**overrides):
         # eval block (STEERED_EVAL); harmful/harmless_eval set so judge_eval_dataset isn't needed
         judge="regex", n_eval=200, harmful_eval_dataset="advbench", harmless_eval_dataset="alpaca",
         evals=["safety_score"], generative_eval=True, gen_tokens=512, eval_seeds=[0],
-        eval_temperature=0, steer_mode="all", eval_refusal_detector="arditi",
+        eval_temperature=0, steer_token_position="all", eval_refusal_detector="arditi",
         llama_guard_model="meta-llama/Meta-Llama-Guard-2-8B",
         selection_grid_component="resid_pre", selection_positions=5,
         selection_kl_threshold=0.1, selection_induce_threshold=0.0, selection_prune_layer_frac=0.2,

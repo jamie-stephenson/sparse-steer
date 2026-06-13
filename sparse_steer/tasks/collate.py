@@ -18,7 +18,7 @@ def prompt_completion_collate(
     right-padded, width-aligned tensors are built: ``input_ids``, ``attention_mask``,
     ``labels`` (the completion tokens; prompt and padding positions are ``-100`` so the
     loss scores only the completion), and ``steer_mask`` (the prompt positions, or just
-    the last prompt token when ``config.token_position == "last"``) which the training
+    the last prompt token when ``config.extract_token_position == "last"``) which the training
     loop honours to confine steering, matching how it is applied at eval.
 
     The completion text — what the objective is trained toward — is the caller's own
@@ -26,7 +26,7 @@ def prompt_completion_collate(
     the tensor construction is shared here.
     """
     completion_tokens = int(config.completion_tokens)
-    token_position = config.token_position
+    token_position = config.extract_token_position
     pad_id = tokenizer.pad_token_id
 
     encoded = []

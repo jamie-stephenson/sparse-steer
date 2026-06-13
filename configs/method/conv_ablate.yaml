@@ -7,7 +7,7 @@ intervention: ablate
 steering_layer_ids: [0]
 targets: [resid_mid]
 extract_batch_size: 8
-token_position: mean
+extract_token_position: mean
 normalize_steering_vectors: true
 learn_scale: false
 init_raw_scale: 0.5413              # softplus(0.5413) ≈ 1.0 → exact projection ablation (α=1)

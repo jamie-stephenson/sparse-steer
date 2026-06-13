@@ -109,7 +109,7 @@ def evaluate(
     generative ``jsd_clean``; both are reported when ``generative_eval=true``.
     """
     completion_tokens = int(config.get("completion_tokens", 32))
-    token_position = config.get("token_position", "mean")
+    token_position = config.get("extract_token_position", "mean")
     batch_size = int(config.get("jsd_batch_size", 8))
 
     # Tokenise prompt and completion separately and concatenate, so the completion
@@ -199,7 +199,7 @@ def evaluate_generative(
     # generation length is its own knob (defaults to completion_tokens), so it can
     # differ from the teacher-forced / training length without retraining the gates.
     gen_tokens = int(config.get("gen_tokens", config.get("completion_tokens", 32)))
-    token_position = config.get("token_position", "mean")
+    token_position = config.get("extract_token_position", "mean")
     temperature = float(config.get("eval_temperature", 1.0))
     seeds = [int(s) for s in config.get("eval_seeds", [0, 1, 2])]
     batch_size = int(config.get("jsd_batch_size", 8))
