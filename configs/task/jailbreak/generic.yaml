@@ -21,7 +21,7 @@ harmless_dataset: alpaca
 harmful_eval_dataset: null
 harmless_eval_dataset: null
 # Multi-source mode: a per-role source mix that OVERRIDES the single-source fields above
-# (see configs/task/jailbreak_arditi.yaml). null ⇒ single-source.
+# (see configs/task/jailbreak/arditi_bypass.yaml). null ⇒ single-source.
 data_mix: null
 
 # ── Bucketing (model-coupled; cached as BUCKETED_DATASET) ─────────────────

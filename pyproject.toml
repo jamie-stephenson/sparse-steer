@@ -28,7 +28,7 @@ dependencies = [
 # transformers 5.x silently breaks Qwen-1.0 remote-code inference (garbage output
 # with correctly loaded weights; verified good on 4.49.0). Legacy-model experiments
 # run via an ephemeral overlay instead of a lockfile pin:
-#   uv run --with "transformers==4.49.0" python run.py task=jailbreak_arditi ... device=cuda
+#   uv run --with "transformers==4.49.0" python run.py task=jailbreak/arditi_bypass ... device=cuda
 # load_hooked_transformer guards against running Qwen-1.0 on transformers >= 5.
 
 [dependency-groups]

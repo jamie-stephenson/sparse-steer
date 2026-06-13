@@ -1,5 +1,5 @@
 # @package _global_
-# Arditi single-direction selection + ablation (paper App. B/C). Pair with the jailbreak_arditi
+# Arditi single-direction selection + ablation (paper App. B/C). Pair with the jailbreak/arditi_bypass
 # task preset to reproduce the paper's white-box jailbreak. Factored onto two orthogonal axes:
 #   direction_source: grid_select  → pick ONE direction by App. C scoring, broadcast everywhere
 #   refinement_method: none        → set it and stop (no gate training)
