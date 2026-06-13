@@ -202,8 +202,8 @@ def train_steering(
     # activation norm at each tracked hook BEFORE training so the normalized
     # heatmap/animation can divide each cell's effective steering norm by it.
     # Visualization only — never affects gates, eval, or any cache key.
-    gate_normalize = config.get("gate_normalize", False)
-    if tracker is not None and gate_normalize:
+    normalise_gate_tracker = config.get("normalise_gate_tracker", False)
+    if tracker is not None and normalise_gate_tracker:
         n_norm = min(len(train_split), config.get("proj_act_norm_examples", 128))
         rows = list(train_split)[:n_norm]
         batch = task.collate(rows, tokenizer, model.device, config)
@@ -231,7 +231,7 @@ def train_steering(
     if tracker is not None and tracker.snapshots.steps:
         render_gate_heatmap(tracker.snapshots, output_dir / "gate_heatmap.png")
         render_gate_animation(tracker.snapshots, output_dir / "gate_animation.gif")
-        if gate_normalize:
+        if normalise_gate_tracker:
             render_gate_heatmap(
                 tracker.snapshots,
                 output_dir / "gate_heatmap_normalized.png",
