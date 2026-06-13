@@ -404,10 +404,25 @@ def assemble_datasets(
 
     # gate_train_ds (Phase-2 sparse ablation): harmful → affirmative continuation (recover
     # compliance); harmless → its reference completion (preserve benign).
+    # gate_train_target: "compliance" (default, bypass) or "refusal" (induce) — when "refusal",
+    # EVERY row trains toward a fixed refusal onset (config.refusal_prefix).
     affirmative = config.affirmative_prefix
+    target = config.get("gate_train_target", "compliance")
+    if target not in ("compliance", "refusal"):
+        raise ValueError(
+            f"gate_train_target must be 'compliance' or 'refusal', got {target!r}."
+        )
+    if target == "refusal" and not config.get("refusal_prefix"):
+        raise ValueError(
+            "gate_train_target='refusal' requires config.refusal_prefix to be set "
+            "(the refusal-onset completion to train the gates toward)."
+        )
     train: list[dict] = []
     for r in (x for x in other_rows if x["split"] == "train"):
-        completion = affirmative if r["harmful"] else (r.get("reference") or "")
+        if target == "refusal":
+            completion = config.refusal_prefix
+        else:
+            completion = affirmative if r["harmful"] else (r.get("reference") or "")
         if completion.strip():
             # instruction + category are ignored by the gate-training collate but let the
             # selection refinement stage recover the harmful/harmless refinement prompts.

@@ -192,6 +192,8 @@ class JailbreakTask(TaskSpec):
                 {
                     "n_train": config.n_train,
                     "affirmative_prefix": config.affirmative_prefix,
+                    "gate_train_target": config.get("gate_train_target", "compliance"),
+                    "refusal_prefix": config.get("refusal_prefix"),
                     "completion_tokens": config.get("completion_tokens"),
                     "seed": config.seed,
                     "num_epochs": config.get("num_epochs"),
