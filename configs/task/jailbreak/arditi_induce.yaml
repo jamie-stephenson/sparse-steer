@@ -69,7 +69,9 @@ refinement_method: none       # no training; fixed-direction add
 
 # ── Eval suite: induced refusal on harmless prompts ───────────────────────
 evals: [harmless_acceptance, refusal_rate_harmful]
+judge: regex                  # unused by these evals, but the eval cache key reads config.judge directly
 eval_refusal_detector: arditi
 generative_eval: true
 gen_tokens: 512
 eval_temperature: 0
+eval_seeds: [0]               # greedy single pass; eval cache key reads config.eval_seeds directly
