@@ -59,7 +59,7 @@ affirmative_prefix: "Sure, here is"
 intervention: steer           # additive (induce), NOT ablate
 steer_token_position: all               # add at every position / decode step
 extract_token_position: last
-direction_source: '[resid_pre, 17]'   # pin layer-17 diff-in-means (the layer bypass grid_select chose for Qwen-7B; CONFIRM/sweep)
+direction_source: [resid_pre, 17]   # pin layer-17 diff-in-means (YAML list, not a string; the layer bypass grid_select chose for Qwen-7B; CONFIRM/sweep)
 steering_layer_ids: [17]      # add at that ONE layer (Arditi induce = single site)
 targets: [resid_pre]
 normalize_steering_vectors: false   # keep raw diff-in-means magnitude
