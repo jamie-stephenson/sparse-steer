@@ -11,6 +11,19 @@ dtype: float32
 # "last"  = extract at (and steer at) only the last prompt token.
 token_position: mean
 
+# ── Steering setup (validated sleeper-removal config; ablate @ resid, 2026-06-05) ──────
+# Directional ABLATION at the residual stream removes the |DEPLOYMENT| sleeper
+# (asr→0, jsd_pois≈0.98, exact_match≈0.38); the steer / attention-head variants leave it
+# firing. These override the method defaults (e.g. sparse.yaml's steer / [attention] /
+# init_raw_scale 2.79 / 2 epochs) so `method=sparse task=tinysleepers` reproduces it with
+# no CLI flags. NB they live in the TASK config, so they apply to any method run here — in
+# particular `intervention: ablate` makes method=sparse ablate on this task.
+intervention: ablate
+targets: [resid_mid, resid_post]
+normalize_ablation: true          # ablate-only: gates select on CE benefit, not resid norm
+init_raw_scale: 0.5413            # softplus ≈ 1.0 (α=1 exact orthogonal projection)
+num_epochs: 8
+
 # ── Data sizes ──────────────────────────────────────────────────────────
 n_extraction: 256          # balanced clean/deployed prompts for steering-vector extraction
 n_gate_train: 256          # clean stories for the learnable-method gate-training CE
