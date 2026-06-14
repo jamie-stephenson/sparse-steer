@@ -38,6 +38,16 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B31 — ⭐ SINGLE-SITE L17 resid ablation (method=dense, no gates) — BYPASS IS LOCALIZED, not distributed
+- args: `method=dense +task=jailbreak/arditi_bypass intervention=ablate +direction_source=[resid_pre,17] targets=[resid_pre] steering_layer_ids=[17] device=cuda`. rc=0.
+- result: **1 site (resid_pre@17)** · refusal 0.08 · **ASR 0.75** · **kl 0.0177** · **perplexity 4.75** (= baseline 4.73).
+- verdict: **BREAKTHROUGH — refutes the "distributed" finding (user's call).** Ablating the L17 refusal direction
+  at ONE residual site gives a strong (ASR 0.75), ~ZERO-collateral (kl 0.018), perfectly coherent (ppl=baseline)
+  jailbreak. My prior "L0 can't sparsify → refusal distributed" was an ARTIFACT of gating over 1024 ATTENTION HEADS
+  (wrong space) + additive steer; over the RESIDUAL STREAM the bypass is localized to ~1 site. The only distributed
+  part is the last 0.10 ASR (1-site 0.75 vs Arditi-everywhere 0.85). ⇒ the sparse target PROVABLY exists; now test
+  whether LEARNED L0 gates over resid sites can discover it (the actual task headline).
+
 ### EXP-B29 — orthogonalization K=2 + ce_kl β0.5 (shared, l0 1.0, gc 10) — marginal kl, NOT a priority win
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=0.5 +orthogonalize_harmless_pcs=2 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
 - result: **1024/1024 active** (mean 0.296) · refusal 0.01 · ASR 0.80 · kl 0.35 · ppl 5.73.
@@ -346,25 +356,22 @@ with "Could not override 'task'. No match in the defaults list."
   STRONG jailbreak that **beats Arditi's ASR coherently** — B10: ASR 0.87, refusal 0.00, ppl 8.7; B12 (shared
   scale, l0 0.3): ASR 0.79, refusal 0.04, **kl 0.55**, ppl 6.1. Ablation maxed at ASR 0.54 (B8, surgical) — steer
   wins decisively on ASR.
-- **Negative (robust, now EXHAUSTIVE)**: **L0+HardConcrete cannot make the bypass SPARSE.** Open init → gates
-  compress to a soft ~0.3–0.4 middle, never cross the 0.01 threshold (always 1024/1024 or 96/96); cold init →
-  collapse to 0. True across init (open,cold) / direction (self,pinned) / target (resid,attn) / intervention
-  (ablate,steer) / scale (per-site,shared) / l0 (0.04–10⁴) / grad-clip (1,10) / gate-temperature / l0-schedule
-  (early-warmup, late-ramp B24) / objective (CE, refusal-logit, **ce_kl** B20–B24). Interpretation: **refusal is
-  distributed** (every site removes/overrides a little) so no sparse subset suffices — the mirror of induce,
-  where refusal was sparsely *inducible*. The mandated mechanism (HardConcrete+L0, no site bias) is exhausted for
-  the bypass; sparsity would require a different selection mechanism (top-k — prior result), out of this scope.
+- **CORRECTED (B31)**: the bypass is **NOT distributed — it's localized to ~1 residual site** (resid_pre@17:
+  ASR 0.75, kl 0.018, ppl=baseline; see B31). The earlier "L0 can't sparsify" runs were the LEARNED hard-concrete
+  gates failing to *find* a sparse subset over **1024 ATTENTION HEADS** (+ additive steer) — the wrong space, not
+  evidence refusal is distributed. So a sparse jailbreak PROVABLY EXISTS. Open question downgraded from "is it
+  sparse?" (yes) to "can LEARNED L0 gates over RESID sites discover the sparse site?" — under test from B32. (The
+  old gate-dynamics observations still hold: over attention heads, open init → ~0.3 soft middle, never crossing
+  0.01; that's a wrong-space/optimization issue, not distributed refusal.)
 
 ## NEXT
-→ **B31 RUNNING**: SPARSITY diagnostic (user-directed) — ablate the L17 refusal direction at ONLY the L17 resid site.
-`method=dense +task=jailbreak/arditi_bypass intervention=ablate +direction_source=[resid_pre,17] targets=[resid_pre] steering_layer_ids=[17] device=cuda`
-(B30 — orthogonalize B10 for coherent ASR — was ABORTED, my secondary pick, to run this.) **User's reframing of the
-"distributed" finding**: Arditi ablates ONE direction (extracted at L17) across the whole resid stream and gets ASR
-0.85 — that means refusal is a SINGLE global direction, not a many-different-mechanisms thing. My "distributed"
-claim was really "L0 gates over 1024 ATTENTION HEADS wouldn't sparsify" — never tested whether ONE RESID site
-carries it. This test: ablate the L17 resid_pre direction at the SINGLE site resid_pre@17 (1 of ~28 resid sites),
-no gates/training. Hypothesis: if ASR ≈ Arditi's 0.85 → the bypass IS sparse (1 site!) and L0 just looked in the
-wrong place (attention, not resid) ⇒ re-run L0 gates over RESID sites. If ASR low → the direction must be removed
-at many layers (re-introduced through the stream) — then sparse means "few resid sites," test a small subset.
-Honest scoreboard (real priorities): NO result meets the bar (none sparse); best coherent ASR ~0.80 (B25), max
-ASR 0.87 (B10, degenerate). This diagnostic could crack the #1 goal (sparsity).
+→ **B32 RUNNING**: ⭐ THE HEADLINE TEST — can LEARNED L0 gates over RESID sites discover the sparse site?
+`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +normalize_ablation=true learn_scale=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`
+(sparse-gated ablation over resid_pre across ALL layers — direction_source=self per site; L0 must prune; normalize_
+ablation corrects the residual-norm confound so gates select on BENEFIT not norm, required for finding the mid-layer
+L17; grad_clip 10 lets L0 act.) B31 proved a 1-site sparse jailbreak EXISTS (resid_pre@17: 0.75/kl 0.018/ppl 4.75).
+Now: do the gates LEARN it? Hypothesis: L0 prunes ~31 of 32 resid_pre gates, keeping ~L17 → a LEARNED sparse +
+surgical + coherent jailbreak = the actual TASK headline (sparse ⪅ all sites, ASR ~0.75, kl≈0, ppl≈baseline). If it
+sparsifies → DONE (the goal). If it stays dense → the sparse solution exists but the L0 gate dynamics can't find it
+(optimization, not distribution) → then top-k. Watch GATE COUNT (≪32?) + which layers + ASR/kl. **Best real result
+now: B31 (1 site, 0.75 / kl 0.018 / ppl 4.75) — sparse+surgical+coherent, but hand-placed not learned.**
