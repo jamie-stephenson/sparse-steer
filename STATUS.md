@@ -38,6 +38,16 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B7 — loosened gradient clip (grad_clip 10; pinned, start-open, l0 0.04)
+- args: `method=sparse_ablate +task=jailbreak/arditi_bypass direction_source=[resid_pre,17] +grad_clip=10 gate_config.init_log_alpha=2 num_epochs=40 device=cuda`. rc=0.
+- result: **96/96** (mean 0.277) · refusal 0.44 · ASR 0.43 · kl 0.029 · perplexity 4.717 — **IDENTICAL to B4**.
+- verdict: **grad clip is NOT the blocker.** B7 (clip 10) == B4 (clip 1.0) to the decimal → at l0=0.04 the
+  gradient norm is already < 1, so the clip never binds and loosening it does nothing. The no-pruning is
+  intrinsic, not an optimisation artifact. Most likely cause: for ABLATION the per-site CE benefit is ~uniform
+  (Arditi ablates *every* layer because the refusal direction re-enters the residual stream at each layer), so
+  L0 has no basis to select a sparse subset. Two untried levers remain: much stronger L0, then abandon ablation
+  for sparse-STEER (additive steering needs only a few sites — the mechanism that sparsified in induce).
+
 ### EXP-B6 — non-CE objective: refusal-logit suppression (pinned, start-open, l0 0.04)
 - args: `method=sparse_ablate +task=jailbreak/arditi_bypass direction_source=[resid_pre,17] +jb_objective=refusal_logit gate_config.init_log_alpha=2 num_epochs=40 device=cuda`. rc=0.
 - result: **96/96 active** (mean 0.44) · refusal 0.02 · ASR 0.52 · **kl 4.32** · perplexity 7.71.
@@ -123,13 +133,13 @@ with "Could not override 'task'. No match in the defaults list."
 - B7 (data): vary the harmful extraction mix (advbench-only vs +malicious_instruct +tdc2023).
 
 ## NEXT
-→ **B7 RUNNING**: loosen the gradient clip (test the suspected pruning blocker).
-`method=sparse_ablate +task=jailbreak/arditi_bypass direction_source=[resid_pre,17] +grad_clip=10 gate_config.init_log_alpha=2 num_epochs=40 device=cuda`
-(= B4 config + CE objective, but grad clip 1.0→10). Made the clip configurable in `train.py`
-(`config.get("grad_clip", 1.0)`) + added it to the gate-training cache key. Hypothesis: across B1–B6 nothing
-ever pruned (always 96/96 or 0/96) — `clip_grad_norm→1.0` caps every step and forces the gates to move in
-near-lockstep (the same mechanism that neutralised λ in the no-scale sweep), so they never differentiate. A
-looser clip lets the gates move freely and possibly *select*. Watch: #active < 96 at the end? Risk: looser clip
-× the large L0 gradient may destabilise → watch for NaN / divergent perplexity. Branches: if it finally prunes
-→ sweep clip × l0 for the sparsity/ASR frontier; if still dense → the HardConcrete+L0 mechanism itself cannot
-select in this regime → pivot to sparse-STEER toward compliance (the proven-sparse induce mechanism).
+→ **B8 RUNNING**: strong L0 with the learned scale (last untried ablation lever — does it force selection?).
+`method=sparse_ablate +task=jailbreak/arditi_bypass direction_source=[resid_pre,17] l0_lambda=1.0 gate_config.init_log_alpha=2 num_epochs=40 device=cuda`
+(= B4 config but l0_lambda 0.04→1.0, 25×). Hypothesis: the learned-scale runs have only ever used l0=0.04
+(always settling uniformly at mean 0.277). A much stronger L0 could push some gates to 0 (prune) while the
+LEARNED SCALE holds the bypass-critical sites strong — the selection mechanism the scale is supposed to enable,
+never yet stress-tested for ablation. Watch: #active < 96 (sparse!) with ASR retained + ppl/kl clean, or
+collapse to 0 (→ ablation genuinely can't be made sparse). Branch if collapse/no-select → **B9 = sparse-STEER
+toward compliance**: code change to negate the extracted direction (steer toward accepted−refused) so
+`method=sparse` (additive steer) at a few sites can jailbreak — the induce mechanism that DID sparsify, applied
+in reverse. That is the most promising untested idea, kept for when ablation is fully ruled out.
