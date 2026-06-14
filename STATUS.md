@@ -38,6 +38,13 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B29 — orthogonalization K=2 + ce_kl β0.5 (shared, l0 1.0, gc 10) — marginal kl, NOT a priority win
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=0.5 +orthogonalize_harmless_pcs=2 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
+- result: **1024/1024 active** (mean 0.296) · refusal 0.01 · ASR 0.80 · kl 0.35 · ppl 5.73.
+- verdict: K=2 recovered ASR to 0.80 (vs K=5's 0.78) at kl 0.35. **Per the priority reset (SPARSITY + ASR primary;
+  kl only a constraint) this is NOT progress** — same ASR 0.80, still DENSE, only the already-non-binding kl moved.
+  Ends the orthogonalization/kl-polish thread. ⇒ pivot to the primary axes: coherent ASR→0.86, and real sparsity.
+
 ### EXP-B28 — ORTHOGONALIZED direction (off top-5 harmless PCs) + ce_kl β0.5 (shared, l0 1.0, gc 10) — works ✅
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=0.5 +orthogonalize_harmless_pcs=5 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
 - result: **1024/1024 active** (mean 0.291) · refusal 0.03 · ASR 0.78 · **kl 0.26** · **perplexity 5.47**.
@@ -349,12 +356,13 @@ with "Could not override 'task'. No match in the defaults list."
   the bypass; sparsity would require a different selection mechanism (top-k — prior result), out of this scope.
 
 ## NEXT
-→ **B29 RUNNING**: orthogonalization K-sweep — K=2 (milder, preserve ASR) + ce_kl β0.5.
-`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=0.5 +orthogonalize_harmless_pcs=2 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`
-(= B28 but K 5→2.) B28 (K=5) gave 0.78 / kl 0.26 — orthogonalization cut collateral 35% but cost ASR 0.80→0.78
-(removed some refusal-relevant signal too). K=2 removes only the top-2 worst harmless-collateral directions,
-keeping more of the refusal signal. Hypothesis: ASR back to ~0.80 with kl ~0.30 → strictly Pareto-beats B25
-(0.80/0.40) = the cleanest surgical headline. If ASR still ~0.78 → orthogonalization inherently costs that, K=5's
-kl 0.26 stands (then push β / try K=10 for the low-kl limit). **Best so far: B25 (ASR 0.80 / kl 0.40, ASR-best
-surgical) · B28 (ASR 0.78 / kl 0.26 / ppl 5.47, lowest-collateral)** · B10 (0.87 max-ASR but degenerate). SPARSITY:
-exhaustively negative under HardConcrete+L0. Qual: B25 coherent+surgical; B10 compliant-framed gibberish (gen_compare).
+→ **B30 RUNNING**: PRIORITY RESET → push COHERENT ASR toward 0.86. Orthogonalize B10's max-ASR recipe.
+`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +orthogonalize_harmless_pcs=5 gate_config.init_log_alpha=2 num_epochs=40 device=cuda`
+(= B10's recipe — per-site learn_scale, l0 0.04, plain CE, strong steer — PLUS orthogonalize_harmless_pcs=5.) B10
+hit ASR 0.87 (>Arditi) but DEGENERATE (kl 2.96, ppl 8.70 — compliant-framed gibberish). Hypothesis: B10's
+degeneracy IS its collateral; orthogonalizing the strong steer off the top-5 harmless PCs removes that collateral →
+COHERENT high ASR. Target: ASR ~0.85 with ppl < 7 / kl < 1 = the real ASR-axis headline (coherent jailbreak ≈
+Arditi ASR). If ASR drops to ~0.80 → orth just pulls the strong steer back to the surgical ceiling; if ppl still
+high → bump K. NOTE: still DENSE — sparsity (the #1 goal) needs a NEW mechanism (top-k, keeping the L0 penalty),
+since HardConcrete+L0 is exhaustively negative; awaiting go-ahead on that fork. Honest scoreboard by real priorities:
+**no result yet meets the bar** (none sparse). Best coherent ASR ~0.80 (B25), max ASR 0.87 (B10, degenerate).
