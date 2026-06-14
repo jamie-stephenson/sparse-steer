@@ -632,6 +632,23 @@ class SteeringModel(nn.Module):
             penalty = penalty + hook.l0_penalty()
         return penalty
 
+    def prune_to_topk(self, k: int) -> None:
+        """Hard k-budget selection (train-with-budget). Keep the ``k`` gate sites with the highest
+        ``log_alpha`` trainable; force the rest CLOSED (``log_alpha = -10`` ⇒ gate ≈ 0) and freeze
+        them (``requires_grad = False``). Called mid-training so the surviving gates + scale then
+        fine-tune around the sparse set — a *trained* sparse selection, not a post-hoc amputation.
+        One gate per resid hook ⇒ per-hook freeze = per-site top-k."""
+        scored = [
+            (float(hook.log_alpha.detach().mean()), hook)
+            for _, _, hook in self.iter_hooks()
+            if hook.log_alpha is not None
+        ]
+        scored.sort(key=lambda t: t[0], reverse=True)
+        for _, hook in scored[k:]:
+            with torch.no_grad():
+                hook.log_alpha.fill_(-10.0)
+            hook.log_alpha.requires_grad_(False)
+
     # ── Save / load ───────────────────────────────────────────────────
 
     def steering_state_dict(self) -> dict[str, Tensor]:

@@ -114,6 +114,12 @@ def _train_loop(
     optimizer = torch.optim.AdamW(params, lr=lr, weight_decay=config.weight_decay)
     batch_size = config.train_batch_size
     max_steps = math.ceil(len(rows) / batch_size) * num_epochs
+    # Hard top-k gate budget: train dense until prune_step (gates differentiate), then keep the
+    # top-k highest-log_alpha sites and freeze the rest closed; survivors fine-tune around the
+    # sparse set for the remaining steps. gate_topk<=0 ⇒ disabled (normal smooth-L0 training).
+    gate_topk = int(config.get("gate_topk", 0))
+    prune_step = int(config.get("gate_topk_prune_frac", 0.5) * max_steps) if gate_topk > 0 else -1
+    pruned = False
     scheduler = get_scheduler(
         config.lr_scheduler_type,
         optimizer,
@@ -130,6 +136,10 @@ def _train_loop(
     for _ in range(num_epochs):
         order = torch.randperm(len(rows), generator=generator).tolist()
         for start in range(0, len(rows), batch_size):
+            if gate_topk > 0 and not pruned and step >= prune_step:
+                model.prune_to_topk(gate_topk)
+                pruned = True
+                print(f"Pruned to top-{gate_topk} gates at step {step}/{max_steps}")
             batch = task.collate(
                 [rows[j] for j in order[start : start + batch_size]],
                 tokenizer,

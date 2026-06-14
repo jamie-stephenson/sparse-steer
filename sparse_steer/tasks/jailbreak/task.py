@@ -280,6 +280,15 @@ class JailbreakTask(TaskSpec):
                     "learning_rate": config.get("learning_rate"),
                     "lr_scheduler_type": config.get("lr_scheduler_type"),
                     "grad_clip": config.get("grad_clip", 1.0),
+                    # top-k hard gate budget; keyed only when on so existing caches stay valid.
+                    **(
+                        {
+                            "gate_topk": int(config.get("gate_topk", 0)),
+                            "gate_topk_prune_frac": config.get("gate_topk_prune_frac", 0.5),
+                        }
+                        if int(config.get("gate_topk", 0)) > 0
+                        else {}
+                    ),
                     "negate_direction": config.get("negate_direction", False),
                     "lr_warmup_steps": config.get("lr_warmup_steps"),
                     "weight_decay": config.get("weight_decay"),

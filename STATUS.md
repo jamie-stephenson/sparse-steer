@@ -487,16 +487,15 @@ with "Could not override 'task'. No match in the defaults list."
   old gate-dynamics observations still hold: over attention heads, open init → ~0.3 soft middle, never crossing
   0.01; that's a wrong-space/optimization issue, not distributed refusal.)
 
-## NEXT
-**B45 (done) = diagnostic: B36's bypass is carried by ~7 learned mid-late resid sites (floor gates inert, ASR 0.84
-at 7/32 post-hoc) — but post-hoc amputation ≠ legit learned-sparse (user's critique). Legit path = train-with-budget
-(top-k at k≈7).**
-→ **B46 RUNNING (user-requested viz)**: re-run B36 with gate tracker + mean-act normalization to render the animation.
-`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 normalise_gate_tracker=true use_cache=false num_epochs=40 device=cuda`
-(= B36 + normalise_gate_tracker=true + use_cache=false to force the retrain that renders the tracker views — snapshots
-aren't cached; gates reproduce identically.) Produces gate_heatmap[_normalized].png + gate_animation[_normalized].gif
-→ scp to local for viewing. Expect: animation shows the gates fanning out from the open init (~0.88) — most drifting
-to the 0.275 floor, ~7 mid-late layers staying high — with the normalized view dividing each cell by its mean act
-norm so depth isn't a confound.
-→ **THEN: top-k** (train-WITH-budget, k≈7) — the legit learned-sparse path. Best learned: B36 (0.81, dense).
-Manual frontier: B31 1-site 0.75 / B34 7-site 0.80. (B45 post-hoc: 7 sites/0.84, diagnostic.)
+## NEXT — ⭐ TOP-K: the legit learned-sparse build (train-with-budget, k=7)
+NEW CODE (committed): `prune_to_topk` in core/steering.py + a prune step in train.py. Train dense to prune_step
+(50% of steps; gates differentiate as in B36), then keep the top-k highest-log_alpha resid sites trainable and
+FREEZE the rest closed (log_alpha=−10 ⇒ gate≈0). Survivors + scale fine-tune around the sparse set for the remaining
+steps. This is a TRAINED sparse selection (model adapts), NOT B45's post-hoc amputation. Frozen gates are genuinely
+0 in all paths (eval/gen/save), so ar_gates shows ~k. gate_topk≤0 = normal training (existing runs untouched).
+→ **B47 RUNNING**: top-k k=7 on the B36 recipe.
+`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 +gate_topk=7 num_epochs=40 device=cuda`
+Hypothesis: a TRAINED 7-gate model → ASR ~0.80 at kl near the clean 7-site B34 (0.042), MUCH below B45's amputated
+0.187 — because the kept gates + scale fine-tune to the sparse set. If so = THE LEARNED SPARSE JAILBREAK (sparse +
+surgical + coherent, the task goal). Verify: gate count ≈7, ASR, kl. Then sweep k (1,3,16) for the frontier.
+Frontier targets: B31 1-site 0.75/kl 0.018 · B34 7-site 0.80/kl 0.042 (manual) · B36 0.81 (dense learned).
