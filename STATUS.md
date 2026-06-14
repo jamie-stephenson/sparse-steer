@@ -38,6 +38,15 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B45 — post-hoc threshold probe: B36 + eval_threshold 0.7 (DIAGNOSTIC, NOT a learned-sparse result)
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=2 gate_config.eval_threshold=0.7 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
+- result: **7/32 active** (mean 0.555) · refusal 0.02 · ASR 0.84 · kl 0.187 · ppl 4.72.
+- verdict: **DIAGNOSTIC — the floor gates are INERT.** Keeping only B36's top-7 gates (>0.7), zeroing the 25
+  floor gates → jailbreak SURVIVES + improves (ASR 0.81→0.84, kl 0.38→0.19, coherent). So B36's bypass is carried by
+  ~7 mid-late resid sites; the 0.275-floor gates contribute ~nothing. **NOT a legit learned-sparse model** (user's
+  critique): it's a 32-gate-trained model with 25 amputated — kept gates + scale were tuned with all 32 on. Strong
+  evidence the learned ranking is real + bypass is ~7-site sparse → top-k at k≈7 should train a genuine sparse model.
+
 ### EXP-B44 — frozen scale 2.84 + clip 100 — differentiates (like B36) but STILL floors → smooth-L0 exhausted
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true freeze_raw_scale=true init_raw_scale=2.79 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=100 num_epochs=40 device=cuda`. rc=0.
 - result: **32/32 active, gate STD 0.204** (range 0.275–0.95, min 0.275) · refusal 0.01 · ASR 0.80 · kl 1.26 · ppl 4.66.
@@ -470,21 +479,16 @@ with "Could not override 'task'. No match in the defaults list."
   old gate-dynamics observations still hold: over attention heads, open init → ~0.3 soft middle, never crossing
   0.01; that's a wrong-space/optimization issue, not distributed refusal.)
 
-## NEXT — smooth-L0 floor is HardConcrete-INTRINSIC (clip×scale exhausted). Try thresholding B36's learned ranking.
-Smooth-L0 won't drive gates below the 0.275 floor (B36–B44: clip {10,20,100} × scale {learnable, frozen-low/high}
-all floor). BUT B36/B44's gates DID learn a per-layer RANKING (0.275 floor → 0.94). The 32/32 "active" is just the
-0.01 eval-threshold counting the floor gates. New idea (in-mechanism, no top-k): raise the eval threshold to keep
-only the clearly-on gates — if the jailbreak survives on those alone, B36 is a LEARNED sparse jailbreak.
-→ **B45 RUNNING**: post-hoc threshold probe — B36 + `gate_config.eval_threshold` 0.01→0.7. **DIAGNOSTIC ONLY, NOT a
-sparse result** (user's valid critique): zeroing gates the trained model used = evaluating a DIFFERENT model (kept
-gates + scale were tuned with all 32 on). At most tells us if the floor gates are low-impact; a legit learned-sparse
-model must be TRAINED to be sparse, not amputated post-hoc. Letting it finish (user wants to see the number).
-`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=2 gate_config.eval_threshold=0.7 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`
-
-→ **QUEUED (user-requested) — run RIGHT AFTER B45:** re-run B36 with the gate tracker + mean-act normalization to
-render the gate animation/heatmap (snapshots aren't cached → needs use_cache=false retrain; gates come out identical).
+## NEXT
+**B45 (done) = diagnostic: B36's bypass is carried by ~7 learned mid-late resid sites (floor gates inert, ASR 0.84
+at 7/32 post-hoc) — but post-hoc amputation ≠ legit learned-sparse (user's critique). Legit path = train-with-budget
+(top-k at k≈7).**
+→ **B46 RUNNING (user-requested viz)**: re-run B36 with gate tracker + mean-act normalization to render the animation.
 `method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 normalise_gate_tracker=true use_cache=false num_epochs=40 device=cuda`
-→ then scp output/.../gate_animation_normalized.gif + gate_heatmap_normalized.png to local for viewing.
-
-→ **THEN: top-k** (train-WITH-budget) — the legit learned-sparse path (post-hoc thresholding is not it, per above).
-Best learned: B36 (0.81, dense). Manual frontier: B31 1-site 0.75 / B34 7-site 0.80.
+(= B36 + normalise_gate_tracker=true + use_cache=false to force the retrain that renders the tracker views — snapshots
+aren't cached; gates reproduce identically.) Produces gate_heatmap[_normalized].png + gate_animation[_normalized].gif
+→ scp to local for viewing. Expect: animation shows the gates fanning out from the open init (~0.88) — most drifting
+to the 0.275 floor, ~7 mid-late layers staying high — with the normalized view dividing each cell by its mean act
+norm so depth isn't a confound.
+→ **THEN: top-k** (train-WITH-budget, k≈7) — the legit learned-sparse path. Best learned: B36 (0.81, dense).
+Manual frontier: B31 1-site 0.75 / B34 7-site 0.80. (B45 post-hoc: 7 sites/0.84, diagnostic.)
