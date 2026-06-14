@@ -38,6 +38,17 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B15 — lower gate temperature (temp 0.1; steer, open, per-site scale, l0 0.3)
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true gate_config.init_log_alpha=2 gate_config.temperature=0.1 l0_lambda=0.3 num_epochs=40 device=cuda`. rc=0.
+- result: **1024/1024 active** (mean 0.417) · refusal 0.02 · ASR 0.73 · kl 1.26 · perplexity 6.94.
+- verdict: **STILL dense.** A sharper HardConcrete (temp 0.33→0.1) did NOT polarize the gates across threshold
+  (1024/1024, mean 0.417; slightly worse ASR 0.73/kl 1.26). Gate sharpness isn't the lever. **CONCLUSIVE: no
+  init / direction / target / intervention / scale / l0 / clip / temperature / objective yields a sparse bypass.**
+  The gates settle at a soft ~0.4 middle from open (every head's steer helps the distributed refusal a little →
+  none redundant → none pruned) and collapse from cold. Refusal is DISTRIBUTED (hard to sparsely remove) — the
+  mirror of induce (sparsely INDUCIBLE). DELIVERABLE = the dense steer beating Arditi (B10 ASR 0.87; B12 ASR
+  0.79 @ kl 0.55). ⇒ polish the deliverable's collateral (gentler steer) toward all-metrics-clean.
+
 ### EXP-B14 — cold start + large steer scale (init −2, init_raw_scale 10; steer toward compliance, attention)
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true gate_config.init_log_alpha=-2 init_raw_scale=10 num_epochs=40 device=cuda`. rc=0.
 - result: **0/1024 active** (mean 0.0) · refusal 0.92 · ASR 0.06 · kl 0.0 · perplexity 4.727.
@@ -199,14 +210,23 @@ with "Could not override 'task'. No match in the defaults list."
 - B6 (objective): contrastive / preference (compliant ≻ refusing completions) + L0.
 - B7 (data): vary the harmful extraction mix (advbench-only vs +malicious_instruct +tdc2023).
 
+## RESULT SUMMARY (after 15 experiments)
+- **Positive**: a learned **steer-toward-compliance** (additive, at attention heads, `+negate_direction`) is a
+  STRONG jailbreak that **beats Arditi's ASR coherently** — B10: ASR 0.87, refusal 0.00, ppl 8.7; B12 (shared
+  scale, l0 0.3): ASR 0.79, refusal 0.04, **kl 0.55**, ppl 6.1. Ablation maxed at ASR 0.54 (B8, surgical) — steer
+  wins decisively on ASR.
+- **Negative (robust)**: **L0+HardConcrete cannot make the bypass SPARSE.** Open init → gates compress to a soft
+  ~0.4 middle, never cross the 0.01 threshold (always 1024/1024 or 96/96); cold init → collapse to 0. True across
+  init / direction (self,pinned) / target (resid,attn) / intervention (ablate,steer) / scale (per-site,shared) /
+  l0 (0.04–10⁴) / grad-clip / gate-temperature / objective (CE, refusal-logit). Interpretation: **refusal is
+  distributed** (every site removes/overrides a little) so no sparse subset suffices — the mirror of induce,
+  where refusal was sparsely *inducible*.
+
 ## NEXT
-→ **B15 RUNNING**: lower gate temperature (sharpen the HardConcrete so gates polarize → prune).
-`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true gate_config.init_log_alpha=2 gate_config.temperature=0.1 l0_lambda=0.3 num_epochs=40 device=cuda`
-(the working open steer + gate temperature 0.33→0.1). Hypothesis: every run's gates settle at a SOFT middle
-(~0.37) and never cross threshold because the HardConcrete is smooth at temp 0.33. A LOWER temperature makes the
-gate samples (and log_alpha) more EXTREME → gates polarize toward 0/1 → redundant ones cross below threshold
-(first prune) while CE holds the bypass-critical heads near 1. Watch: sparse #active + ASR retained + coherent.
-Branches: prunes+strong → THE breakthrough, sweep temp×l0; still dense → gate sharpness isn't it either → the
-CONCLUSIVE finding is "L0+HardConcrete cannot sparsify a bypass" and the DELIVERABLE is the dense steer (beats
-Arditi: B10 ASR 0.87, B12 ASR 0.79/kl 0.55) — then polish it (lower steer scale → kl→0) and keep generating
-angles (contrastive compliant−refusing objective; l0 annealing; data-mix). Best result so far: B10/B12.
+→ **B16 RUNNING**: polish the deliverable — gentler FROZEN steer scale for lower collateral.
+`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=0.3 init_raw_scale=1.0 freeze_raw_scale=true num_epochs=40 device=cuda`
+(B12 but steer scale 2.79→1.0 and FROZEN so it can't grow back). Hypothesis: the kl collateral is the
+unconditional steer's magnitude; a smaller fixed scale → less harmless push → lower kl while the gates keep ASR
+up → the cleanest strong DENSE jailbreak (high ASR + kl→0 + coherent) as the headline. Still probing sparsity per
+persistence — queued NEW angles: contrastive (compliant−refusing margin) objective; resid-target steer; data-mix
+variation; l0 annealing. Best results to date: **B10 (ASR 0.87) / B12 (ASR 0.79 @ kl 0.55)**.
