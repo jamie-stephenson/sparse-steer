@@ -356,13 +356,15 @@ with "Could not override 'task'. No match in the defaults list."
   the bypass; sparsity would require a different selection mechanism (top-k — prior result), out of this scope.
 
 ## NEXT
-→ **B30 RUNNING**: PRIORITY RESET → push COHERENT ASR toward 0.86. Orthogonalize B10's max-ASR recipe.
-`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +orthogonalize_harmless_pcs=5 gate_config.init_log_alpha=2 num_epochs=40 device=cuda`
-(= B10's recipe — per-site learn_scale, l0 0.04, plain CE, strong steer — PLUS orthogonalize_harmless_pcs=5.) B10
-hit ASR 0.87 (>Arditi) but DEGENERATE (kl 2.96, ppl 8.70 — compliant-framed gibberish). Hypothesis: B10's
-degeneracy IS its collateral; orthogonalizing the strong steer off the top-5 harmless PCs removes that collateral →
-COHERENT high ASR. Target: ASR ~0.85 with ppl < 7 / kl < 1 = the real ASR-axis headline (coherent jailbreak ≈
-Arditi ASR). If ASR drops to ~0.80 → orth just pulls the strong steer back to the surgical ceiling; if ppl still
-high → bump K. NOTE: still DENSE — sparsity (the #1 goal) needs a NEW mechanism (top-k, keeping the L0 penalty),
-since HardConcrete+L0 is exhaustively negative; awaiting go-ahead on that fork. Honest scoreboard by real priorities:
-**no result yet meets the bar** (none sparse). Best coherent ASR ~0.80 (B25), max ASR 0.87 (B10, degenerate).
+→ **B31 RUNNING**: SPARSITY diagnostic (user-directed) — ablate the L17 refusal direction at ONLY the L17 resid site.
+`method=dense +task=jailbreak/arditi_bypass intervention=ablate +direction_source=[resid_pre,17] targets=[resid_pre] steering_layer_ids=[17] device=cuda`
+(B30 — orthogonalize B10 for coherent ASR — was ABORTED, my secondary pick, to run this.) **User's reframing of the
+"distributed" finding**: Arditi ablates ONE direction (extracted at L17) across the whole resid stream and gets ASR
+0.85 — that means refusal is a SINGLE global direction, not a many-different-mechanisms thing. My "distributed"
+claim was really "L0 gates over 1024 ATTENTION HEADS wouldn't sparsify" — never tested whether ONE RESID site
+carries it. This test: ablate the L17 resid_pre direction at the SINGLE site resid_pre@17 (1 of ~28 resid sites),
+no gates/training. Hypothesis: if ASR ≈ Arditi's 0.85 → the bypass IS sparse (1 site!) and L0 just looked in the
+wrong place (attention, not resid) ⇒ re-run L0 gates over RESID sites. If ASR low → the direction must be removed
+at many layers (re-introduced through the stream) — then sparse means "few resid sites," test a small subset.
+Honest scoreboard (real priorities): NO result meets the bar (none sparse); best coherent ASR ~0.80 (B25), max
+ASR 0.87 (B10, degenerate). This diagnostic could crack the #1 goal (sparsity).
