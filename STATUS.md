@@ -38,6 +38,14 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B39 — cold init (−2) + MINIMAL l0 (0.1) — STILL collapsed (cold gates can't lift at any l0)
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=-2 l0_lambda=0.1 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
+- result: refusal 0.92 · ASR 0.06 · kl 0.000 · ppl 4.73 = **UNSTEERED** (collapsed, same as B38).
+- verdict: **cold init can't lift even at l0=0.1** (10× lower than B38) → it's NOT the l0 strength; HardConcrete gates
+  genuinely can't LIFT from closed (gradient too weak there). With B37 (can't CLOSE from open — the floor), the gates
+  are stuck at BOTH extremes. ⇒ last HardConcrete lever: gate TEMPERATURE (sharpness) — try low temp to bimodalize
+  B36's differentiated gates toward 0/1.
+
 ### EXP-B38 — COLD init (−2) + B36 combo, l0 1.0 — COLLAPSED (gates couldn't lift from closed)
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=-2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
 - result: refusal 0.92 · ASR 0.06 · kl 0.000 · ppl 4.73 = **UNSTEERED** (gates collapsed to ~0, no intervention).
@@ -428,11 +436,12 @@ with "Could not override 'task'. No match in the defaults list."
   0.01; that's a wrong-space/optimization issue, not distributed refusal.)
 
 ## NEXT
-→ **B39 RUNNING**: cold init + MINIMAL l0 (0.1) so CE can lift useful gates from closed (B38 collapsed at l0 1.0).
-`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=-2 l0_lambda=0.1 +grad_clip=10 num_epochs=40 device=cuda`
-(= B38 but l0 1.0→0.1.) B38 collapsed — l0=1.0 from the 0.04 cold start kept even the useful gates closed (ASR
-0.06). Drop l0 10× so CE can LIFT the useful (mid-late) gates from cold while the tiny l0 still nudges the useless
-gates below the 0.01 threshold → SPARSE jailbreak. Branches: useful lift + useless closed → LEARNED SPARSE (goal);
-useful STILL don't lift (collapse) → HardConcrete can't lift from closed regardless ⇒ smooth-L0 can't hard-prune,
-top-k is the clean fix; useful + useless both lift → l0 too low, nudge up. Watch gate count + ASR. **Soft-sparse
-result stands: B36 (ASR 0.81, gates differentiated 0.275–0.94 by layer).** Manual proof: B31 1-site 0.75 / B34 7-site 0.80.
+→ **B40 RUNNING**: last HardConcrete lever — LOW gate temperature (0.1) to bimodalize B36's differentiated gates.
+`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=2 gate_config.temperature=0.1 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`
+(= B36 + gate temp 0.33→0.1.) Gates are stuck at both extremes (B37 floor from open, B38/B39 collapse from cold).
+LOWER temperature sharpens the HardConcrete → pushes log_alpha toward the extremes → the useless (0.275-floor) gates
+may finally drop below the 0.01 threshold while useful → ~1 → HARD SPARSE, jailbreaking via the useful gates.
+Hypothesis: sparse subset + ASR ~0.8 = learned sparse via smooth-L0. If still floored/collapses → smooth-L0
+hard-pruning is EXHAUSTED (open=floor, cold=collapse, low-temp=no help) ⇒ top-k is the justified clean fix.
+Watch gate COUNT + std + ASR. **Best learned result: B36 soft-sparse (ASR 0.81, gates 0.275–0.94 by layer, dense).**
+Manual proof sparsity is real: B31 1-site 0.75 / B34 7-site 0.80.
