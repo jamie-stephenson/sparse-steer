@@ -38,6 +38,16 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B1 — learned-scale sparse_ablate baseline (init −0.79, l0 0.04)
+- args: `method=sparse_ablate +task=jailbreak/arditi_bypass num_epochs=40 device=cuda`
+  (defaults: learn_scale=true, normalize_ablation=true, init_log_alpha=−0.79, l0_lambda=0.04,
+  targets=resid_pre/mid/post, direction_source=self). rc=0.
+- result: **0/96 active** (mean gate 0.0) · refusal 0.92 · ASR 0.06 · kl 0.0 · perplexity 4.727.
+- verdict: **FAIL — gates collapsed to all-off** → no bypass (identical to unsteered). Even *with* the
+  learned scale, a cold init (−0.79) + l0=0.04 lets L0 win and shut every gate (the cold-collapse, now
+  confirmed *with* the scale too). ⇒ the learned scale is necessary but not sufficient from a cold start;
+  the gates must START open so the bypass works first, then L0 prunes. Pivot to start-open init.
+
 ### EXP-000 — no-scale α=1 ablation sweep  (dead-end, logged so the loop won't repeat it)
 - config: `method=sparse_ablate learn_scale=false normalize_ablation=false gate_config.init_log_alpha=2`
   `targets=[resid_pre,resid_mid,resid_post]` (96 sites), λ ∈ {0.04 … 10000}, num_epochs=40.
@@ -59,7 +69,12 @@ with "Could not override 'task'. No match in the defaults list."
 - B7 (data): vary the harmful extraction mix (advbench-only vs +malicious_instruct +tdc2023).
 
 ## NEXT
-→ **B1 RUNNING** (launched 2026-06-14 ~01:19 UTC via the harness:
-`method=sparse_ablate +task=jailbreak/arditi_bypass num_epochs=40 device=cuda`).
-When `~/ar.done`: record B1's ASR / refusal / kl / perplexity + #active gates in the log above,
-then design + launch **B2** (l0_lambda sweep) — or a better idea per the latest result.
+→ **B2 RUNNING**: learned-scale + **START-OPEN init**.
+`method=sparse_ablate +task=jailbreak/arditi_bypass gate_config.init_log_alpha=2 num_epochs=40 device=cuda`
+(learn_scale=true, normalize_ablation=true, l0_lambda=0.04, targets=resid_pre/mid/post).
+Hypothesis: from a start-open init the bypass works immediately, and unlike the no-scale runs (which
+stayed 96/96 because L0 had only one lever), the **learned scale** should let CE hold the
+bypass-necessary sites strong while L0 prunes the redundant ones → a *sparse* jailbreak. Watch: does
+#active drop below 96 while ASR stays high and kl/perplexity stay clean?
+When `~/ar.done`: record B2, then if it prunes → sweep l0_lambda for the ASR-vs-sparsity frontier;
+if it stays dense (96/96) → lower init / raise l0 with the scale; if it collapses → raise init further.
