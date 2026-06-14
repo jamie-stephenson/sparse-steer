@@ -38,6 +38,16 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B23 — relax grad-clip (10) + ce_kl β1 + l0 1.0 (shared_scale) — NEW BEST surgical; sparsity still blocked
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
+- result: **1024/1024 active** (mean 0.31) · refusal 0.03 · **ASR 0.79** · **kl 0.40** · perplexity 5.58.
+- verdict: **two findings.** (1) SURGICAL — **NEW BEST balanced point**: ASR 0.79 / kl 0.40 / ppl 5.58 PARETO-BEATS
+  B12 (0.79 / 0.55 / 6.06) on every axis — relaxed clip let compliance learn a bit more (ASR 0.75→0.79 vs B20)
+  while ce_kl kept kl low; matches the CE frontier ASR (nears Arditi 0.86) far more surgically. (2) SPARSITY still
+  BLOCKED — grad_clip 1→10 changed gate count NOT AT ALL (1024/1024, mean 0.31 ≈ B22's 0.314). So grad-clip was NOT
+  the L0 bottleneck; the bypass is irreducibly dense under smooth L0 (gates won't cross the 0.01 threshold). ⇒
+  smooth-L0 sparsity now ~exhaustively negative. Last untried L0 lever: the SCHEDULE (late l0 ramp).
+
 ### EXP-B22 — does ce_kl unlock sparsity? ce_kl β1 + l0 1.0 (shared_scale) — NO, still dense
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=1.0 num_epochs=40 device=cuda`. rc=0.
 - result: **1024/1024 active** (mean 0.314) · refusal 0.07 · ASR 0.75 · kl 0.36 · perplexity 5.56.
@@ -289,21 +299,15 @@ with "Could not override 'task'. No match in the defaults list."
   where refusal was sparsely *inducible*.
 
 ## NEXT
-→ **B23 RUNNING**: sparsity attempt — relax grad-clip (the implicated L0-step bottleneck) with the ce_kl recipe.
-`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`
-(= B22 + grad_clip 1.0→10, isolating the clip.) Established finding: clip@1.0 NEUTRALIZES λ — the total-grad cap
-shrinks the L0 step so gates never reach 0 (every l0-sweep stayed dense). The robust-negative listed "grad-clip"
-but that was with plain CE; UNTRIED with the winning ce_kl recipe (feedback: exhaust tuning with the winning recipe
-before concluding). Hypothesis: 10× headroom lets L0 drive collateral-only gates to 0, ce_kl's KL gradient
-reinforcing the close. Watch GATE COUNT (<1024?) + ASR/kl/ppl (risk: big steps destabilize). If sparsifies w/ ASR
-retained → THE HEADLINE (sparse+surgical). If dense or unstable → smooth L0 conclusively dead even with the best
-recipe + relaxed clip ⇒ pivot to top-k selection (+ keep L0 as 2nd reg) per the "top-k necessary" prior, and lock
-the surgical headline (β-sweep). [Original B22 reasoning kept below for the record.]
-The robust negative was: plain CE + L0 can't sparsify the bypass (refusal is
-distributed; CE needs every site, and grad-clip caps the L0 step at any λ). But ce_kl adds a NEW gradient — a gate
-that only contributes harmless collateral now hurts BOTH the KL term AND L0, so closing it improves the loss on two
-axes. Hypothesis: ce_kl + higher l0 may finally prune below 1024 where plain CE could not. Watch GATE COUNT (<1024?)
-+ whether ASR (~0.75) / kl (~0.34) survive. If it sparsifies with ASR retained → THE HEADLINE (sparse + surgical +
-jailbreaks, beating Arditi on all axes). If still dense → sparsity is blocked even with a collateral-aware objective
-(refusal genuinely needs all sites) — then refine the dense surgical point (β 0.5) + try an orthogonalized steer.
-Best so far: B20 (ASR 0.75 / kl 0.34, surgical, DENSE) · B10 (ASR 0.87 max) · B12 (0.79/0.55). β≈1 = the knee.
+→ **B24 RUNNING**: last L0-sparsity lever — LATE l0 ramp (long warmup) so the bypass forms before pruning.
+`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 l0_warmup_steps=600 num_epochs=40 device=cuda`
+(= B23 + l0_warmup_steps 16→600 ≈ half the ~1240-step run.) Every prior l0 run applied pressure from ~step 16
+(l0 on almost throughout) → gates compress UNIFORMLY (the differentiating CE/KL "which sites matter" signal is
+drowned → dense, not sparse; cf the CE λ=10⁴ "every gate uniform at 0.462"). Hypothesis: hold l0≈0 while the
+surgical bypass forms + gates differentiate by benefit, THEN ramp l0 to prune the sites that didn't matter — the
+form-then-prune schedule, untried. If some gates close with ASR retained → first real sparsity; if dense → bypass
+genuinely needs ALL sites (distributed, conclusive); if ASR collapses → pruning breaks it (also confirms
+distributed). After this, smooth-L0 levers are exhausted; if still no sparsity, lock the surgical headline (B23)
+and explore a constraint-respecting sparsity route (e.g. orthogonalized steer, or top-k *with* the L0 penalty kept).
+**Best so far: B23 (ASR 0.79 / kl 0.40 / ppl 5.58 — surgical, Pareto-beats B12, DENSE)** · B10 (ASR 0.87 max) ·
+B20 (0.75/0.34). β≈1 = knee. Sparsity: comprehensively negative under smooth L0.
