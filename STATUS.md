@@ -38,6 +38,16 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B20 — ce_kl clean A/B (shared_scale = B12, aligned full-prompt KL, β 1.0) — FRONTIER BROKEN ✅
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=0.3 num_epochs=40 device=cuda`. rc=0.
+- result: **1024/1024 active** (mean 0.339) · refusal 0.05 · ASR 0.75 · **kl 0.34** · perplexity 5.58.
+- verdict: **the dual objective WORKS — beats the CE collateral frontier.** vs B12 (identical config, plain CE:
+  0.79 / kl 0.55 / ppl 6.06): at ~matched ASR (0.75) harmless KL dropped 0.55→0.34 (−38%) and ppl 6.06→5.58
+  (toward baseline 4.73). Directly penalizing harmless collateral moves the ASR↔collateral frontier INWARD —
+  previously kl 0.34 needed scale 1.0 which cost ASR (B16: 0.51/0.21); now kl 0.34 at ASR 0.75. Selectivity from
+  the OBJECTIVE, steer still unconditional (respects the constraint). Still DENSE (1024/1024) — L0 didn't sparsify
+  (consistent w/ the robust negative). ⇒ β is the new knob; sweep it for the knee + the surgical limit.
+
 ### EXP-B19 — NEW objective ce_kl, first run (per-site learn_scale, β 1.0, l0 0.3) — CONFOUNDED + buggy proxy
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=0.3 num_epochs=40 device=cuda`. rc=0.
 - result: **1024/1024 active** (mean 0.418) · refusal 0.00 · ASR 0.79 · **kl 1.95** · **perplexity 11.28**.
@@ -261,16 +271,12 @@ with "Could not override 'task'. No match in the defaults list."
   where refusal was sparsely *inducible*.
 
 ## NEXT
-→ **B20 RUNNING**: clean A/B for ce_kl — shared_scale (= B12) + aligned full-prompt KL term.
-`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=0.3 num_epochs=40 device=cuda`
-(= B12's exact frontier config, only CE→ce_kl, so kl difference is purely the objective; β=1.0.) Fixes B19's two
-errors: shared_scale (gentle regime, matches B12's 0.55 kl point) + the KL term now measures the steered harmless
-dist under FULL-prompt steering (matches the kl_harmless eval), so it actually penalizes the collateral eval sees.
-(First relaunch OOM'd — a 2nd grad forward doubled activation memory; fixed by dropping the last-token steer_mask
-so the SINGLE grad forward steers the full prompt and feeds both CE and KL → 1 grad + 1 no_grad base, same memory
-as B19.) Hypothesis: penalizing harmless collateral directly BREAKS the magnitude↔
-collateral frontier → kl < 0.55 at ASR ~0.79 (vs B12). Branches: kl drops → β-sweep to push toward kl→0 (the
-headline surgical jailbreak), and check if L0+KL also sparsified; kl flat → the unconditional steer can't be made
-selective even with a direct penalty (refusal & harmless share the steered subspace) — a deeper finding, pivot to
-per-direction selectivity (orthogonalize steer vs harmless variation). Best to date: B10 (ASR 0.87) / B12 (0.79 @
-kl 0.55). Robust negatives: bypass not L0-sparsifiable at attention; resid placement worse (B18).
+→ **B21 RUNNING**: ce_kl β-sweep — β 3.0 (push preservation harder; bracket the knee + find the surgical limit).
+`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=3.0 gate_config.init_log_alpha=2 l0_lambda=0.3 num_epochs=40 device=cuda`
+(= B20 but β 1.0→3.0.) B20 broke the frontier (ASR 0.75 / kl 0.34 vs B12's 0.79 / 0.55). β-sweep map so far:
+β≈0 (B12) 0.79/0.55 → β1 (B20) 0.75/0.34. B21 gets the low-kl end. Hypothesis: kl drops further (~0.2) at some ASR
+cost — brackets the knee of the ce_kl ASR↔kl frontier. If ASR stays ≥0.65 at kl ~0.2 → a strong SURGICAL jailbreak
+(low collateral + coherent + still jailbreaks), the headline differentiator vs Arditi's high-collateral dense
+ablation. If ASR collapses → B20's β≈1 is near-optimal; next sweep β DOWN (0.5/0.3) for the high-ASR end (recover
+ASR 0.79 at kl<0.55, Pareto-beating B12). Best so far: B20 (0.75/kl 0.34) surgical · B10 (ASR 0.87) max-ASR · B12
+(0.79/0.55). Still DENSE — sparsity remains the open problem (queued: ce_kl + lower l0 init; orthogonalized steer).
