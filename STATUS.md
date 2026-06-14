@@ -38,6 +38,15 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B37 — B36 setup + higher l0 (3.0) to prune — did NOT prune, COMPRESSED toward floor instead
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=3.0 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
+- result: **32/32 active, gate STD 0.123** (min 0.275, max 0.913; only L27 high, rest near the 0.275 floor) · refusal 0.01 · ASR 0.81 · kl 0.19 · ppl 4.71.
+- verdict: **higher l0 COMPRESSES, doesn't prune.** vs B36 (l0 1.0, std 0.197): cranking l0 pulled the HIGH gates
+  DOWN toward the 0.275 floor (std ↓), the OPPOSITE of pruning. Cause: HardConcrete's expected-L0 gradient VANISHES
+  as a gate nears closed, so from OPEN init the gates stall at the 0.275 floor and never cross the 0.01 threshold;
+  more λ just drowns CE differentiation. (ASR still 0.81, kl 0.38→0.19.) ⇒ don't crank l0; START COLD (default-closed)
+  so the floor is at 0 and CE lifts only the useful gates above threshold → sparse.
+
 ### EXP-B36 — ⭐ shared_scale + FULL-strength ablation (no normalize) + clip 10, resid_pre, L0 — GATES DIFFERENTIATE
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
 - result: **32/32 active but gate STD 0.197** (range 0.275–0.938; mid-late layers ~0.7–0.94, early at 0.275 floor) · refusal 0.00 · ASR 0.81 · kl 0.38 · ppl 4.67.
@@ -411,12 +420,12 @@ with "Could not override 'task'. No match in the defaults list."
   0.01; that's a wrong-space/optimization issue, not distributed refusal.)
 
 ## NEXT
-→ **B37 RUNNING**: ⭐ convert B36's gate differentiation → actual SPARSITY. B36 setup + higher l0 (1.0→3.0).
-`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=3.0 +grad_clip=10 num_epochs=40 device=cuda`
-B36 BROKE the gate symmetry (std 0.197, ASR 0.81) but all 32 still active — the low-utility early-layer gates sit at
-the 0.275 L0-floor, above the 0.01 threshold. Now that the gates carry a per-layer utility signal, MORE L0 pressure
-should push the low (early) gates below threshold while the high-CE-pull (mid-late) gates resist → SPARSE learned
-selection. Hypothesis: prunes to ~mid-late resid layers (≪32) with ASR ~0.8 retained = THE LEARNED SPARSE JAILBREAK
-(the task goal, no top-k). If over-prunes (ASR↓) → back off l0; if still 32/32 → l0 higher / lower init. Watch gate
-COUNT + std + ASR. **Smooth-L0 sparsity is alive** (B36) — this is the live path. Manual proof: B31 1-site 0.75 · B34
-7-site 0.80.
+→ **B38 RUNNING**: ⭐ sparsity via COLD init (default-closed) + B36 differentiation combo. init_log_alpha −2.
+`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=-2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`
+(= B36 but init 2→−2 → gates start ~0.04, near-closed.) B36 proved gates DIFFERENTIATE (shared scale + full-strength
+ablation + clip 10); B37 showed you can't prune from OPEN init (L0 gradient dies at the 0.275 floor). So flip it:
+start near-CLOSED so "off" is the default, and let the strong CE signal lift ONLY the useful (mid-late) layers above
+the 0.01 threshold while the rest stay closed → SPARSE. Prior cold-init collapsed, but that was WITHOUT this combo
+(CE couldn't reach the gates). Hypothesis: a sparse subset (≪32) lifts and still jailbreaks (ASR ~0.8) = THE LEARNED
+SPARSE JAILBREAK (task goal, no top-k). If it collapses (0 gates, no bypass) → l0 too strong from cold → lower l0 /
+l0-warmup. Watch gate COUNT + which layers + ASR. Manual proof sparsity is real: B31 1-site 0.75 · B34 7-site 0.80.
