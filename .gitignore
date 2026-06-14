@@ -1,5 +1,7 @@
 __pycache__/
 *.py[cod]
+# root-level scratch / throwaway analysis scripts
+/_*.py
 *.egg-info/
 dist/
 build/
