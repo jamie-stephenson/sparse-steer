@@ -38,6 +38,15 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B22 — does ce_kl unlock sparsity? ce_kl β1 + l0 1.0 (shared_scale) — NO, still dense
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=1.0 num_epochs=40 device=cuda`. rc=0.
+- result: **1024/1024 active** (mean 0.314) · refusal 0.07 · ASR 0.75 · kl 0.36 · perplexity 5.56.
+- verdict: **sparsity still BLOCKED — ce_kl's collateral gradient did NOT close any gates.** Tripling l0 (0.3→1.0)
+  changed nothing (gates 1024/1024, ASR/kl/ppl ≈ B20's 0.75/0.34/5.58). Re-confirms the robust negative EVEN with a
+  collateral-aware objective: smooth L0 can't sparsify the bypass — gates sit at the ~0.3 soft middle, never cross
+  the 0.01 close threshold; grad-clip@1.0 caps the L0 step so λ barely matters (same as the CE l0-sweep). ⇒ grad-clip
+  is the prime suspect (TASK lists it as a lever; established finding "clip neutralizes λ"); untried w/ ce_kl. ⇒ B23.
+
 ### EXP-B21 — ce_kl β-sweep: β 3.0 (shared_scale, l0 0.3) — β overshot, non-monotonic
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=3.0 gate_config.init_log_alpha=2 l0_lambda=0.3 num_epochs=40 device=cuda`. rc=0.
 - result: **1024/1024 active** (mean 0.469) · refusal 0.03 · ASR 0.75 · kl 0.41 · perplexity 5.97.
@@ -280,9 +289,17 @@ with "Could not override 'task'. No match in the defaults list."
   where refusal was sparsely *inducible*.
 
 ## NEXT
-→ **B22 RUNNING**: does ce_kl UNLOCK sparsity? — ce_kl (β=1 sweet spot) + higher l0 (0.3→1.0).
-`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=1.0 num_epochs=40 device=cuda`
-(= B20 but l0_lambda 0.3→1.0.) The robust negative was: plain CE + L0 can't sparsify the bypass (refusal is
+→ **B23 RUNNING**: sparsity attempt — relax grad-clip (the implicated L0-step bottleneck) with the ce_kl recipe.
+`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`
+(= B22 + grad_clip 1.0→10, isolating the clip.) Established finding: clip@1.0 NEUTRALIZES λ — the total-grad cap
+shrinks the L0 step so gates never reach 0 (every l0-sweep stayed dense). The robust-negative listed "grad-clip"
+but that was with plain CE; UNTRIED with the winning ce_kl recipe (feedback: exhaust tuning with the winning recipe
+before concluding). Hypothesis: 10× headroom lets L0 drive collateral-only gates to 0, ce_kl's KL gradient
+reinforcing the close. Watch GATE COUNT (<1024?) + ASR/kl/ppl (risk: big steps destabilize). If sparsifies w/ ASR
+retained → THE HEADLINE (sparse+surgical). If dense or unstable → smooth L0 conclusively dead even with the best
+recipe + relaxed clip ⇒ pivot to top-k selection (+ keep L0 as 2nd reg) per the "top-k necessary" prior, and lock
+the surgical headline (β-sweep). [Original B22 reasoning kept below for the record.]
+The robust negative was: plain CE + L0 can't sparsify the bypass (refusal is
 distributed; CE needs every site, and grad-clip caps the L0 step at any λ). But ce_kl adds a NEW gradient — a gate
 that only contributes harmless collateral now hurts BOTH the KL term AND L0, so closing it improves the loss on two
 axes. Hypothesis: ce_kl + higher l0 may finally prune below 1024 where plain CE could not. Watch GATE COUNT (<1024?)
