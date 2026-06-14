@@ -38,6 +38,15 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B28 — ORTHOGONALIZED direction (off top-5 harmless PCs) + ce_kl β0.5 (shared, l0 1.0, gc 10) — works ✅
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=0.5 +orthogonalize_harmless_pcs=5 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
+- result: **1024/1024 active** (mean 0.291) · refusal 0.03 · ASR 0.78 · **kl 0.26** · **perplexity 5.47**.
+- verdict: **orthogonalization improves SURGICAL-ness — new low-kl point.** vs B25 (no orth, 0.80/0.40/5.64):
+  kl 0.40→0.26 (−35%) and ppl 5.64→5.47 (toward baseline 4.73), at a small ASR cost (0.80→0.78). Confirms part of
+  the steer's collateral came from the refusal direction's OVERLAP with harmless-variance directions — removing the
+  top-5 cleans it. Did NOT raise the ASR ceiling (~0.80 robust), but advanced the collateral axis (lowest-kl
+  coherent jailbreak yet). Still dense. ⇒ sweep K: milder (K=2) to preserve ASR at low kl (aim Pareto-beat B25).
+
 ### EXP-B27 — normalize directions (equal per-head) + ce_kl β0.5 (shared, l0 1.0, grad_clip 10) — BROKE the model
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=0.5 normalize_steering_vectors=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
 - result: **1024/1024 active** (mean 0.31) · refusal 0.00 · ASR 0.83 · **kl 11.84** · **perplexity inf**.
@@ -340,14 +349,12 @@ with "Could not override 'task'. No match in the defaults list."
   the bypass; sparsity would require a different selection mechanism (top-k — prior result), out of this scope.
 
 ## NEXT
-→ **B28 RUNNING**: ORTHOGONALIZED direction — project the steer off top-5 harmless PCs (NEW code) + ce_kl (= B25).
-`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=0.5 +orthogonalize_harmless_pcs=5 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`
-(= B25 best-surgical + orthogonalize_harmless_pcs=5.) Implemented this tick in core/extract.py (guarded, default
-0 = unchanged → other tasks/regression untouched; cache-keyed only when >0): each site's diff-in-means is projected
-orthogonal to the top-5 PCs of that site's harmless (negative-class) activations — the directions harmless
-processing is most sensitive to. Attacks the ROOT of the steep ASR↔collateral frontier (B25–B27: surgical ASR caps
-~0.80; pushing harder breaks coherence): a more SELECTIVE direction should perturb harmless less, so the steer can
-push compliance harder → higher ASR at lower kl. Hypothesis: ASR > 0.80 with kl ≤ 0.40 → frontier broken further
-(toward match-Arditi-surgically). If the jailbreak WEAKENS (ASR drops) → refusal ⊂ the harmless-variance subspace
-(the steer NEEDS those directions) — itself a clean mechanistic finding; then sweep K (1,2). **Best: B25 (ASR 0.80
-/ kl 0.40 / ppl 5.64, surgical, Pareto-beats B12)** · B10 (0.87 max, kl 2.96). SPARSITY: exhaustively negative.
+→ **B29 RUNNING**: orthogonalization K-sweep — K=2 (milder, preserve ASR) + ce_kl β0.5.
+`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=0.5 +orthogonalize_harmless_pcs=2 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`
+(= B28 but K 5→2.) B28 (K=5) gave 0.78 / kl 0.26 — orthogonalization cut collateral 35% but cost ASR 0.80→0.78
+(removed some refusal-relevant signal too). K=2 removes only the top-2 worst harmless-collateral directions,
+keeping more of the refusal signal. Hypothesis: ASR back to ~0.80 with kl ~0.30 → strictly Pareto-beats B25
+(0.80/0.40) = the cleanest surgical headline. If ASR still ~0.78 → orthogonalization inherently costs that, K=5's
+kl 0.26 stands (then push β / try K=10 for the low-kl limit). **Best so far: B25 (ASR 0.80 / kl 0.40, ASR-best
+surgical) · B28 (ASR 0.78 / kl 0.26 / ppl 5.47, lowest-collateral)** · B10 (0.87 max-ASR but degenerate). SPARSITY:
+exhaustively negative under HardConcrete+L0. Qual: B25 coherent+surgical; B10 compliant-framed gibberish (gen_compare).
