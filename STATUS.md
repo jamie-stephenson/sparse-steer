@@ -38,6 +38,16 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B10 — sparse-STEER toward compliance, START-OPEN (init +2, l0 0.04, attention) ★ first to beat Arditi ASR
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true gate_config.init_log_alpha=2 num_epochs=40 device=cuda`. rc=0.
+- result: **1024/1024 active** (mean 0.296) · refusal 0.00 · **ASR 0.87** · **kl 2.96** · perplexity 8.70.
+- verdict: **STRONG jailbreak (ASR 0.87 > Arditi 0.86) but NOT surgical, NOT sparse.** Big finding: additive
+  steer toward compliance DOES bypass strongly (refusal 0.00, ASR 0.87 — beats every ablation run AND Arditi's
+  ceiling). But dense (1024/1024 from start-open) AND damages harmless (kl 2.96) + coherence (ppl 8.70). Root
+  cause of collateral: the steer is UNCONDITIONAL → it pushes harmless toward "compliance" too (ablation was a
+  no-op on non-refusing harmless → kl ~0.03). The fix for BOTH problems is the same — PRUNE to the few
+  refusal-relevant heads (sparse → targeted → less harmless damage). ⇒ raise l0 to force pruning of the steer.
+
 ### EXP-B9 — sparse-STEER toward compliance, COLD init (method=sparse, steer, attention, negate_direction, init −2)
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true gate_config.init_log_alpha=-2 num_epochs=40 device=cuda`. rc=0.
 - result: **0/1024 active** (mean 0.0) · refusal 0.92 · ASR 0.06 · kl 0.0 · perplexity 4.727.
@@ -151,11 +161,13 @@ with "Could not override 'task'. No match in the defaults list."
 - B7 (data): vary the harmful extraction mix (advbench-only vs +malicious_instruct +tdc2023).
 
 ## NEXT
-→ **B10 RUNNING**: sparse-STEER toward compliance, START-OPEN init.
-`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true gate_config.init_log_alpha=2 num_epochs=40 device=cuda`
-(B9 but init −2→+2). From start-open the compliance-steer is active from step 0, so the bypass — if additive
-steer toward compliance works at all — happens immediately, and L0 can then prune the 1024 heads to a sparse
-subset (additive steer needs only a few, unlike ablation). Two things to learn: (a) does steer-toward-compliance
-even bypass (ASR up)? (b) if so, does it prune sparse where ablation never did? Branches: bypass+sparse →
-BREAKTHROUGH, tune frontier; bypass+dense → l0 sweep; no bypass → the compliance direction is ineffective →
-verify negate / try resid targets / a margin (compliant−refusing) objective for steer.
+→ **B11 RUNNING**: prune the (working) steer — higher l0 on the start-open compliance-steer.
+`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true gate_config.init_log_alpha=2 l0_lambda=0.3 num_epochs=40 device=cuda`
+(B10 + l0 0.04→0.3). B10 proved additive steer toward compliance jailbreaks STRONGLY (ASR 0.87 > Arditi) but
+densely + with bad harmless collateral (kl 2.96 — the unconditional steer hits harmless). Hypothesis: a stronger
+L0 prunes the 1024 heads to the few refusal-relevant ones → sparse AND more surgical (steering only where it
+matters → less harmless damage) while keeping ASR high (additive steer needs only a few heads — induce's
+23/1024). Watch: #active ≪ 1024 with ASR retained + kl/ppl falling toward clean. **This is the most promising
+lead** — the first config to beat Arditi's ASR; the job now is to make it sparse + surgical. Branches: prunes +
+stays strong+clean → BREAKTHROUGH, sweep l0 for the frontier; over-prunes/collapses → lower l0 (0.1); prunes but
+kl still high → restrict steer or lower the steer scale (init_raw_scale).
