@@ -38,6 +38,15 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B12 — steer + SHARED scale (l0 0.3; start-open, attention)
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=0.3 num_epochs=40 device=cuda`. rc=0.
+- result: **1024/1024 active** (mean 0.371) · refusal 0.04 · ASR 0.79 · **kl 0.55** · perplexity 6.06.
+- verdict: **most surgical steer yet, STILL dense.** Shared scale did NOT enable threshold-crossing pruning
+  (still 1024/1024, mean 0.371 = B11) — but lowest collateral of the steer runs (kl 2.96→0.95→0.55 across
+  B10→B11→B12) at ASR 0.79. The gates COMPRESS toward ~0.37 but never cross the 0.01 active-threshold (recurring:
+  open never prunes, cold collapses). Shared scale wasn't the (only) blocker. ⇒ push l0 much higher (shared scale
+  can't rescue individual gates) to force redundant gates below threshold.
+
 ### EXP-B11 — steer toward compliance, higher l0 (l0 0.3; start-open, attention)
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true gate_config.init_log_alpha=2 l0_lambda=0.3 num_epochs=40 device=cuda`. rc=0.
 - result: **1024/1024 active** (mean 0.371) · refusal 0.01 · ASR 0.82 · kl 0.95 · perplexity 6.24.
@@ -170,13 +179,13 @@ with "Could not override 'task'. No match in the defaults list."
 - B7 (data): vary the harmful extraction mix (advbench-only vs +malicious_instruct +tdc2023).
 
 ## NEXT
-→ **B12 RUNNING**: SHARED scale (remove the per-site scale that blocks pruning) on the working steer.
-`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=0.3 num_epochs=40 device=cuda`
-(B11 but one SHARED scalar scale instead of per-site; learn_scale moot once shared_scale set — the model uses
-the shared one). Reasoning: B8 + B11 show the PER-SITE scale defeats L0 (each site's scale grows to compensate,
-no gate ever closes). A single SHARED scale provides magnitude uniformly → it can't selectively rescue a site,
-so L0 should finally close the redundant gates → sparse, while the shared scale keeps the kept heads strong.
-Still a learnable scale (no no-scale collapse) — keeps the constraint's intent while removing the specific
-blocker. Watch: #active ≪ 1024 with ASR retained + kl/ppl clean = the full win. Branches: collapse → lower l0;
-still dense → HardConcrete+L0 fundamentally can't sparsify here → report the dense ASR-0.87 steer + frontier; if
-shared_scale isn't config-plumbed (run errors) → wire it through / use method=shared_scale_only with gates.
+→ **B13 RUNNING**: shared scale + much stronger l0 (force threshold-crossing pruning).
+`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=1.0 num_epochs=40 device=cuda`
+(B12 + l0 0.3→1.0). The gates compress to ~0.37 but never drop below the 0.01 active-threshold. With the SHARED
+scale (no per-site rescue), a much stronger L0 should push redundant gates below threshold while CE holds the
+bypass-critical heads above → the first real prune. Watch: #active < 1024 with ASR retained. Branches: prunes +
+strong → sweep l0 frontier (the win); collapses to 0 → l0 too high, back off (0.5); still dense → the gates
+genuinely won't cross threshold from open init → the honest result is the dense strong-surgical steer
+(B12: ASR 0.79, kl 0.55, beats Arditi coherently but not sparsely), and the finding is "L0+HardConcrete won't
+sparsify a bypass-steer from any reachable init". Also queued: lower the steer scale (init_raw_scale) to drive kl
+toward 0 for a clean dense result; and num_epochs↑ in case selection is just slow.
