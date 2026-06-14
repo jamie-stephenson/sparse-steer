@@ -38,6 +38,17 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B2 — learned-scale + start-open init (init +2, l0 0.04)
+- args: `method=sparse_ablate +task=jailbreak/arditi_bypass gate_config.init_log_alpha=2 num_epochs=40 device=cuda`
+  (learn_scale=true, normalize_ablation=true, l0_lambda=0.04, targets=resid_pre/mid/post, direction_source=self). rc=0.
+- result: **96/96 active** (mean gate 0.277) · refusal 0.69 · ASR 0.22 · kl 0.011 · perplexity 4.737.
+- verdict: **PARTIAL & dense.** Surgical + coherent (kl 0.01, ppl baseline) but a weak jailbreak (ASR 0.22)
+  and NOT sparse. The learned scale + L0 *compressed* every gate (0.96→0.277) rather than *pruning* a subset —
+  the same symmetry trap as the no-scale start-open runs: all 96 resid sites start identical and stay identical.
+  With per-site self directions the resid sites are too uniformly-useful to differentiate, so L0 can't pick a
+  sparse subset. ⇒ pivot to a more granular target (attention heads), which sparsified to 23/1024 in the earlier
+  induce experiments.
+
 ### EXP-B1 — learned-scale sparse_ablate baseline (init −0.79, l0 0.04)
 - args: `method=sparse_ablate +task=jailbreak/arditi_bypass num_epochs=40 device=cuda`
   (defaults: learn_scale=true, normalize_ablation=true, init_log_alpha=−0.79, l0_lambda=0.04,
@@ -69,12 +80,11 @@ with "Could not override 'task'. No match in the defaults list."
 - B7 (data): vary the harmful extraction mix (advbench-only vs +malicious_instruct +tdc2023).
 
 ## NEXT
-→ **B2 RUNNING**: learned-scale + **START-OPEN init**.
-`method=sparse_ablate +task=jailbreak/arditi_bypass gate_config.init_log_alpha=2 num_epochs=40 device=cuda`
-(learn_scale=true, normalize_ablation=true, l0_lambda=0.04, targets=resid_pre/mid/post).
-Hypothesis: from a start-open init the bypass works immediately, and unlike the no-scale runs (which
-stayed 96/96 because L0 had only one lever), the **learned scale** should let CE hold the
-bypass-necessary sites strong while L0 prunes the redundant ones → a *sparse* jailbreak. Watch: does
-#active drop below 96 while ASR stays high and kl/perplexity stay clean?
-When `~/ar.done`: record B2, then if it prunes → sweep l0_lambda for the ASR-vs-sparsity frontier;
-if it stays dense (96/96) → lower init / raise l0 with the scale; if it collapses → raise init further.
+→ **B3 RUNNING**: attention-head targets (more granular ⇒ should differentiate where resid couldn't).
+`method=sparse_ablate +task=jailbreak/arditi_bypass targets=[attention] gate_config.init_log_alpha=2 num_epochs=40 device=cuda`
+(learn_scale=true, l0_lambda=0.04, start-open). Hypothesis: 1024 attention heads break the resid symmetry —
+some heads carry refusal far more than others, so L0 can prune to a sparse head subset (induce found 23/1024)
+while ASR stays high. Watch: #active ≪ 1024 with ASR up? Branches: if it prunes AND jailbreaks → l0/ASR
+frontier; if it prunes but doesn't bypass → attention-output ablation is the wrong space (refusal lives in
+resid) → try the pinned Arditi resid direction (`direction_source='[resid_pre, 17]'`) so resid sites
+differentiate by that one direction's presence; if it stays dense → a non-CE objective (B5).
