@@ -38,6 +38,16 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B36 — ⭐ shared_scale + FULL-strength ablation (no normalize) + clip 10, resid_pre, L0 — GATES DIFFERENTIATE
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
+- result: **32/32 active but gate STD 0.197** (range 0.275–0.938; mid-late layers ~0.7–0.94, early at 0.275 floor) · refusal 0.00 · ASR 0.81 · kl 0.38 · ppl 4.67.
+- verdict: **BREAKTHROUGH — gates BREAK SYMMETRY (std 0.197 vs B32/B35 ≈0.000), strong coherent jailbreak.** Needed
+  ALL THREE at once: full-strength ablation (gates affect loss; B32/B35 failed via normalize→weak), shared scale
+  (utility can't escape to a per-site scale; B32 failed), relaxed clip=10 (breaks the clip=1.0 lockstep the EXP-000
+  findings blamed). Gates organize by LAYER (mid-late high, early low) — so smooth L0 CAN carry a per-site signal.
+  NOT sparse yet (low gates floor at 0.275 > 0.01 thr, all 32 active). ⇒ push l0 higher to drop the low gates below
+  threshold → sparse.
+
 ### EXP-B35 — shared_scale + normalize_ablation + L0 ablate/resid — STILL uniform, but CONFOUNDED by weak ablation
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true +normalize_ablation=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
 - result: **32/32 active, gate STD 0.0002** (all 0.275; 1 shared scale confirmed) · refusal 0.79 · ASR 0.17 · kl 0.020 · ppl 4.76.
@@ -401,12 +411,12 @@ with "Could not override 'task'. No match in the defaults list."
   0.01; that's a wrong-space/optimization issue, not distributed refusal.)
 
 ## NEXT
-→ **B36 RUNNING**: clean scale-mode test — shared_scale + FULL-strength ablation (drop normalize) over resid + L0.
-`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`
-(= B35 minus normalize_ablation.) B32 (per-site scale) + B35 (shared scale) BOTH gave uniform gates (std≈0), but
-both used normalize_ablation → weak ablation (ASR 0.17–0.18) → gates barely affect the loss → no CE signal to
-differentiate → L0 uniformizes. So the common confound is normalize, not the scale mode. Full-strength ablation
-makes the gates MATTER (jailbreaks), and with a shared scale the only per-site magnitude knob IS the gate → CE
-should drive L17's gate up vs low-benefit layers → DIFFERENTIATE → L0 prunes → sparse. If gate STD>0 + sparse +
-jailbreaks → LEARNED sparse via L0. If STILL uniform (std≈0) even strong → the gate↔scale degeneracy / smooth-L0
-lockstep is fundamental ⇒ top-k. Watch gate STD + ASR + count. Best hand-placed: B31 1-site 0.75 · B34 7-site 0.80.
+→ **B37 RUNNING**: ⭐ convert B36's gate differentiation → actual SPARSITY. B36 setup + higher l0 (1.0→3.0).
+`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=3.0 +grad_clip=10 num_epochs=40 device=cuda`
+B36 BROKE the gate symmetry (std 0.197, ASR 0.81) but all 32 still active — the low-utility early-layer gates sit at
+the 0.275 L0-floor, above the 0.01 threshold. Now that the gates carry a per-layer utility signal, MORE L0 pressure
+should push the low (early) gates below threshold while the high-CE-pull (mid-late) gates resist → SPARSE learned
+selection. Hypothesis: prunes to ~mid-late resid layers (≪32) with ASR ~0.8 retained = THE LEARNED SPARSE JAILBREAK
+(the task goal, no top-k). If over-prunes (ASR↓) → back off l0; if still 32/32 → l0 higher / lower init. Watch gate
+COUNT + std + ASR. **Smooth-L0 sparsity is alive** (B36) — this is the live path. Manual proof: B31 1-site 0.75 · B34
+7-site 0.80.
