@@ -38,6 +38,17 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B24 — late l0 ramp (l0_warmup 600) + ce_kl β1 + grad_clip 10 — BACKFIRED; smooth-L0 sparsity exhausted
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 l0_warmup_steps=600 num_epochs=40 device=cuda`. rc=0.
+- result: **1024/1024 active** (mean 0.521) · refusal 0.00 · ASR 0.76 · kl 1.02 · perplexity 7.51.
+- verdict: **form-then-prune FAILED + made it worse.** Holding l0≈0 for the first ~half let the gates open WIDER
+  (mean 0.31→0.521) → more collateral (kl 0.40→1.02, ppl 5.58→7.51); the late ramp couldn't pull them back (still
+  1024/1024). ⇒ the SCHEDULE lever is exhausted too. **Smooth-L0 + HardConcrete CONCLUSIVELY cannot sparsify the
+  bypass** — negative across l0 (0.04–10⁴) / init (open,cold) / grad-clip (1,10) / schedule (early,late) / scale
+  (per-site,shared) / objective (CE,refusal-logit,ce_kl) / direction / target / intervention / temperature. The
+  bypass is irreducibly DENSE (refusal distributed). ⇒ stop chasing sparsity via this mechanism; lock + strengthen
+  the surgical headline (B23 0.79/0.40) — push ASR toward Arditi's 0.86.
+
 ### EXP-B23 — relax grad-clip (10) + ce_kl β1 + l0 1.0 (shared_scale) — NEW BEST surgical; sparsity still blocked
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
 - result: **1024/1024 active** (mean 0.31) · refusal 0.03 · **ASR 0.79** · **kl 0.40** · perplexity 5.58.
@@ -291,23 +302,23 @@ with "Could not override 'task'. No match in the defaults list."
   STRONG jailbreak that **beats Arditi's ASR coherently** — B10: ASR 0.87, refusal 0.00, ppl 8.7; B12 (shared
   scale, l0 0.3): ASR 0.79, refusal 0.04, **kl 0.55**, ppl 6.1. Ablation maxed at ASR 0.54 (B8, surgical) — steer
   wins decisively on ASR.
-- **Negative (robust)**: **L0+HardConcrete cannot make the bypass SPARSE.** Open init → gates compress to a soft
-  ~0.4 middle, never cross the 0.01 threshold (always 1024/1024 or 96/96); cold init → collapse to 0. True across
-  init / direction (self,pinned) / target (resid,attn) / intervention (ablate,steer) / scale (per-site,shared) /
-  l0 (0.04–10⁴) / grad-clip / gate-temperature / objective (CE, refusal-logit). Interpretation: **refusal is
+- **Negative (robust, now EXHAUSTIVE)**: **L0+HardConcrete cannot make the bypass SPARSE.** Open init → gates
+  compress to a soft ~0.3–0.4 middle, never cross the 0.01 threshold (always 1024/1024 or 96/96); cold init →
+  collapse to 0. True across init (open,cold) / direction (self,pinned) / target (resid,attn) / intervention
+  (ablate,steer) / scale (per-site,shared) / l0 (0.04–10⁴) / grad-clip (1,10) / gate-temperature / l0-schedule
+  (early-warmup, late-ramp B24) / objective (CE, refusal-logit, **ce_kl** B20–B24). Interpretation: **refusal is
   distributed** (every site removes/overrides a little) so no sparse subset suffices — the mirror of induce,
-  where refusal was sparsely *inducible*.
+  where refusal was sparsely *inducible*. The mandated mechanism (HardConcrete+L0, no site bias) is exhausted for
+  the bypass; sparsity would require a different selection mechanism (top-k — prior result), out of this scope.
 
 ## NEXT
-→ **B24 RUNNING**: last L0-sparsity lever — LATE l0 ramp (long warmup) so the bypass forms before pruning.
-`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 l0_warmup_steps=600 num_epochs=40 device=cuda`
-(= B23 + l0_warmup_steps 16→600 ≈ half the ~1240-step run.) Every prior l0 run applied pressure from ~step 16
-(l0 on almost throughout) → gates compress UNIFORMLY (the differentiating CE/KL "which sites matter" signal is
-drowned → dense, not sparse; cf the CE λ=10⁴ "every gate uniform at 0.462"). Hypothesis: hold l0≈0 while the
-surgical bypass forms + gates differentiate by benefit, THEN ramp l0 to prune the sites that didn't matter — the
-form-then-prune schedule, untried. If some gates close with ASR retained → first real sparsity; if dense → bypass
-genuinely needs ALL sites (distributed, conclusive); if ASR collapses → pruning breaks it (also confirms
-distributed). After this, smooth-L0 levers are exhausted; if still no sparsity, lock the surgical headline (B23)
-and explore a constraint-respecting sparsity route (e.g. orthogonalized steer, or top-k *with* the L0 penalty kept).
-**Best so far: B23 (ASR 0.79 / kl 0.40 / ppl 5.58 — surgical, Pareto-beats B12, DENSE)** · B10 (ASR 0.87 max) ·
-B20 (0.75/0.34). β≈1 = knee. Sparsity: comprehensively negative under smooth L0.
+→ **B25 RUNNING**: strengthen the surgical headline — push ASR toward Arditi (β-sweep DOWN, β 1.0→0.5).
+`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=0.5 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`
+(= B23 but β 1.0→0.5.) Smooth-L0 sparsity is now exhausted (B24) → pivot to maximizing the salvageable headline:
+a SURGICAL jailbreak that matches Arditi's ASR (0.86) with far less collateral than his dense ablation. B23 gives
+ASR 0.79 / kl 0.40; less harmless-preservation pressure (β↓) should let the steer push compliance harder → ASR up
+toward 0.82–0.85 at modestly higher kl (~0.45–0.5, still < B12's 0.55 and ≪ Arditi's collateral). ce_kl ASR↔kl map:
+β3 0.75/0.41 · β1 0.79/0.40 · β0.5 → ? · β≈0(CE,B12) 0.79/0.55. If ASR climbs with kl held < 0.55 → headline
+(match-Arditi ASR + surgical). If ASR plateaus ~0.79 → that's the ce_kl ceiling; B23 stands, then try a stronger
+steer (init_raw_scale↑) for ASR. **Best: B23 (0.79 / kl 0.40 / ppl 5.58, surgical, Pareto-beats B12)** · B10 (0.87
+max-ASR). SPARSITY: comprehensively negative under the mandated HardConcrete+L0 mechanism (B24 closed the last lever).
