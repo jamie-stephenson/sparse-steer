@@ -38,6 +38,14 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B33 — #sites→ASR curve: L17 direction ablated at resid_pre ALL 32 layers (dense, manual)
+- args: `method=dense +task=jailbreak/arditi_bypass intervention=ablate +direction_source=[resid_pre,17] targets=[resid_pre] device=cuda`. rc=0.
+- result: **32 sites (resid_pre all layers)** · refusal 0.02 · ASR 0.82 · kl 0.075 · ppl 4.80.
+- verdict: **confirms GRADED benefit.** Curve: 1 site (B31) 0.75 → 32 resid_pre sites 0.82 → Arditi 96 sites 0.85.
+  More layers → more ASR (every resid layer carries some refusal), all surgical (kl 0.075) + coherent (ppl 4.80).
+  This is why smooth L0 keeps all gates (each adds ASR; CE wants the full 0.85) → top-k needed to force sparsity.
+  Curve is SHALLOW — 1 site already gets 0.75 of 0.85, so B31 (1-site) is near the sparse sweet spot.
+
 ### EXP-B32 — LEARNED L0 gates over resid + normalize_ablation (ablate, l0 1.0, gc 10) — STILL dense (answers "why")
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +normalize_ablation=true learn_scale=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
 - result: **32/32 active** (mean 0.275, uniform) · refusal 0.78 · ASR 0.18 · kl 0.012 · ppl 4.74.
@@ -377,12 +385,11 @@ with "Could not override 'task'. No match in the defaults list."
   0.01; that's a wrong-space/optimization issue, not distributed refusal.)
 
 ## NEXT
-→ **B33 RUNNING**: confirm the graded-benefit answer — ablate the L17 direction at resid_pre ALL layers (32 sites).
-`method=dense +task=jailbreak/arditi_bypass intervention=ablate +direction_source=[resid_pre,17] targets=[resid_pre] device=cuda`
-(= B31 but steering_layer_ids=null → all 32 resid_pre layers, same L17 direction, vs B31's 1 site.) B32 showed L0
-won't localize (dense-uniform) because benefit is GRADED across layers. This maps the #sites→ASR curve directly:
-B31 1-site=0.75 → B33 32-site resid_pre=? → Arditi 96-site (resid_pre+mid+post) ≈0.85. If ASR climbs with #sites →
-confirms graded benefit (every layer carries some refusal) ⇒ why smooth L0 keeps all gates + why top-k is needed to
-force sparsity. **The LEARNED sparse route is top-k (forces the tradeoff L0 won't make) — awaiting user go-ahead.**
-Best real result: B31 (1 resid site, ASR 0.75 / kl 0.018 / ppl=baseline — sparse+surgical+coherent, hand-placed).
-L0-over-resid (B32): dense-uniform, confirmed. Honest: no LEARNED sparse result yet; the manual 1-site proof stands.
+→ **B34 RUNNING**: knee of the sparse frontier — L17 direction at resid_pre layers 14–20 (7 mid sites).
+`method=dense +task=jailbreak/arditi_bypass intervention=ablate +direction_source=[resid_pre,17] targets=[resid_pre] steering_layer_ids=[14,15,16,17,18,19,20] device=cuda`
+(manual probe: how few sites for ~Arditi ASR? curve so far: 1-site 0.75 → 32-site 0.82 → 96-site 0.85.) Expect
+~0.78–0.82 at 7 mid sites. Pins where the sparse sweet spot is. This completes the MANUAL sparsity story (proves how
+sparse a hand-placed ablation can be: ~1–7 resid sites, surgical, coherent). The LEARNED sparse result needs top-k
+(forces the use-fewer-sites tradeoff smooth L0 won't make — B32 confirmed L0 stays dense-uniform; B33 explains why
+via graded benefit). **top-k strongly recommended as the next build — awaiting user go-ahead.** Best real result:
+B31 (1 resid site, ASR 0.75 / kl 0.018 / ppl=baseline) — sparse + surgical + coherent, hand-placed.
