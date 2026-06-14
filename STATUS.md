@@ -38,6 +38,15 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B9 — sparse-STEER toward compliance, COLD init (method=sparse, steer, attention, negate_direction, init −2)
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true gate_config.init_log_alpha=-2 num_epochs=40 device=cuda`. rc=0.
+- result: **0/1024 active** (mean 0.0) · refusal 0.92 · ASR 0.06 · kl 0.0 · perplexity 4.727.
+- verdict: **FAIL — collapsed** (= unsteered). The cold init shut the steer gates to all-off, same as the
+  ablation cold runs: the recruitment gradient from the compliance-steer couldn't overcome L0 from closed.
+  (Asymmetry: induce recruited from cold for steer-toward-REFUSAL on harmless; bypass steer-toward-COMPLIANCE on
+  harmful collapsed — maybe the negated direction steers less effectively, or harmful-refusal is harder to
+  overturn additively.) ⇒ try start-open init so the compliance steer is active first.
+
 ### EXP-B8 — strong L0 with learned scale (l0_lambda 1.0; pinned, start-open)
 - args: `method=sparse_ablate +task=jailbreak/arditi_bypass direction_source=[resid_pre,17] l0_lambda=1.0 gate_config.init_log_alpha=2 num_epochs=40 device=cuda`. rc=0.
 - result: **96/96** (mean 0.372) · refusal 0.34 · ASR 0.54 · kl 0.036 · perplexity 4.717 — best COHERENT bypass so far.
@@ -142,12 +151,11 @@ with "Could not override 'task'. No match in the defaults list."
 - B7 (data): vary the harmful extraction mix (advbench-only vs +malicious_instruct +tdc2023).
 
 ## NEXT
-→ **B9 RUNNING**: sparse-STEER toward compliance — the pivot off ablation (most promising idea).
-`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true gate_config.init_log_alpha=-2 num_epochs=40 device=cuda`
-(method=sparse: additive steer at attention heads, learn_scale=true, l0=0.04, init_raw_scale=2.79; cold init −2;
-+negate_direction flips the diff-in-means so the steer pushes TOWARD compliance, not refusal). Implemented
-`negate_direction` in `steering.py` (negates the sourced vectors) + the cache key. Hypothesis: ablation can't
-be sparse because the refusal direction re-enters every layer — but ADDITIVE steer at a few heads suffices
-(induce proved 23/1024). Steering toward compliance from a cold init should recruit a SPARSE head set. Watch:
-sparse #active (≪ 1024) with ASR up + coherent ppl/kl = the breakthrough. Branches: collapse (cold) → start-open
-init; dense → same symmetry → a contrastive/margin objective for steer; works → tune init/l0/targets frontier.
+→ **B10 RUNNING**: sparse-STEER toward compliance, START-OPEN init.
+`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true gate_config.init_log_alpha=2 num_epochs=40 device=cuda`
+(B9 but init −2→+2). From start-open the compliance-steer is active from step 0, so the bypass — if additive
+steer toward compliance works at all — happens immediately, and L0 can then prune the 1024 heads to a sparse
+subset (additive steer needs only a few, unlike ablation). Two things to learn: (a) does steer-toward-compliance
+even bypass (ASR up)? (b) if so, does it prune sparse where ablation never did? Branches: bypass+sparse →
+BREAKTHROUGH, tune frontier; bypass+dense → l0 sweep; no bypass → the compliance direction is ineffective →
+verify negate / try resid targets / a margin (compliant−refusing) objective for steer.
