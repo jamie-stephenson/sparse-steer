@@ -435,13 +435,16 @@ with "Could not override 'task'. No match in the defaults list."
   old gate-dynamics observations still hold: over attention heads, open init → ~0.3 soft middle, never crossing
   0.01; that's a wrong-space/optimization issue, not distributed refusal.)
 
-## NEXT
-→ **B40 RUNNING**: last HardConcrete lever — LOW gate temperature (0.1) to bimodalize B36's differentiated gates.
-`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=2 gate_config.temperature=0.1 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`
-(= B36 + gate temp 0.33→0.1.) Gates are stuck at both extremes (B37 floor from open, B38/B39 collapse from cold).
-LOWER temperature sharpens the HardConcrete → pushes log_alpha toward the extremes → the useless (0.275-floor) gates
-may finally drop below the 0.01 threshold while useful → ~1 → HARD SPARSE, jailbreaking via the useful gates.
-Hypothesis: sparse subset + ASR ~0.8 = learned sparse via smooth-L0. If still floored/collapses → smooth-L0
-hard-pruning is EXHAUSTED (open=floor, cold=collapse, low-temp=no help) ⇒ top-k is the justified clean fix.
-Watch gate COUNT + std + ASR. **Best learned result: B36 soft-sparse (ASR 0.81, gates 0.275–0.94 by layer, dense).**
-Manual proof sparsity is real: B31 1-site 0.75 / B34 7-site 0.80.
+## NEXT — ⚠ GRAD-CLIP CONFOUND: re-run key sparsity experiments at higher clip (user-directed)
+**Realization:** the early "L0 can't sparsify / gates uniform" results (EXP-000, the 21-run grid, B1–~B22) were all
+at the DEFAULT `grad_clip=1.0`. Gates only started DIFFERENTIATING once clip→10 (B36). So that clip was a major
+confound and a chunk of the sparsity-negative evidence is contaminated. The floored gates (B37) may be a CLIP
+artifact: at the 0.275 floor (log_alpha≈−0.79) the expected-L0 gradient is MAXIMAL (center of the L0 sigmoid) → the
+update step is largest there → most likely clipped → stall. Looser clip should let it through → prune. ⇒ sweep clip
+higher and redo the sparsity runs at the looser clip. (B40 temp-0.1 ABORTED to pivot here.)
+→ **B41 RUNNING**: B36 setup at `grad_clip=100` (vs 10) — does looser clip break the 0.275 floor → hard-prune?
+`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=100 num_epochs=40 device=cuda`
+If gates now drop below the 0.01 threshold (count ≪32) with ASR retained → LEARNED SPARSE via L0 (clip was the
+blocker). Then re-run the l0 / init / target sweeps at the winning clip. If still floored → floor is HardConcrete-
+intrinsic, not clip ⇒ top-k. Watch gate COUNT + std + ASR. Best learned: B36 (ASR 0.81, soft-sparse). Manual: B31
+1-site 0.75 / B34 7-site 0.80.
