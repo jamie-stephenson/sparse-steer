@@ -38,6 +38,15 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B43 — definitive clip test: FROZEN scale (1.0) + clip 100 — no divergence, gates UNIFORM at floor (no prune)
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true freeze_raw_scale=true init_raw_scale=0.5413 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=100 num_epochs=40 device=cuda`. rc=0.
+- result: **32/32 active, gate STD 0.000** (all 0.275, min 0.2748) · refusal 0.12 · ASR 0.72 · kl 0.053 · ppl 4.78.
+- verdict: **floor is HardConcrete-INTRINSIC, confirmed.** Freezing the scale killed the B41 divergence (stable, no
+  NaN) but the gates went UNIFORM at the 0.275 floor — no prune. The floor now survives clip {10,20,100} × scale
+  {learnable, frozen}. ⇒ smooth-L0 CANNOT hard-prune the bypass gates (vanishing L0 gradient near closed), not a
+  clip/scale artifact. Side-finding: frozen scale → uniform vs B36 learnable → differentiated (the learnable scale
+  was needed for differentiation). ⇒ top-k is the justified fix for a learned sparse point.
+
 ### EXP-B42 — clip sweep: B36 + grad_clip 20 — STABLE but floor UNCHANGED (clip doesn't break the floor)
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=20 num_epochs=40 device=cuda`. rc=0.
 - result: **32/32 active, gate STD 0.202** (range 0.275–0.948, min 0.275) · refusal 0.00 · ASR 0.80 · kl 0.38 · ppl 4.72.
@@ -451,15 +460,16 @@ with "Could not override 'task'. No match in the defaults list."
   old gate-dynamics observations still hold: over attention heads, open init → ~0.3 soft middle, never crossing
   0.01; that's a wrong-space/optimization issue, not distributed refusal.)
 
-## NEXT — clip-sweep result: floor is clip-INDEPENDENT (10≈20 floor; 100 diverges). Definitive test next.
-**Clip sweep done:** clip 1 → uniform/lockstep (early confound, real); clip 10 (B36) → differentiate, floor 0.275;
-clip 20 (B42) → differentiate, floor 0.275 (SAME — clip doesn't lower the floor); clip 100 (B41) → diverge
-(scale→NaN). So higher clip fixed the EARLY uniformity but NOT hard-pruning; the 0.275 floor is clip-independent.
-B41's divergence was the *learnable scale* blowing up — which masks whether clip-on-gates-alone could prune.
-→ **B43 RUNNING**: FREEZE the scale + clip 100 — isolate the clip's effect on the gates (no scale divergence).
-`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true freeze_raw_scale=true init_raw_scale=0.5413 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=100 num_epochs=40 device=cuda`
-(scale frozen at softplus(0.5413)=1.0 → gate = ablation fraction; init gate 0.88 → working jailbreak; L0 prunes from
-there; clip 100 acts only on gates, can't diverge.) If useless gates now drop <0.01 (count<32) → the floor WAS
-clip-limited (scale-divergence was the only thing stopping it) → LEARNED SPARSE via L0. If they STILL floor ~0.275
-→ floor is HardConcrete-INTRINSIC (vanishing L0 gradient near closed), conclusive ⇒ top-k. Watch gate COUNT + min +
-ASR. Best learned: B36 (ASR 0.81, soft-sparse, dense). Manual frontier: B31 1-site 0.75 / B34 7-site 0.80.
+## NEXT — smooth-L0 floor is HardConcrete-INTRINSIC (clip×scale exhausted). One last probe, then top-k.
+**Clip sweep (done):** clip 1 → uniform/lockstep; clip 10/20 (learnable scale) → differentiate but floor 0.275;
+clip 100 (learnable) → diverge; clip 100 (FROZEN scale, B43) → uniform floor 0.275, no prune. So the 0.275 floor
+survives every clip × scale combo → INTRINSIC (vanishing L0 gradient near closed), not the clip. The clip only ever
+explained the EARLY uniformity (clip 1).
+→ **B44 RUNNING**: resolve B43's puzzle + last smooth-L0 shot — frozen scale at HIGHER value (2.84) + clip 100.
+`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true freeze_raw_scale=true init_raw_scale=2.79 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=100 num_epochs=40 device=cuda`
+(= B43 but frozen scale 1.0→2.84 = B36's learnable-converged value.) B43 (frozen 1.0)→uniform vs B36 (learnable
+~2.8)→differentiated: does the frozen scale VALUE control differentiation? Frozen-high-scale (no divergence) + clip
+100 = last chance for gates to differentiate AND prune. If it floors/uniforms (expected) → smooth-L0 hard-pruning
+CONCLUSIVELY exhausted ⇒ **TOP-K is the next build** (hard k-budget selection, keep L0 as 2nd term; recommend
+greenlight — it's the established fix + the only path to a LEARNED interior point on the ASR-vs-sparsity frontier).
+Best learned: B36 (0.81, dense/soft-sparse). Manual frontier: B31 1-site 0.75 / B34 7-site 0.80.
