@@ -127,8 +127,12 @@ class JailbreakTask(TaskSpec):
             batch["decision_pos"] = (batch["labels"] != -100).int().argmax(dim=1) - 1
         elif objective == "ce_kl":
             # Dual objective: CE-toward-affirmative on harmful rows + KL(steered‖base) on harmless
-            # rows at the decision token (mirrors the kl_harmless eval). Bake what .loss needs (it
-            # gets no config): which rows are harmless, the decision position, and the KL weight β.
+            # rows at the decision token (mirrors the kl_harmless eval). Drop the last-token
+            # steer_mask so the SINGLE (grad) main forward steers the FULL prompt — exactly as eval
+            # steers — and serves both the CE and the KL term; one grad forward keeps activation
+            # memory at the single-forward baseline (a second grad forward OOMs the card). Bake what
+            # .loss needs (it gets no config): harmless rows, the decision position, the KL weight β.
+            batch.pop("steer_mask", None)
             batch["harmless_mask"] = torch.tensor(
                 [r.get("category") == "harmless" for r in rows], device=device
             )
@@ -171,16 +175,10 @@ class JailbreakTask(TaskSpec):
                 ce = logits.new_zeros(())
             kl = logits.new_zeros(())
             if hm.any():
-                # Measure the steered harmless decision distribution under FULL-prompt steering
-                # (all positions) — exactly as the kl_harmless eval does — NOT the last-token
-                # steering used for the CE forward (the passed `logits`). Otherwise only last-token
-                # collateral is penalized while eval/deployment steer everywhere, leaving most
-                # harmless collateral unpenalized. After the train loop's steer_ctx exits, the
-                # hooks' pos_mask is None, so this fresh forward steers every position (with grad).
-                steered_full = model(
-                    input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]
-                ).logits
-                steered_lp = F.log_softmax(steered_full[idx, dp].float(), dim=-1)[hm]
+                # `logits` is already FULL-prompt-steered (ce_kl drops the last-token steer_mask in
+                # collate), matching the kl_harmless eval — so reuse it (no second grad forward,
+                # which would OOM). Base reference = the same input with steering disabled (no_grad).
+                steered_lp = F.log_softmax(logits[idx, dp].float(), dim=-1)[hm]
                 with torch.no_grad(), model.steering_disabled():
                     base_logits = model(
                         input_ids=batch["input_ids"],

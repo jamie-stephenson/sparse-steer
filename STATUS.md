@@ -266,8 +266,9 @@ with "Could not override 'task'. No match in the defaults list."
 (= B12's exact frontier config, only CE→ce_kl, so kl difference is purely the objective; β=1.0.) Fixes B19's two
 errors: shared_scale (gentle regime, matches B12's 0.55 kl point) + the KL term now measures the steered harmless
 dist under FULL-prompt steering (matches the kl_harmless eval), so it actually penalizes the collateral eval sees.
-The dual loss does 3 forwards/step (CE last-token-steered + KL full-steered + base under steering_disabled), so
-training is ~1.5× slower (~20 min). Hypothesis: penalizing harmless collateral directly BREAKS the magnitude↔
+(First relaunch OOM'd — a 2nd grad forward doubled activation memory; fixed by dropping the last-token steer_mask
+so the SINGLE grad forward steers the full prompt and feeds both CE and KL → 1 grad + 1 no_grad base, same memory
+as B19.) Hypothesis: penalizing harmless collateral directly BREAKS the magnitude↔
 collateral frontier → kl < 0.55 at ASR ~0.79 (vs B12). Branches: kl drops → β-sweep to push toward kl→0 (the
 headline surgical jailbreak), and check if L0+KL also sparsified; kl flat → the unconditional steer can't be made
 selective even with a direct penalty (refusal & harmless share the steered subspace) — a deeper finding, pivot to
