@@ -38,6 +38,16 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B44 — frozen scale 2.84 + clip 100 — differentiates (like B36) but STILL floors → smooth-L0 exhausted
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true freeze_raw_scale=true init_raw_scale=2.79 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=100 num_epochs=40 device=cuda`. rc=0.
+- result: **32/32 active, gate STD 0.204** (range 0.275–0.95, min 0.275) · refusal 0.01 · ASR 0.80 · kl 1.26 · ppl 4.66.
+- verdict: **resolves the B43 puzzle + closes smooth-L0.** Frozen scale 2.84 (vs B43's 1.0) → gates DIFFERENTIATE
+  (std 0.204, like B36) → so the SCALE VALUE (effective strength) controls differentiation, not freezing. But it
+  STILL floors at 0.275 (32/32). The floor now survives clip {10,20,100} × scale {learnable, frozen-low→uniform,
+  frozen-high→differentiated}. ⇒ **smooth-L0 hard-pruning is CONCLUSIVELY exhausted** — the 0.275 floor is intrinsic
+  to the HardConcrete relaxation (vanishing L0 grad near closed). ⇒ implement TOP-K (hard k-budget, keep L0 as 2nd
+  term) — the only path to a learned interior point on the ASR↔sparsity frontier.
+
 ### EXP-B43 — definitive clip test: FROZEN scale (1.0) + clip 100 — no divergence, gates UNIFORM at floor (no prune)
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true freeze_raw_scale=true init_raw_scale=0.5413 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=100 num_epochs=40 device=cuda`. rc=0.
 - result: **32/32 active, gate STD 0.000** (all 0.275, min 0.2748) · refusal 0.12 · ASR 0.72 · kl 0.053 · ppl 4.78.
@@ -460,16 +470,15 @@ with "Could not override 'task'. No match in the defaults list."
   old gate-dynamics observations still hold: over attention heads, open init → ~0.3 soft middle, never crossing
   0.01; that's a wrong-space/optimization issue, not distributed refusal.)
 
-## NEXT — smooth-L0 floor is HardConcrete-INTRINSIC (clip×scale exhausted). One last probe, then top-k.
-**Clip sweep (done):** clip 1 → uniform/lockstep; clip 10/20 (learnable scale) → differentiate but floor 0.275;
-clip 100 (learnable) → diverge; clip 100 (FROZEN scale, B43) → uniform floor 0.275, no prune. So the 0.275 floor
-survives every clip × scale combo → INTRINSIC (vanishing L0 gradient near closed), not the clip. The clip only ever
-explained the EARLY uniformity (clip 1).
-→ **B44 RUNNING**: resolve B43's puzzle + last smooth-L0 shot — frozen scale at HIGHER value (2.84) + clip 100.
-`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true freeze_raw_scale=true init_raw_scale=2.79 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=100 num_epochs=40 device=cuda`
-(= B43 but frozen scale 1.0→2.84 = B36's learnable-converged value.) B43 (frozen 1.0)→uniform vs B36 (learnable
-~2.8)→differentiated: does the frozen scale VALUE control differentiation? Frozen-high-scale (no divergence) + clip
-100 = last chance for gates to differentiate AND prune. If it floors/uniforms (expected) → smooth-L0 hard-pruning
-CONCLUSIVELY exhausted ⇒ **TOP-K is the next build** (hard k-budget selection, keep L0 as 2nd term; recommend
-greenlight — it's the established fix + the only path to a LEARNED interior point on the ASR-vs-sparsity frontier).
-Best learned: B36 (0.81, dense/soft-sparse). Manual frontier: B31 1-site 0.75 / B34 7-site 0.80.
+## NEXT — smooth-L0 floor is HardConcrete-INTRINSIC (clip×scale exhausted). Try thresholding B36's learned ranking.
+Smooth-L0 won't drive gates below the 0.275 floor (B36–B44: clip {10,20,100} × scale {learnable, frozen-low/high}
+all floor). BUT B36/B44's gates DID learn a per-layer RANKING (0.275 floor → 0.94). The 32/32 "active" is just the
+0.01 eval-threshold counting the floor gates. New idea (in-mechanism, no top-k): raise the eval threshold to keep
+only the clearly-on gates — if the jailbreak survives on those alone, B36 is a LEARNED sparse jailbreak.
+→ **B45 RUNNING**: post-hoc sparsity — B36 + `gate_config.eval_threshold` 0.01→0.7.
+`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=2 gate_config.eval_threshold=0.7 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`
+(= B36 but eval_threshold 0.7 → keeps only gates >0.7, ~8 mid-late layers; floor gates zeroed at eval.) If ASR holds
+~0.8 with ~8 active → the floor gates are INERT and this is a LEARNED ~8-site sparse jailbreak via HardConcrete+L0
+(no top-k!). If ASR drops → floor gates matter → train-WITH-budget (top-k) needed. Caveat: post-hoc cut (trained
+with all gates) — tests whether the low gates are dispensable. Watch ACTIVE count + ASR. Next if this fails: top-k.
+Best learned: B36 (0.81, dense). Manual frontier: B31 1-site 0.75 / B34 7-site 0.80.
