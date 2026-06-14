@@ -38,6 +38,15 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B16 — polish: gentler FROZEN steer scale (init_raw_scale 1.0 frozen; steer, shared, l0 0.3)
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=0.3 init_raw_scale=1.0 freeze_raw_scale=true num_epochs=40 device=cuda`. rc=0.
+- result: **1024/1024 active** (mean 0.37) · refusal 0.33 · ASR 0.51 · **kl 0.21** · perplexity 5.31.
+- verdict: **cleaner but weaker — maps the ASR↔collateral frontier.** Freezing the steer scale gentle (1.0) cut
+  kl 0.55→0.21 and ppl 6.06→5.31 (much more surgical/coherent) but dropped ASR 0.79→0.51. So the steer SCALE is a
+  clean ASR-vs-collateral knob: B10 (~2.85, l0 0.04) 0.87/2.96 → B12 (~2.85, l0 0.3) 0.79/0.55 → B16 (1.0)
+  0.51/0.21. The knee (best ASR per kl) is between scale 1.0 and 2.85. ⇒ find it (frozen scale ~2.0) for the
+  cleanest strong headline point. (Still dense — sparsity remains conclusively ruled out.)
+
 ### EXP-B15 — lower gate temperature (temp 0.1; steer, open, per-site scale, l0 0.3)
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true gate_config.init_log_alpha=2 gate_config.temperature=0.1 l0_lambda=0.3 num_epochs=40 device=cuda`. rc=0.
 - result: **1024/1024 active** (mean 0.417) · refusal 0.02 · ASR 0.73 · kl 1.26 · perplexity 6.94.
@@ -223,10 +232,10 @@ with "Could not override 'task'. No match in the defaults list."
   where refusal was sparsely *inducible*.
 
 ## NEXT
-→ **B16 RUNNING**: polish the deliverable — gentler FROZEN steer scale for lower collateral.
-`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=0.3 init_raw_scale=1.0 freeze_raw_scale=true num_epochs=40 device=cuda`
-(B12 but steer scale 2.79→1.0 and FROZEN so it can't grow back). Hypothesis: the kl collateral is the
-unconditional steer's magnitude; a smaller fixed scale → less harmless push → lower kl while the gates keep ASR
-up → the cleanest strong DENSE jailbreak (high ASR + kl→0 + coherent) as the headline. Still probing sparsity per
-persistence — queued NEW angles: contrastive (compliant−refusing margin) objective; resid-target steer; data-mix
-variation; l0 annealing. Best results to date: **B10 (ASR 0.87) / B12 (ASR 0.79 @ kl 0.55)**.
+→ **B17 RUNNING**: frontier knee — frozen steer scale 2.0 (cleanest strong headline point).
+`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=0.3 init_raw_scale=2.0 freeze_raw_scale=true num_epochs=40 device=cuda`
+(between B16's gentle 1.0 → ASR 0.51/kl 0.21 and B12's ~2.85 → ASR 0.79/kl 0.55). Hypothesis: scale 2.0 lands
+near the knee — ASR ~0.7+ at kl ~0.3, the cleanest strong DENSE jailbreak for the headline. Watch the ASR/kl
+balance. After this the deliverable (best balanced point on the steer ASR↔collateral frontier, beating Arditi's
+ASR coherently, dense) is locked. Then keep probing fresh sparsity angles per persistence (contrastive
+compliant−refusing objective; resid-target steer; data-mix). Best to date: B10 (ASR 0.87) / B12 (0.79 @ kl 0.55).
