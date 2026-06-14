@@ -38,6 +38,15 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B8 — strong L0 with learned scale (l0_lambda 1.0; pinned, start-open)
+- args: `method=sparse_ablate +task=jailbreak/arditi_bypass direction_source=[resid_pre,17] l0_lambda=1.0 gate_config.init_log_alpha=2 num_epochs=40 device=cuda`. rc=0.
+- result: **96/96** (mean 0.372) · refusal 0.34 · ASR 0.54 · kl 0.036 · perplexity 4.717 — best COHERENT bypass so far.
+- verdict: **STILL dense — ablation is conclusively non-sparsifiable.** Counter-intuitively a 25× stronger L0
+  gave a STRONGER coherent bypass (ASR 0.54 > B4's 0.43) at a HIGHER mean gate (0.372) — because the learned
+  scale *compensates* the L0 push (grows to keep ablation strong), so no gate crosses to 0. Confirmed across
+  B1–B8: for ABLATION, L0 + learned scale never prune (the scale defeats the sparsity pressure, and ablation
+  needs every layer anyway). **⇒ ablation ruled out for sparsity. Pivot to sparse-STEER toward compliance.**
+
 ### EXP-B7 — loosened gradient clip (grad_clip 10; pinned, start-open, l0 0.04)
 - args: `method=sparse_ablate +task=jailbreak/arditi_bypass direction_source=[resid_pre,17] +grad_clip=10 gate_config.init_log_alpha=2 num_epochs=40 device=cuda`. rc=0.
 - result: **96/96** (mean 0.277) · refusal 0.44 · ASR 0.43 · kl 0.029 · perplexity 4.717 — **IDENTICAL to B4**.
@@ -133,13 +142,12 @@ with "Could not override 'task'. No match in the defaults list."
 - B7 (data): vary the harmful extraction mix (advbench-only vs +malicious_instruct +tdc2023).
 
 ## NEXT
-→ **B8 RUNNING**: strong L0 with the learned scale (last untried ablation lever — does it force selection?).
-`method=sparse_ablate +task=jailbreak/arditi_bypass direction_source=[resid_pre,17] l0_lambda=1.0 gate_config.init_log_alpha=2 num_epochs=40 device=cuda`
-(= B4 config but l0_lambda 0.04→1.0, 25×). Hypothesis: the learned-scale runs have only ever used l0=0.04
-(always settling uniformly at mean 0.277). A much stronger L0 could push some gates to 0 (prune) while the
-LEARNED SCALE holds the bypass-critical sites strong — the selection mechanism the scale is supposed to enable,
-never yet stress-tested for ablation. Watch: #active < 96 (sparse!) with ASR retained + ppl/kl clean, or
-collapse to 0 (→ ablation genuinely can't be made sparse). Branch if collapse/no-select → **B9 = sparse-STEER
-toward compliance**: code change to negate the extracted direction (steer toward accepted−refused) so
-`method=sparse` (additive steer) at a few sites can jailbreak — the induce mechanism that DID sparsify, applied
-in reverse. That is the most promising untested idea, kept for when ablation is fully ruled out.
+→ **B9 RUNNING**: sparse-STEER toward compliance — the pivot off ablation (most promising idea).
+`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true gate_config.init_log_alpha=-2 num_epochs=40 device=cuda`
+(method=sparse: additive steer at attention heads, learn_scale=true, l0=0.04, init_raw_scale=2.79; cold init −2;
++negate_direction flips the diff-in-means so the steer pushes TOWARD compliance, not refusal). Implemented
+`negate_direction` in `steering.py` (negates the sourced vectors) + the cache key. Hypothesis: ablation can't
+be sparse because the refusal direction re-enters every layer — but ADDITIVE steer at a few heads suffices
+(induce proved 23/1024). Steering toward compliance from a cold init should recruit a SPARSE head set. Watch:
+sparse #active (≪ 1024) with ASR up + coherent ppl/kl = the breakthrough. Branches: collapse (cold) → start-open
+init; dense → same symmetry → a contrastive/margin objective for steer; works → tune init/l0/targets frontier.

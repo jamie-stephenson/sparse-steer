@@ -59,6 +59,15 @@ def _refine_gate_training(experiment, model, tokenizer, extraction_ds, train_ds,
         experiment, model, tokenizer, extraction_ds, train_ds, cache_info
     )
     if steering_vectors is not None:
+        # negate_direction: flip the diff-in-means so an ADDITIVE steer pushes toward the
+        # accepted (compliant) side instead of the refused side — i.e. steer TOWARD compliance.
+        # Lets a sparse additive steer jailbreak (vs dense ablation). Default off.
+        if experiment.config.get("negate_direction", False):
+            steering_vectors = (
+                {k: -v for k, v in steering_vectors.items()}
+                if isinstance(steering_vectors, dict)
+                else -steering_vectors
+            )
         model.set_all_vectors(
             steering_vectors, normalize=experiment.config.normalize_steering_vectors
         )
