@@ -14,6 +14,10 @@ A 10-minute cron fires an "autoresearch tick" into the Claude REPL. Each tick:
 
 To stop the pipeline: delete the cron job (CronDelete) and `ssh runpod 'rm -f ~/ar.running'`.
 
+**NB — always use `+task=` (with the `+`):** `config.yaml` has no default task, so every `run.py`
+invocation must *append* the task — `+task=jailbreak/arditi_bypass` — never `task=...`, which errors
+with "Could not override 'task'. No match in the defaults list."
+
 ## Baselines (Qwen-7B-Chat · task=jailbreak/arditi_bypass · data_origin=arditi_exact)
 - **Unsteered**: refusal_rate_harmful 0.92 · Llama-Guard ASR (safety_score) 0.06 · kl_harmless 0 · perplexity_capability 4.73.
 - **Arditi dense ablation (target ceiling)**: ASR ≈ 0.85–0.86 — full-layer directional ablation, **not sparse**.
@@ -41,7 +45,7 @@ To stop the pipeline: delete the cron job (CronDelete) and `ssh runpod 'rm -f ~/
 - verdict: dead-end — no-scale can't sparsify (see finding #1/#2). Superseded by the learn_scale=true direction.
 
 ## Backlog (candidate experiments — the tick picks/refines)
-- **B1 (do first): learned-scale sparse baseline.** `method=sparse_ablate task=jailbreak/arditi_bypass`
+- **B1 (do first): learned-scale sparse baseline.** `method=sparse_ablate +task=jailbreak/arditi_bypass`
   `num_epochs=40 device=cuda` (defaults: learn_scale=true, normalize_ablation=true, init −0.79,
   targets=resid_pre/mid/post, l0_lambda=0.04, direction_source=self). Record ASR, #active sites, kl,
   perplexity — the reference every later experiment builds on.
@@ -55,4 +59,7 @@ To stop the pipeline: delete the cron job (CronDelete) and `ssh runpod 'rm -f ~/
 - B7 (data): vary the harmful extraction mix (advbench-only vs +malicious_instruct +tdc2023).
 
 ## NEXT
-→ **B1** — establish the learned-scale sparse_ablate jailbreak baseline. (First tick launches it.)
+→ **B1 RUNNING** (launched 2026-06-14 ~01:19 UTC via the harness:
+`method=sparse_ablate +task=jailbreak/arditi_bypass num_epochs=40 device=cuda`).
+When `~/ar.done`: record B1's ASR / refusal / kl / perplexity + #active gates in the log above,
+then design + launch **B2** (l0_lambda sweep) — or a better idea per the latest result.
