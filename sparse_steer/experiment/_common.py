@@ -57,7 +57,11 @@ def run_extraction(
         token_position=config.extract_token_position,
     )
     print("Computing steering vectors...")
-    steering_vectors = extract_steering_vectors(extraction_with_acts, component_names)
+    steering_vectors = extract_steering_vectors(
+        extraction_with_acts,
+        component_names,
+        orthogonalize_k=int(config.get("orthogonalize_harmless_pcs", 0)),
+    )
     sv_dest = experiment._prepare_cache_path(ArtifactType.STEERING_VECTORS)
     metadata = OmegaConf.to_container(config, resolve=True)
     save_steering_vectors(steering_vectors, sv_dest, metadata=metadata)

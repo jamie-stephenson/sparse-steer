@@ -248,6 +248,10 @@ class JailbreakTask(TaskSpec):
                     "normalize_steering_vectors": config.get("normalize_steering_vectors", False),
                 }
             )
+            # Direction-selectivity option; keyed only when on so existing steering-vector
+            # caches (orthogonalize_harmless_pcs=0) stay valid.
+            if config.get("orthogonalize_harmless_pcs", 0):
+                fields["orthogonalize_harmless_pcs"] = int(config.get("orthogonalize_harmless_pcs", 0))
 
         # Trained-gate identity: the SPARSE_STEERING artifact (and any eval that consumes it) is a
         # deterministic function of the WHOLE gate-training recipe. Without these a frontier sweep

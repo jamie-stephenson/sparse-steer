@@ -38,6 +38,16 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B27 — normalize directions (equal per-head) + ce_kl β0.5 (shared, l0 1.0, grad_clip 10) — BROKE the model
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=0.5 normalize_steering_vectors=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
+- result: **1024/1024 active** (mean 0.31) · refusal 0.00 · ASR 0.83 · **kl 11.84** · **perplexity inf**.
+- verdict: **DEGENERATE — does NOT count.** Unit-normalizing 1024 head directions (equal weight) over-steered
+  catastrophically; the shared scale couldn't absorb it → ppl=inf (gibberish), kl 11.8. ASR 0.83 is meaningless
+  with a broken model (the TASK's explicit "high ASR from gibberish ≠ success" trap). ⇒ raw-norm direction
+  weighting is load-bearing for coherence; the steep ASR↔collateral frontier holds (pushing harder breaks
+  coherence). Confirms the limiter is the direction SUBSPACE → justifies the orthogonalized-direction swing. B25
+  (0.80/0.40) stays the surgical headline.
+
 ### EXP-B26 — push ASR via per-site learn_scale + FIXED ce_kl (β1, l0 1.0, grad_clip 10) — per-site WORSE
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
 - result: **1024/1024 active** (mean 0.318) · refusal 0.01 · ASR 0.78 · kl 0.62 · perplexity 6.39.
@@ -330,14 +340,14 @@ with "Could not override 'task'. No match in the defaults list."
   the bypass; sparsity would require a different selection mechanism (top-k — prior result), out of this scope.
 
 ## NEXT
-→ **B27 RUNNING**: discriminate the ASR-ceiling cause — normalize directions (equal per-head) + ce_kl (= B25).
-`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=0.5 normalize_steering_vectors=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`
-(= B25 best-surgical + normalize_steering_vectors=true.) The ASR↔collateral frontier caps surgical ASR ~0.80
-(B25–B26). Is the limiter the direction MAGNITUDE-weighting (raw diff-in-means → high-norm heads dominate) or the
-direction SUBSPACE? Normalizing each head's direction to unit (equal per-head contribution, shared scale sets
-magnitude) tests the weighting. Hypothesis: ASR climbs >0.80 → weighting was the limiter (cheap win); ASR ~0.80 →
-subspace is the limiter ⇒ commit to the bigger swing: an ORTHOGONALIZED direction (project each site's diff-in-means
-off the top-K PCs of that site's harmless activations — available in extract; needs careful extract→sourcing +
-cache work). Risk: normalize×1024 heads is a large initial steer; learnable shared scale + grad_clip should absorb
-it (watch ppl). **Best: B25 (ASR 0.80 / kl 0.40 / ppl 5.64, surgical, Pareto-beats B12) ≈ B23** · B10 (0.87 max,
-kl 2.96). SPARSITY: comprehensively negative under HardConcrete+L0 (B24 closed the last lever).
+→ **B28 RUNNING**: ORTHOGONALIZED direction — project the steer off top-5 harmless PCs (NEW code) + ce_kl (= B25).
+`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=0.5 +orthogonalize_harmless_pcs=5 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`
+(= B25 best-surgical + orthogonalize_harmless_pcs=5.) Implemented this tick in core/extract.py (guarded, default
+0 = unchanged → other tasks/regression untouched; cache-keyed only when >0): each site's diff-in-means is projected
+orthogonal to the top-5 PCs of that site's harmless (negative-class) activations — the directions harmless
+processing is most sensitive to. Attacks the ROOT of the steep ASR↔collateral frontier (B25–B27: surgical ASR caps
+~0.80; pushing harder breaks coherence): a more SELECTIVE direction should perturb harmless less, so the steer can
+push compliance harder → higher ASR at lower kl. Hypothesis: ASR > 0.80 with kl ≤ 0.40 → frontier broken further
+(toward match-Arditi-surgically). If the jailbreak WEAKENS (ASR drops) → refusal ⊂ the harmless-variance subspace
+(the steer NEEDS those directions) — itself a clean mechanistic finding; then sweep K (1,2). **Best: B25 (ASR 0.80
+/ kl 0.40 / ppl 5.64, surgical, Pareto-beats B12)** · B10 (0.87 max, kl 2.96). SPARSITY: exhaustively negative.

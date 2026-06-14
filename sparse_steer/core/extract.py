@@ -185,14 +185,42 @@ def collect_activations(
     return dataset, list(all_acts.keys())
 
 
+def _orthogonalize_to_neg_pcs(diff: Tensor, neg: Tensor, k: int) -> Tensor:
+    """Project ``diff`` orthogonal to the top-``k`` principal components of the negative-class
+    activations ``neg``, independently per site (every leading dim before the last/feature dim).
+
+    ``diff``: ``(*site_dims, d)``; ``neg``: ``(n_neg, *site_dims, d)``. The PCs are the directions
+    along which the harmless (negative) representations vary, i.e. the directions harmless
+    processing is most sensitive to — removing the steer's component along them reduces harmless
+    collateral while keeping its refusal-relevant part. Centered SVD; PCs are orthonormal.
+    """
+    d = diff.shape[-1]
+    diff_flat = diff.reshape(-1, d).clone()                  # (nsites, d)
+    neg_flat = neg.reshape(neg.shape[0], -1, d).permute(1, 0, 2)  # (nsites, n_neg, d)
+    for s in range(diff_flat.shape[0]):
+        x = neg_flat[s].float()                              # (n_neg, d)
+        x = x - x.mean(0, keepdim=True)                      # center → variance directions
+        if x.shape[0] < 2:
+            continue
+        _, _, vh = torch.linalg.svd(x, full_matrices=False)
+        pcs = vh[: min(k, vh.shape[0])]                      # (k, d) orthonormal rows
+        v = diff_flat[s]
+        diff_flat[s] = v - pcs.t() @ (pcs @ v)               # remove projection onto span(pcs)
+    return diff_flat.reshape(diff.shape)
+
+
 def extract_steering_vectors(
     dataset: Dataset,
     components: list[str],
+    orthogonalize_k: int = 0,
 ) -> dict[str, Tensor]:
     """Compute mean-difference steering vectors from activation columns.
 
     ``dataset`` must contain a boolean ``"positive"`` column plus one column per
-    component.
+    component. When ``orthogonalize_k > 0``, each site's mean-difference direction is
+    projected orthogonal to the top-``k`` principal components of that site's negative-class
+    activations (a more *selective* direction — less harmless collateral); ``0`` (default)
+    leaves the plain mean-difference unchanged.
     """
     missing = set(components) - set(dataset.column_names)
     if missing:
@@ -206,6 +234,8 @@ def extract_steering_vectors(
     for name in components:
         acts = torch.tensor(dataset[name])
         diff = acts[positive].float().mean(0) - acts[~positive].float().mean(0)
+        if orthogonalize_k > 0:
+            diff = _orthogonalize_to_neg_pcs(diff, acts[~positive], orthogonalize_k)
         result[name] = diff
     return result
 
