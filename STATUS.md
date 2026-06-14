@@ -38,6 +38,15 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B21 — ce_kl β-sweep: β 3.0 (shared_scale, l0 0.3) — β overshot, non-monotonic
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=3.0 gate_config.init_log_alpha=2 l0_lambda=0.3 num_epochs=40 device=cuda`. rc=0.
+- result: **1024/1024 active** (mean 0.469) · refusal 0.03 · ASR 0.75 · kl 0.41 · perplexity 5.97.
+- verdict: **β=3 is PAST the optimum — kl ROSE vs β=1.** Sweep: β≈0 (B12) 0.79/0.55 → β1 (B20) 0.75/**0.34** →
+  β3 (B21) 0.75/0.41. More preservation pressure did NOT lower kl; it opened the gates more (mean 0.339→0.469) →
+  stronger net steer → more collateral. So **β≈1 is the sweet spot (knee)** — stop raising β. The bigger open
+  question is SPARSITY (every ce_kl run still dense) — test whether the KL term now gives L0 a reason to close
+  collateral-only gates (ce_kl + higher l0). ⇒ B22.
+
 ### EXP-B20 — ce_kl clean A/B (shared_scale = B12, aligned full-prompt KL, β 1.0) — FRONTIER BROKEN ✅
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=0.3 num_epochs=40 device=cuda`. rc=0.
 - result: **1024/1024 active** (mean 0.339) · refusal 0.05 · ASR 0.75 · **kl 0.34** · perplexity 5.58.
@@ -271,12 +280,13 @@ with "Could not override 'task'. No match in the defaults list."
   where refusal was sparsely *inducible*.
 
 ## NEXT
-→ **B21 RUNNING**: ce_kl β-sweep — β 3.0 (push preservation harder; bracket the knee + find the surgical limit).
-`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=3.0 gate_config.init_log_alpha=2 l0_lambda=0.3 num_epochs=40 device=cuda`
-(= B20 but β 1.0→3.0.) B20 broke the frontier (ASR 0.75 / kl 0.34 vs B12's 0.79 / 0.55). β-sweep map so far:
-β≈0 (B12) 0.79/0.55 → β1 (B20) 0.75/0.34. B21 gets the low-kl end. Hypothesis: kl drops further (~0.2) at some ASR
-cost — brackets the knee of the ce_kl ASR↔kl frontier. If ASR stays ≥0.65 at kl ~0.2 → a strong SURGICAL jailbreak
-(low collateral + coherent + still jailbreaks), the headline differentiator vs Arditi's high-collateral dense
-ablation. If ASR collapses → B20's β≈1 is near-optimal; next sweep β DOWN (0.5/0.3) for the high-ASR end (recover
-ASR 0.79 at kl<0.55, Pareto-beating B12). Best so far: B20 (0.75/kl 0.34) surgical · B10 (ASR 0.87) max-ASR · B12
-(0.79/0.55). Still DENSE — sparsity remains the open problem (queued: ce_kl + lower l0 init; orthogonalized steer).
+→ **B22 RUNNING**: does ce_kl UNLOCK sparsity? — ce_kl (β=1 sweet spot) + higher l0 (0.3→1.0).
+`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=1.0 num_epochs=40 device=cuda`
+(= B20 but l0_lambda 0.3→1.0.) The robust negative was: plain CE + L0 can't sparsify the bypass (refusal is
+distributed; CE needs every site, and grad-clip caps the L0 step at any λ). But ce_kl adds a NEW gradient — a gate
+that only contributes harmless collateral now hurts BOTH the KL term AND L0, so closing it improves the loss on two
+axes. Hypothesis: ce_kl + higher l0 may finally prune below 1024 where plain CE could not. Watch GATE COUNT (<1024?)
++ whether ASR (~0.75) / kl (~0.34) survive. If it sparsifies with ASR retained → THE HEADLINE (sparse + surgical +
+jailbreaks, beating Arditi on all axes). If still dense → sparsity is blocked even with a collateral-aware objective
+(refusal genuinely needs all sites) — then refine the dense surgical point (β 0.5) + try an orthogonalized steer.
+Best so far: B20 (ASR 0.75 / kl 0.34, surgical, DENSE) · B10 (ASR 0.87 max) · B12 (0.79/0.55). β≈1 = the knee.
