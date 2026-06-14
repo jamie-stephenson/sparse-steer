@@ -38,6 +38,15 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B35 — shared_scale + normalize_ablation + L0 ablate/resid — STILL uniform, but CONFOUNDED by weak ablation
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true +normalize_ablation=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
+- result: **32/32 active, gate STD 0.0002** (all 0.275; 1 shared scale confirmed) · refusal 0.79 · ASR 0.17 · kl 0.020 · ppl 4.76.
+- verdict: **shared scale did NOT differentiate the gates — but the test is CONFOUNDED.** normalize_ablation made
+  the ablation too weak (ASR 0.17, like B32), so the gates barely affect the loss → no CE pressure to differentiate
+  → L0 shrinks them uniformly. So this doesn't isolate scale-mode. ⇒ re-test shared_scale with FULL-strength
+  ablation (drop normalize_ablation) so the gates actually matter and CE can differentiate them. (Common factor in
+  both uniform runs B32+B35 = normalize_ablation weakness, not the scale mode.)
+
 ### EXP-B34 — knee: L17 direction ablated at resid_pre layers 14–20 (7 mid sites, dense manual)
 - args: `method=dense +task=jailbreak/arditi_bypass intervention=ablate +direction_source=[resid_pre,17] targets=[resid_pre] steering_layer_ids=[14,15,16,17,18,19,20] device=cuda`. rc=0.
 - result: **7 sites** · refusal 0.05 · ASR 0.80 · kl 0.042 · ppl 4.77.
@@ -392,13 +401,12 @@ with "Could not override 'task'. No match in the defaults list."
   0.01; that's a wrong-space/optimization issue, not distributed refusal.)
 
 ## NEXT
-→ **B35 RUNNING**: ⭐ can L0 self-sparsify once the per-site SCALE can't absorb utility? shared_scale + ablate/resid.
-`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true +normalize_ablation=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`
-(= B32 but +shared_scale=true REPLACING per-site learn_scale — code-confirmed: shared scale sets per-site raw_scale
-to None.) ROOT CAUSE found in B32's weights: gates were uniform (std 0.000 @ 0.275) because the per-site learnable
-scale absorbed ALL utility (softplus scales 1.3→4.2); the gate carried zero site-discriminating signal so L0 just
-shrank them uniformly. With ONE shared scale, per-site utility MUST live in the GATES → they should DIFFERENTIATE
-by benefit → L0 prunes low-utility resid layers → SPARSE. normalize_ablation keeps gate gradients on benefit not
-norm. **If gates go non-uniform (std>0) + prune to ~mid layers with ASR retained → LEARNED sparse jailbreak via L0,
-no top-k — answers "why uniform" AND fixes it.** If still uniform/weak → top-k. Watch gate STD + count + ASR.
-Manual sparse frontier (hand-placed): B31 1-site 0.75/kl 0.018 · B34 7-site 0.80/kl 0.042 · both surgical+coherent.
+→ **B36 RUNNING**: clean scale-mode test — shared_scale + FULL-strength ablation (drop normalize) over resid + L0.
+`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`
+(= B35 minus normalize_ablation.) B32 (per-site scale) + B35 (shared scale) BOTH gave uniform gates (std≈0), but
+both used normalize_ablation → weak ablation (ASR 0.17–0.18) → gates barely affect the loss → no CE signal to
+differentiate → L0 uniformizes. So the common confound is normalize, not the scale mode. Full-strength ablation
+makes the gates MATTER (jailbreaks), and with a shared scale the only per-site magnitude knob IS the gate → CE
+should drive L17's gate up vs low-benefit layers → DIFFERENTIATE → L0 prunes → sparse. If gate STD>0 + sparse +
+jailbreaks → LEARNED sparse via L0. If STILL uniform (std≈0) even strong → the gate↔scale degeneracy / smooth-L0
+lockstep is fundamental ⇒ top-k. Watch gate STD + ASR + count. Best hand-placed: B31 1-site 0.75 · B34 7-site 0.80.
