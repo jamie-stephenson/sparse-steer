@@ -38,6 +38,18 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B32 — LEARNED L0 gates over resid + normalize_ablation (ablate, l0 1.0, gc 10) — STILL dense (answers "why")
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +normalize_ablation=true learn_scale=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
+- result: **32/32 active** (mean 0.275, uniform) · refusal 0.78 · ASR 0.18 · kl 0.012 · ppl 4.74.
+- verdict: **L0 does NOT localize even over resid WITH the norm-confound fix.** Gates land in the prior's
+  "dense-uniform" regime (all 32 ≈ 0.275); normalize_ablation made that uniform ablation too WEAK (ASR 0.18). So the
+  norm confound was not the (only) blocker. **Answers the user's "why doesn't L0 work like tinysleepers":** the
+  jailbreak benefit is GRADED across layers (B31: 1 site=0.75, all≈0.85 — every resid layer carries some refusal),
+  so NO site has ~zero benefit → smooth L0 keeps them ALL open to maximize ASR (the CE objective wants the full
+  0.85). tinysleepers' backdoor is SPIKY (1 site has benefit, rest ZERO) → L0 collapses the zero-benefit sites,
+  keeping the 1 → sparse. So sparsity here needs a HARD budget (top-k) that forces the use-fewer-sites-for-a-bit-
+  less-ASR tradeoff L0 won't make on its own. ⇒ confirm the graded curve (B33).
+
 ### EXP-B31 — ⭐ SINGLE-SITE L17 resid ablation (method=dense, no gates) — BYPASS IS LOCALIZED, not distributed
 - args: `method=dense +task=jailbreak/arditi_bypass intervention=ablate +direction_source=[resid_pre,17] targets=[resid_pre] steering_layer_ids=[17] device=cuda`. rc=0.
 - result: **1 site (resid_pre@17)** · refusal 0.08 · **ASR 0.75** · **kl 0.0177** · **perplexity 4.75** (= baseline 4.73).
@@ -365,13 +377,12 @@ with "Could not override 'task'. No match in the defaults list."
   0.01; that's a wrong-space/optimization issue, not distributed refusal.)
 
 ## NEXT
-→ **B32 RUNNING**: ⭐ THE HEADLINE TEST — can LEARNED L0 gates over RESID sites discover the sparse site?
-`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +normalize_ablation=true learn_scale=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`
-(sparse-gated ablation over resid_pre across ALL layers — direction_source=self per site; L0 must prune; normalize_
-ablation corrects the residual-norm confound so gates select on BENEFIT not norm, required for finding the mid-layer
-L17; grad_clip 10 lets L0 act.) B31 proved a 1-site sparse jailbreak EXISTS (resid_pre@17: 0.75/kl 0.018/ppl 4.75).
-Now: do the gates LEARN it? Hypothesis: L0 prunes ~31 of 32 resid_pre gates, keeping ~L17 → a LEARNED sparse +
-surgical + coherent jailbreak = the actual TASK headline (sparse ⪅ all sites, ASR ~0.75, kl≈0, ppl≈baseline). If it
-sparsifies → DONE (the goal). If it stays dense → the sparse solution exists but the L0 gate dynamics can't find it
-(optimization, not distribution) → then top-k. Watch GATE COUNT (≪32?) + which layers + ASR/kl. **Best real result
-now: B31 (1 site, 0.75 / kl 0.018 / ppl 4.75) — sparse+surgical+coherent, but hand-placed not learned.**
+→ **B33 RUNNING**: confirm the graded-benefit answer — ablate the L17 direction at resid_pre ALL layers (32 sites).
+`method=dense +task=jailbreak/arditi_bypass intervention=ablate +direction_source=[resid_pre,17] targets=[resid_pre] device=cuda`
+(= B31 but steering_layer_ids=null → all 32 resid_pre layers, same L17 direction, vs B31's 1 site.) B32 showed L0
+won't localize (dense-uniform) because benefit is GRADED across layers. This maps the #sites→ASR curve directly:
+B31 1-site=0.75 → B33 32-site resid_pre=? → Arditi 96-site (resid_pre+mid+post) ≈0.85. If ASR climbs with #sites →
+confirms graded benefit (every layer carries some refusal) ⇒ why smooth L0 keeps all gates + why top-k is needed to
+force sparsity. **The LEARNED sparse route is top-k (forces the tradeoff L0 won't make) — awaiting user go-ahead.**
+Best real result: B31 (1 resid site, ASR 0.75 / kl 0.018 / ppl=baseline — sparse+surgical+coherent, hand-placed).
+L0-over-resid (B32): dense-uniform, confirmed. Honest: no LEARNED sparse result yet; the manual 1-site proof stands.
