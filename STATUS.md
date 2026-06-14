@@ -38,6 +38,15 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B42 — clip sweep: B36 + grad_clip 20 — STABLE but floor UNCHANGED (clip doesn't break the floor)
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=20 num_epochs=40 device=cuda`. rc=0.
+- result: **32/32 active, gate STD 0.202** (range 0.275–0.948, min 0.275) · refusal 0.00 · ASR 0.80 · kl 0.38 · ppl 4.72.
+- verdict: **clip 10→20 did NOT lower the floor.** Gates differentiate (std 0.202 ≈ B36's 0.197) but min stays at
+  0.275, all 32 active — identical floor to clip=10. So the 0.275 floor is NOT clip-limited (more headroom doesn't
+  move it); clip=100 just diverges (B41). ⇒ floor looks HardConcrete-INTRINSIC, not a clip artifact. The clip fixed
+  the EARLY uniformity (clip 1→10) but not hard-pruning. ⇒ definitive test: freeze scale (kills B41 divergence) +
+  clip 100 → if gates STILL floor → intrinsic → top-k.
+
 ### EXP-B41 — clip sweep: B36 + grad_clip 100 — DIVERGED (NaN), scale blew up
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=100 num_epochs=40 device=cuda`. rc=0 (but NaN metrics).
 - result: **all 32 gates + shared scale = NaN** · refusal 0.00 · ASR 0.88 (meaningless) · kl nan · ppl nan.
@@ -442,18 +451,15 @@ with "Could not override 'task'. No match in the defaults list."
   old gate-dynamics observations still hold: over attention heads, open init → ~0.3 soft middle, never crossing
   0.01; that's a wrong-space/optimization issue, not distributed refusal.)
 
-## NEXT — ⚠ GRAD-CLIP CONFOUND: re-run key sparsity experiments at higher clip (user-directed)
-**Realization:** the early "L0 can't sparsify / gates uniform" results (EXP-000, the 21-run grid, B1–~B22) were all
-at the DEFAULT `grad_clip=1.0`. Gates only started DIFFERENTIATING once clip→10 (B36). So that clip was a major
-confound and a chunk of the sparsity-negative evidence is contaminated. The floored gates (B37) may be a CLIP
-artifact: at the 0.275 floor (log_alpha≈−0.79) the expected-L0 gradient is MAXIMAL (center of the L0 sigmoid) → the
-update step is largest there → most likely clipped → stall. Looser clip should let it through → prune. ⇒ sweep clip
-higher and redo the sparsity runs at the looser clip. (B40 temp-0.1 ABORTED to pivot here.)
-→ **B42 RUNNING**: clip sweep midpoint — B36 + `grad_clip=20` (between 10-stable and 100-diverged).
-`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=20 num_epochs=40 device=cuda`
-(= B36 but clip 10→20.) B36 (clip 10) stable+floored; B41 (clip 100) diverged (scale→NaN). 2× headroom may let the
-floored gates push past the 0.275 floor (where the L0 step is clipped) WITHOUT the scale diverging. Branches:
-stable + gates prune (count<32, ASR held) → clip WAS the blocker → redo early sweeps at clip 20 = learned sparse;
-diverges (NaN) → stable window is ≤~15 and the floor-breaking clip diverges the scale → clip can't fix it, floor is
-HardConcrete-intrinsic ⇒ top-k; stable + still floored → try clip 30–50, or freeze the scale (kills divergence) +
-high clip. Watch NaN + gate COUNT + std + ASR. Best learned: B36 (ASR 0.81, soft-sparse). Manual: B31 0.75 / B34 0.80.
+## NEXT — clip-sweep result: floor is clip-INDEPENDENT (10≈20 floor; 100 diverges). Definitive test next.
+**Clip sweep done:** clip 1 → uniform/lockstep (early confound, real); clip 10 (B36) → differentiate, floor 0.275;
+clip 20 (B42) → differentiate, floor 0.275 (SAME — clip doesn't lower the floor); clip 100 (B41) → diverge
+(scale→NaN). So higher clip fixed the EARLY uniformity but NOT hard-pruning; the 0.275 floor is clip-independent.
+B41's divergence was the *learnable scale* blowing up — which masks whether clip-on-gates-alone could prune.
+→ **B43 RUNNING**: FREEZE the scale + clip 100 — isolate the clip's effect on the gates (no scale divergence).
+`method=sparse +task=jailbreak/arditi_bypass intervention=ablate targets=[resid_pre] +shared_scale=true freeze_raw_scale=true init_raw_scale=0.5413 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=100 num_epochs=40 device=cuda`
+(scale frozen at softplus(0.5413)=1.0 → gate = ablation fraction; init gate 0.88 → working jailbreak; L0 prunes from
+there; clip 100 acts only on gates, can't diverge.) If useless gates now drop <0.01 (count<32) → the floor WAS
+clip-limited (scale-divergence was the only thing stopping it) → LEARNED SPARSE via L0. If they STILL floor ~0.275
+→ floor is HardConcrete-INTRINSIC (vanishing L0 gradient near closed), conclusive ⇒ top-k. Watch gate COUNT + min +
+ASR. Best learned: B36 (ASR 0.81, soft-sparse, dense). Manual frontier: B31 1-site 0.75 / B34 7-site 0.80.
