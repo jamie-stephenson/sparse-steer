@@ -116,9 +116,26 @@ class JailbreakTask(TaskSpec):
         """Teacher-forced ``prompt + completion`` batch; steering confined to prompt
         positions. The completion is a compliant/affirmative continuation so sparse
         ablation learns to recover compliance on harmful prompts."""
-        return prompt_completion_collate(rows, tokenizer, device, config)
+        batch = prompt_completion_collate(rows, tokenizer, device, config)
+        # Non-CE objective (jb_objective=refusal_logit): bake what the loss needs (config is not
+        # passed to .loss) — the refusal-opener token ids and the decision position (the last
+        # prompt token, whose logits predict the first completion token).
+        if config.get("jb_objective", "ce") == "refusal_logit":
+            rt = [tokenizer(t, add_special_tokens=False)["input_ids"][0] for t in config.refusal_tokens]
+            batch["refusal_token_ids"] = torch.tensor(rt, device=device)
+            batch["decision_pos"] = (batch["labels"] != -100).int().argmax(dim=1) - 1
+        return batch
 
     def loss(self, model, batch: dict[str, Tensor], logits: Tensor) -> Tensor:
+        # Non-CE objective: directly suppress refusal — minimise log P(refusal opener) at the
+        # decision position (Arditi's refusal-logit signal) instead of CE toward an affirmative
+        # completion. The L0 term is still added by the train loop. The idea is to differentiate
+        # sites by their actual effect on refusal rather than on next-token likelihood.
+        if "refusal_token_ids" in batch:
+            n = logits.size(0)
+            rows = torch.arange(n, device=logits.device)
+            lp = F.log_softmax(logits[rows, batch["decision_pos"]].float(), dim=-1)
+            return lp[:, batch["refusal_token_ids"]].logsumexp(dim=-1).mean()
         shift_logits = logits[..., :-1, :].float()
         return F.cross_entropy(
             shift_logits.reshape(-1, shift_logits.size(-1)),
@@ -193,6 +210,7 @@ class JailbreakTask(TaskSpec):
                     "n_train": config.n_train,
                     "affirmative_prefix": config.affirmative_prefix,
                     "gate_train_target": config.get("gate_train_target", "compliance"),
+                    "jb_objective": config.get("jb_objective", "ce"),
                     "refusal_prefix": config.get("refusal_prefix"),
                     "completion_tokens": config.get("completion_tokens"),
                     "seed": config.seed,

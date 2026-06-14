@@ -38,6 +38,16 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B5 — induce cold-start recipe for bypass (cold init −2 + large scale init 2.79 + pinned dir)
+- args: `method=sparse_ablate +task=jailbreak/arditi_bypass direction_source=[resid_pre,17] gate_config.init_log_alpha=-2 init_raw_scale=2.79 num_epochs=40 device=cuda`. rc=0.
+- result: **0/96 active** (mean gate 0.0) · refusal 0.92 · ASR 0.06 · kl 0.0 · perplexity 4.727.
+- verdict: **FAIL — collapsed to all-off** (= unsteered), like B1. The large scale init that let the induce
+  (steer) runs recruit from cold does NOT save bypass (ablate) from the cold-collapse. ⇒ **config-space is
+  exhausted for sparse ablation**: cold init always collapses, open init always stays dense (uniform compress),
+  for self/pinned directions, resid/attention. The L0+HardConcrete optimisation cannot *select* a sparse subset
+  with the CE objective. Next: change the OBJECTIVE (non-CE), per TASK.md — a refusal-suppression loss that
+  differentiates sites by their actual effect on refusal (code change in tasks/jailbreak, keep CE path).
+
 ### EXP-B4 — pinned Arditi layer-17 direction (resid, start-open, l0 0.04)
 - args: `method=sparse_ablate +task=jailbreak/arditi_bypass direction_source=[resid_pre,17] gate_config.init_log_alpha=2 num_epochs=40 device=cuda`
   (learn_scale=true, normalize_ablation=true, l0_lambda=0.04, resid targets, pinned single direction). rc=0.
@@ -102,12 +112,14 @@ with "Could not override 'task'. No match in the defaults list."
 - B7 (data): vary the harmful extraction mix (advbench-only vs +malicious_instruct +tdc2023).
 
 ## NEXT
-→ **B5 RUNNING**: induce-style cold-start for bypass (cold init + LARGE scale init + pinned dir).
-`method=sparse_ablate +task=jailbreak/arditi_bypass direction_source=[resid_pre,17] gate_config.init_log_alpha=-2 init_raw_scale=2.79 num_epochs=40 device=cuda`
-(learn_scale=true, l0=0.04). Hypothesis: B1 collapsed from a cold init because its scale init was *small*
-(0.54) → weak gate gradient. The induce runs recruited a SPARSE set from a cold init precisely because the
-scale init was *large* (2.79): a big scale amplifies the gate gradient so CE recruits the useful sites from
-closed while L0 holds the rest shut. Apply that recipe to bypass with the pinned Arditi direction. Watch: does
-#active land in a sparse MIDDLE (not 0, not 96) with ASR up + ppl/kl clean? (Risk: large scale may over-ablate
-→ watch perplexity.) Branches: if it collapses → cold is unrecoverable for ablate → next: a NON-CE objective
-(refusal-logit suppression, code) that differentiates sites by their actual effect on refusal.
+→ **B6 RUNNING**: first NON-CE objective — **refusal-logit suppression**.
+`method=sparse_ablate +task=jailbreak/arditi_bypass direction_source=[resid_pre,17] +jb_objective=refusal_logit gate_config.init_log_alpha=2 num_epochs=40 device=cuda`
+(= B4's pinned/start-open/learned-scale/l0=0.04 config, but the new objective). Added a selectable
+`jb_objective` knob in `tasks/jailbreak/task.py`: collate bakes the refusal-opener token ids + decision
+position; loss minimises log P(refusal opener "I"/"As") at the decision position (Arditi's refusal signal)
+instead of CE-to-affirmative; CE path unchanged; smoke-tested (decision_pos correct, both branches finite).
+Hypothesis: optimising the refusal signal *directly* gives a sharper per-site gradient (sites whose ablation
+most reduces refusal) that may finally let L0 *select* a sparse subset, where CE only uniformly compressed (B4).
+Watch: #active < 96 with ASR up + ppl/kl clean. Risk: a pure refusal loss may hurt coherence → watch perplexity;
+if so, next add a small CE regulariser term. If it works → l0/ASR/sparsity frontier; if not → contrastive obj
+or sparse-STEER (steer toward compliance, the proven-sparse induce mechanism) instead of ablation.
