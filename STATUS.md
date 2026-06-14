@@ -38,6 +38,16 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B14 — cold start + large steer scale (init −2, init_raw_scale 10; steer toward compliance, attention)
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true gate_config.init_log_alpha=-2 init_raw_scale=10 num_epochs=40 device=cuda`. rc=0.
+- result: **0/1024 active** (mean 0.0) · refusal 0.92 · ASR 0.06 · kl 0.0 · perplexity 4.727.
+- verdict: **FAIL — collapsed.** Even a ~10× per-gate steer scale didn't let the gates recruit from cold — all
+  shut to off (= unsteered). Cold is UNRECOVERABLE for bypass regardless of scale. Confirms the full grid:
+  open→dense, cold→collapse, for every direction/target/scale/l0. **L0+HardConcrete cannot produce a sparse
+  bypass.** Best deliverable: the DENSE steer-toward-compliance (B10 ASR 0.87; B12 ASR 0.79/kl 0.55) beating
+  Arditi coherently. One genuinely-new lever left: gate SHARPNESS — gates settle at a soft middle (~0.37) and
+  never polarize; a lower HardConcrete temperature could make them binary (some → 0 = prune).
+
 ### EXP-B13 — steer + shared scale + strong l0 (l0 1.0; start-open, attention)
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=1.0 num_epochs=40 device=cuda`. rc=0.
 - result: **1024/1024 active** (mean 0.44) · refusal 0.01 · ASR 0.78 · kl 0.93 · perplexity 6.89.
@@ -190,12 +200,13 @@ with "Could not override 'task'. No match in the defaults list."
 - B7 (data): vary the harmful extraction mix (advbench-only vs +malicious_instruct +tdc2023).
 
 ## NEXT
-→ **B14 RUNNING**: cold start + LARGE steer scale (force sparse recruitment — the last untried sparsity lever).
-`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true gate_config.init_log_alpha=-2 init_raw_scale=10 num_epochs=40 device=cuda`
-(cold init −2, init_raw_scale 2.79→10 ⇒ per-gate steer scale ~10). Hypothesis: B9 collapsed from cold because
-each gate's compliance-steer was too weak to bypass alone → no recruitment. A MUCH larger per-gate steer makes
-a single recruited gate effective → CE recruits a SPARSE few from closed while L0 holds the rest shut — exactly
-how induce sparsified (23/1024), now with enough per-gate punch to clear the harder bypass bar. Watch: sparse
-#active (not 0, not 1024) with ASR up + coherent ppl. Risk: scale 10 may over-steer → watch perplexity (→ scale 5).
-Branches: sparse+strong → THE breakthrough, tune frontier; collapse → cold unrecoverable even at high scale →
-accept the dense steer (B12) as the result + polish kl with a smaller scale on the open config; over-steer → scale 5.
+→ **B15 RUNNING**: lower gate temperature (sharpen the HardConcrete so gates polarize → prune).
+`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true gate_config.init_log_alpha=2 gate_config.temperature=0.1 l0_lambda=0.3 num_epochs=40 device=cuda`
+(the working open steer + gate temperature 0.33→0.1). Hypothesis: every run's gates settle at a SOFT middle
+(~0.37) and never cross threshold because the HardConcrete is smooth at temp 0.33. A LOWER temperature makes the
+gate samples (and log_alpha) more EXTREME → gates polarize toward 0/1 → redundant ones cross below threshold
+(first prune) while CE holds the bypass-critical heads near 1. Watch: sparse #active + ASR retained + coherent.
+Branches: prunes+strong → THE breakthrough, sweep temp×l0; still dense → gate sharpness isn't it either → the
+CONCLUSIVE finding is "L0+HardConcrete cannot sparsify a bypass" and the DELIVERABLE is the dense steer (beats
+Arditi: B10 ASR 0.87, B12 ASR 0.79/kl 0.55) — then polish it (lower steer scale → kl→0) and keep generating
+angles (contrastive compliant−refusing objective; l0 annealing; data-mix). Best result so far: B10/B12.
