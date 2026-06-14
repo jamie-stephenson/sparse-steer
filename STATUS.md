@@ -38,6 +38,16 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B26 — push ASR via per-site learn_scale + FIXED ce_kl (β1, l0 1.0, grad_clip 10) — per-site WORSE
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
+- result: **1024/1024 active** (mean 0.318) · refusal 0.01 · ASR 0.78 · kl 0.62 · perplexity 6.39.
+- verdict: **per-site does NOT beat shared_scale.** ASR 0.78 < B25's 0.80, kl 0.62 > 0.40, ppl worse — per-site
+  just adds collateral without raising ASR. (Confirms the ce_kl KL fix: vs B19's buggy last-token 1.95, kl fell to
+  0.62.) So B25 (shared, 0.80/0.40) stays best. KEY: a STEEP ASR↔collateral frontier is now mapped — every surgical
+  regime caps ASR ~0.80; the only 0.87 is B10 (per-site CE, kl 2.96). So no scale/β/objective tweak reaches Arditi's
+  0.86 surgically; the limiter is the steer DIRECTION's selectivity, not its strength. ⇒ try an orthogonalized
+  (more selective) direction — the one lever that attacks the root cause.
+
 ### EXP-B25 — ce_kl β-sweep DOWN: β 0.5 (shared_scale, l0 1.0, grad_clip 10) — β flat; ASR ceiling ~0.80
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=0.5 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`. rc=0.
 - result: **1024/1024 active** (mean 0.305) · refusal 0.04 · **ASR 0.80** · **kl 0.40** · perplexity 5.64.
@@ -320,13 +330,14 @@ with "Could not override 'task'. No match in the defaults list."
   the bypass; sparsity would require a different selection mechanism (top-k — prior result), out of this scope.
 
 ## NEXT
-→ **B26 RUNNING**: push ASR toward Arditi — per-site learn_scale (stronger steer) + FIXED ce_kl to tame collateral.
-`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`
-(= B23 but DROP +shared_scale → default per-site learn_scale.) shared_scale+ce_kl caps ASR ~0.80 (B25, β flat);
-per-site scale is the stronger-steer regime that hit ASR 0.87 (B10) but at kl 2.96. The now-FIXED full-prompt ce_kl
-should pull the per-site scales DOWN where they hurt harmless → high ASR (per-site) + controlled kl (ce_kl). Distinct
-from B19 (per-site + BUGGY last-token KL → 0.79/1.95); the KL fix should cut kl hard. Hypothesis: ASR → 0.83–0.87 at
-kl < 0.6 = match-Arditi ASR, far more surgical than his dense ablation = the headline. If kl still blows up →
-per-site is intrinsically high-collateral even with ce_kl, and B25 (0.80/0.40) is the surgical headline.
-**Best: B25 (ASR 0.80 / kl 0.40 / ppl 5.64, surgical, Pareto-beats B12) ≈ B23** · B10 (0.87 max-ASR, kl 2.96).
-SPARSITY: comprehensively negative under the mandated HardConcrete+L0 mechanism (B24 closed the last lever).
+→ **B27 RUNNING**: discriminate the ASR-ceiling cause — normalize directions (equal per-head) + ce_kl (= B25).
+`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=0.5 normalize_steering_vectors=true gate_config.init_log_alpha=2 l0_lambda=1.0 +grad_clip=10 num_epochs=40 device=cuda`
+(= B25 best-surgical + normalize_steering_vectors=true.) The ASR↔collateral frontier caps surgical ASR ~0.80
+(B25–B26). Is the limiter the direction MAGNITUDE-weighting (raw diff-in-means → high-norm heads dominate) or the
+direction SUBSPACE? Normalizing each head's direction to unit (equal per-head contribution, shared scale sets
+magnitude) tests the weighting. Hypothesis: ASR climbs >0.80 → weighting was the limiter (cheap win); ASR ~0.80 →
+subspace is the limiter ⇒ commit to the bigger swing: an ORTHOGONALIZED direction (project each site's diff-in-means
+off the top-K PCs of that site's harmless activations — available in extract; needs careful extract→sourcing +
+cache work). Risk: normalize×1024 heads is a large initial steer; learnable shared scale + grad_clip should absorb
+it (watch ppl). **Best: B25 (ASR 0.80 / kl 0.40 / ppl 5.64, surgical, Pareto-beats B12) ≈ B23** · B10 (0.87 max,
+kl 2.96). SPARSITY: comprehensively negative under HardConcrete+L0 (B24 closed the last lever).
