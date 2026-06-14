@@ -153,7 +153,7 @@ def _train_loop(
 
             optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(params, 1.0)
+            torch.nn.utils.clip_grad_norm_(params, config.get("grad_clip", 1.0))
             optimizer.step()
             scheduler.step()
             step += 1

@@ -38,6 +38,17 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B6 — non-CE objective: refusal-logit suppression (pinned, start-open, l0 0.04)
+- args: `method=sparse_ablate +task=jailbreak/arditi_bypass direction_source=[resid_pre,17] +jb_objective=refusal_logit gate_config.init_log_alpha=2 num_epochs=40 device=cuda`. rc=0.
+- result: **96/96 active** (mean 0.44) · refusal 0.02 · ASR 0.52 · **kl 4.32** · perplexity 7.71.
+- verdict: **PARTIAL & flawed.** The objective hit its TARGET (refusal_rate 0.02 — model rarely opens "I"/"As")
+  but it's GAMEABLE: Llama-Guard ASR only 0.52, so dodging the refusal opener ≠ real compliance. And kl_harmless
+  4.32 (objective applied to harmless rows too → damaged them) + perplexity 7.7 (mild degradation). STILL 96/96.
+  Objective fixes exist (restrict to harmful rows; add a coherence/CE term) — but the deeper finding is that
+  across B1–B6 **nothing ever prunes** (always 96/96 or 0/96). Strong evidence the blocker is the OPTIMISATION,
+  not the objective/config: `clip_grad_norm→1.0` caps and near-uniformises the gate updates (it's what
+  neutralised λ in the no-scale sweep). ⇒ test loosening the clip before anything else.
+
 ### EXP-B5 — induce cold-start recipe for bypass (cold init −2 + large scale init 2.79 + pinned dir)
 - args: `method=sparse_ablate +task=jailbreak/arditi_bypass direction_source=[resid_pre,17] gate_config.init_log_alpha=-2 init_raw_scale=2.79 num_epochs=40 device=cuda`. rc=0.
 - result: **0/96 active** (mean gate 0.0) · refusal 0.92 · ASR 0.06 · kl 0.0 · perplexity 4.727.
@@ -112,14 +123,13 @@ with "Could not override 'task'. No match in the defaults list."
 - B7 (data): vary the harmful extraction mix (advbench-only vs +malicious_instruct +tdc2023).
 
 ## NEXT
-→ **B6 RUNNING**: first NON-CE objective — **refusal-logit suppression**.
-`method=sparse_ablate +task=jailbreak/arditi_bypass direction_source=[resid_pre,17] +jb_objective=refusal_logit gate_config.init_log_alpha=2 num_epochs=40 device=cuda`
-(= B4's pinned/start-open/learned-scale/l0=0.04 config, but the new objective). Added a selectable
-`jb_objective` knob in `tasks/jailbreak/task.py`: collate bakes the refusal-opener token ids + decision
-position; loss minimises log P(refusal opener "I"/"As") at the decision position (Arditi's refusal signal)
-instead of CE-to-affirmative; CE path unchanged; smoke-tested (decision_pos correct, both branches finite).
-Hypothesis: optimising the refusal signal *directly* gives a sharper per-site gradient (sites whose ablation
-most reduces refusal) that may finally let L0 *select* a sparse subset, where CE only uniformly compressed (B4).
-Watch: #active < 96 with ASR up + ppl/kl clean. Risk: a pure refusal loss may hurt coherence → watch perplexity;
-if so, next add a small CE regulariser term. If it works → l0/ASR/sparsity frontier; if not → contrastive obj
-or sparse-STEER (steer toward compliance, the proven-sparse induce mechanism) instead of ablation.
+→ **B7 RUNNING**: loosen the gradient clip (test the suspected pruning blocker).
+`method=sparse_ablate +task=jailbreak/arditi_bypass direction_source=[resid_pre,17] +grad_clip=10 gate_config.init_log_alpha=2 num_epochs=40 device=cuda`
+(= B4 config + CE objective, but grad clip 1.0→10). Made the clip configurable in `train.py`
+(`config.get("grad_clip", 1.0)`) + added it to the gate-training cache key. Hypothesis: across B1–B6 nothing
+ever pruned (always 96/96 or 0/96) — `clip_grad_norm→1.0` caps every step and forces the gates to move in
+near-lockstep (the same mechanism that neutralised λ in the no-scale sweep), so they never differentiate. A
+looser clip lets the gates move freely and possibly *select*. Watch: #active < 96 at the end? Risk: looser clip
+× the large L0 gradient may destabilise → watch for NaN / divergent perplexity. Branches: if it finally prunes
+→ sweep clip × l0 for the sparsity/ASR frontier; if still dense → the HardConcrete+L0 mechanism itself cannot
+select in this regime → pivot to sparse-STEER toward compliance (the proven-sparse induce mechanism).

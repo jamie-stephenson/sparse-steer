@@ -217,6 +217,7 @@ class JailbreakTask(TaskSpec):
                     "num_epochs": config.get("num_epochs"),
                     "learning_rate": config.get("learning_rate"),
                     "lr_scheduler_type": config.get("lr_scheduler_type"),
+                    "grad_clip": config.get("grad_clip", 1.0),
                     "lr_warmup_steps": config.get("lr_warmup_steps"),
                     "weight_decay": config.get("weight_decay"),
                     "train_batch_size": config.get("train_batch_size"),
