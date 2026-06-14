@@ -38,6 +38,16 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B18 — NEW placement: steer toward compliance at RESID_POST (32 sites, learn_scale, l0 0.3)
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true learn_scale=true init_raw_scale=1.0 gate_config.init_log_alpha=2 l0_lambda=0.3 targets=[resid_post] num_epochs=40 device=cuda`. rc=0.
+- result: **32/32 active** (mean 0.276) · refusal 0.00 · ASR 0.81 · **kl 1.57** · **perplexity 9.29**.
+- verdict: **resid placement is WORSE — hypothesis refuted.** ASR 0.81 ≈ attention's 0.79 but kl 1.57 (3× worse
+  than B17's 0.57) and ppl 9.29 (vs 6.10, baseline 4.73). Adding the compliance direction into the residual
+  stream at every layer perturbs the whole forward pass far more than the gentle attention-head injection — more
+  DIRECT but more DESTRUCTIVE. Still dense (32/32). ⇒ attention frontier (B12/B17) stays best; sliding placement
+  does NOT break the magnitude↔collateral frontier. Next lever: a smarter OBJECTIVE that optimizes the tradeoff
+  directly (dual compliance + harmless-KL-preservation loss) rather than pushing harder.
+
 ### EXP-B17 — frontier knee: frozen steer scale 2.0 (steer, shared, l0 0.3, attention)
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true gate_config.init_log_alpha=2 l0_lambda=0.3 init_raw_scale=2.0 freeze_raw_scale=true num_epochs=40 device=cuda`. rc=0.
 - result: **1024/1024 active** (mean 0.37) · refusal 0.05 · ASR 0.79 · kl 0.57 · perplexity 6.10.
@@ -241,13 +251,15 @@ with "Could not override 'task'. No match in the defaults list."
   where refusal was sparsely *inducible*.
 
 ## NEXT
-→ **B18 RUNNING**: NEW placement — steer toward compliance at RESID_POST (vs attention), per-site learn_scale.
-`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true learn_scale=true init_raw_scale=1.0 gate_config.init_log_alpha=2 l0_lambda=0.3 targets=[resid_post] num_epochs=40 device=cuda`
-(32 resid_post sites instead of 1024 attention heads; gentle learnable init scale 1.0 to avoid early blow-up from
-larger resid norms; open gates; l0 0.3.) Hypothesis: the refusal direction lives in the RESIDUAL stream (Arditi
-reads/ablates it at resid_pre/mid/post), so adding the compliance direction there is more DIRECT than at
-attention-head outputs — may (a) beat the attention ASR↔collateral frontier (B17 0.79/kl 0.57) with higher ASR
-per unit kl, and/or (b) let L0 prune from 32 sites to a sparse subset. Watch ASR vs kl/ppl AND gate count (<32?).
-Branches: cleaner frontier or sparse → new best; same/worse → frontier is intrinsic to steer magnitude ⇒ next
-implement the contrastive (compliant−refusing margin) objective to sharpen selectivity. Best to date: B10 (ASR
-0.87 dense) / B12 (0.79 @ kl 0.55 dense). Robust negative: bypass can't be L0-sparsified at attention.
+→ **B19 RUNNING**: NEW objective `jb_objective=ce_kl` — dual compliance + harmless-KL-preservation.
+`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=0.3 num_epochs=40 device=cuda`
+(attention = best placement per B18; per-site learn_scale default; open gates; l0 0.3; β=1.0.) The objective
+(implemented this tick in tasks/jailbreak/task.py, ce + refusal_logit paths untouched) keeps CE-toward-affirmative
+on harmful rows but replaces harmless CE-to-reference with an explicit **KL(steered‖base) at the decision token**
+— the training analogue of the kl_harmless eval, with the base recomputed under steering_disabled(). Hypothesis:
+directly penalizing harmless collateral (instead of just pushing the steer harder) BREAKS the magnitude↔collateral
+frontier — the optimizer finds gates/scale that bypass refusal on harmful while minimally perturbing harmless →
+lower kl at similar ASR, and possibly sparser (L0 + KL both prune sites that only add collateral). Selectivity from
+the OBJECTIVE, steer still unconditional (respects the constraint). Watch kl vs B17 (0.57) at matched ASR + gates.
+β is the new principled knob — sweep next if β=1.0 over/under-preserves. Best to date: B10 (ASR 0.87 dense) / B12
+(0.79 @ kl 0.55 dense). Robust negatives: bypass can't be L0-sparsified at attention; resid placement worse (B18).

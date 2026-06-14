@@ -120,10 +120,22 @@ class JailbreakTask(TaskSpec):
         # Non-CE objective (jb_objective=refusal_logit): bake what the loss needs (config is not
         # passed to .loss) — the refusal-opener token ids and the decision position (the last
         # prompt token, whose logits predict the first completion token).
-        if config.get("jb_objective", "ce") == "refusal_logit":
+        objective = config.get("jb_objective", "ce")
+        if objective == "refusal_logit":
             rt = [tokenizer(t, add_special_tokens=False)["input_ids"][0] for t in config.refusal_tokens]
             batch["refusal_token_ids"] = torch.tensor(rt, device=device)
             batch["decision_pos"] = (batch["labels"] != -100).int().argmax(dim=1) - 1
+        elif objective == "ce_kl":
+            # Dual objective: CE-toward-affirmative on harmful rows + KL(steered‖base) on harmless
+            # rows at the decision token (mirrors the kl_harmless eval). Bake what .loss needs (it
+            # gets no config): which rows are harmless, the decision position, and the KL weight β.
+            batch["harmless_mask"] = torch.tensor(
+                [r.get("category") == "harmless" for r in rows], device=device
+            )
+            batch["decision_pos"] = (batch["labels"] != -100).int().argmax(dim=1) - 1
+            batch["harmless_kl_weight"] = torch.tensor(
+                float(config.get("harmless_kl_weight", 1.0)), device=device
+            )
         return batch
 
     def loss(self, model, batch: dict[str, Tensor], logits: Tensor) -> Tensor:
@@ -136,6 +148,38 @@ class JailbreakTask(TaskSpec):
             rows = torch.arange(n, device=logits.device)
             lp = F.log_softmax(logits[rows, batch["decision_pos"]].float(), dim=-1)
             return lp[:, batch["refusal_token_ids"]].logsumexp(dim=-1).mean()
+        if "harmless_mask" in batch:
+            # Dual objective (jb_objective=ce_kl): recover compliance on harmful prompts (CE toward
+            # the affirmative completion) while preserving harmless behaviour via an explicit
+            # KL(steered‖base) at the decision token — the training analogue of the kl_harmless
+            # eval. Optimises the success criterion directly (high ASR + low harmless collateral)
+            # rather than pushing the steer harder. The base (unsteered) reference is recomputed
+            # each step with the frozen base model under steering_disabled() (no_grad).
+            hm = batch["harmless_mask"]
+            idx = torch.arange(logits.size(0), device=logits.device)
+            dp = batch["decision_pos"]
+            if (~hm).any():
+                harmful_labels = batch["labels"].clone()
+                harmful_labels[hm] = -100  # score CE only on the harmful rows' completions
+                sh = logits[..., :-1, :].float()
+                ce = F.cross_entropy(
+                    sh.reshape(-1, sh.size(-1)),
+                    harmful_labels[..., 1:].reshape(-1),
+                    ignore_index=-100,
+                )
+            else:
+                ce = logits.new_zeros(())
+            kl = logits.new_zeros(())
+            if hm.any():
+                steered_lp = F.log_softmax(logits[idx, dp].float(), dim=-1)[hm]
+                with torch.no_grad(), model.steering_disabled():
+                    base_logits = model(
+                        input_ids=batch["input_ids"],
+                        attention_mask=batch["attention_mask"],
+                    ).logits
+                base_lp = F.log_softmax(base_logits[idx, dp].float(), dim=-1)[hm]
+                kl = (steered_lp.exp() * (steered_lp - base_lp)).sum(dim=-1).mean()
+            return ce + batch["harmless_kl_weight"] * kl
         shift_logits = logits[..., :-1, :].float()
         return F.cross_entropy(
             shift_logits.reshape(-1, shift_logits.size(-1)),
@@ -211,6 +255,13 @@ class JailbreakTask(TaskSpec):
                     "affirmative_prefix": config.affirmative_prefix,
                     "gate_train_target": config.get("gate_train_target", "compliance"),
                     "jb_objective": config.get("jb_objective", "ce"),
+                    # β only affects the ce_kl objective; key it solely for ce_kl runs so existing
+                    # ce / refusal_logit cache identities (and their artifacts) stay unchanged.
+                    **(
+                        {"harmless_kl_weight": config.get("harmless_kl_weight", 1.0)}
+                        if config.get("jb_objective", "ce") == "ce_kl"
+                        else {}
+                    ),
                     "refusal_prefix": config.get("refusal_prefix"),
                     "completion_tokens": config.get("completion_tokens"),
                     "seed": config.seed,
