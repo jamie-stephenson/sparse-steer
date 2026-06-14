@@ -38,6 +38,16 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B19 — NEW objective ce_kl, first run (per-site learn_scale, β 1.0, l0 0.3) — CONFOUNDED + buggy proxy
+- args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=0.3 num_epochs=40 device=cuda`. rc=0.
+- result: **1024/1024 active** (mean 0.418) · refusal 0.00 · ASR 0.79 · **kl 1.95** · **perplexity 11.28**.
+- verdict: **uninformative — two design errors, now fixed.** (1) CONFOUND: used the *default per-site* learn_scale,
+  not shared_scale → high-collateral regime (cf B10 per-site kl 2.96), not comparable to the B12 frontier
+  (shared, 0.55). (2) MISALIGNED PROXY: the training KL penalized only LAST-TOKEN steering (the CE forward's
+  steer_mask) while kl_harmless eval steers ALL positions → earlier-token collateral unpenalized → eval kl stayed
+  high. ⇒ fixed the loss so the KL term measures the steered harmless dist under FULL-prompt steering (matches
+  eval); re-run as a clean A/B with shared_scale (B20) vs B12's 0.55. The ce_kl path itself ran end-to-end clean.
+
 ### EXP-B18 — NEW placement: steer toward compliance at RESID_POST (32 sites, learn_scale, l0 0.3)
 - args: `method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true learn_scale=true init_raw_scale=1.0 gate_config.init_log_alpha=2 l0_lambda=0.3 targets=[resid_post] num_epochs=40 device=cuda`. rc=0.
 - result: **32/32 active** (mean 0.276) · refusal 0.00 · ASR 0.81 · **kl 1.57** · **perplexity 9.29**.
@@ -251,15 +261,15 @@ with "Could not override 'task'. No match in the defaults list."
   where refusal was sparsely *inducible*.
 
 ## NEXT
-→ **B19 RUNNING**: NEW objective `jb_objective=ce_kl` — dual compliance + harmless-KL-preservation.
-`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=0.3 num_epochs=40 device=cuda`
-(attention = best placement per B18; per-site learn_scale default; open gates; l0 0.3; β=1.0.) The objective
-(implemented this tick in tasks/jailbreak/task.py, ce + refusal_logit paths untouched) keeps CE-toward-affirmative
-on harmful rows but replaces harmless CE-to-reference with an explicit **KL(steered‖base) at the decision token**
-— the training analogue of the kl_harmless eval, with the base recomputed under steering_disabled(). Hypothesis:
-directly penalizing harmless collateral (instead of just pushing the steer harder) BREAKS the magnitude↔collateral
-frontier — the optimizer finds gates/scale that bypass refusal on harmful while minimally perturbing harmless →
-lower kl at similar ASR, and possibly sparser (L0 + KL both prune sites that only add collateral). Selectivity from
-the OBJECTIVE, steer still unconditional (respects the constraint). Watch kl vs B17 (0.57) at matched ASR + gates.
-β is the new principled knob — sweep next if β=1.0 over/under-preserves. Best to date: B10 (ASR 0.87 dense) / B12
-(0.79 @ kl 0.55 dense). Robust negatives: bypass can't be L0-sparsified at attention; resid placement worse (B18).
+→ **B20 RUNNING**: clean A/B for ce_kl — shared_scale (= B12) + aligned full-prompt KL term.
+`method=sparse +task=jailbreak/arditi_bypass intervention=steer +negate_direction=true +shared_scale=true +jb_objective=ce_kl +harmless_kl_weight=1.0 gate_config.init_log_alpha=2 l0_lambda=0.3 num_epochs=40 device=cuda`
+(= B12's exact frontier config, only CE→ce_kl, so kl difference is purely the objective; β=1.0.) Fixes B19's two
+errors: shared_scale (gentle regime, matches B12's 0.55 kl point) + the KL term now measures the steered harmless
+dist under FULL-prompt steering (matches the kl_harmless eval), so it actually penalizes the collateral eval sees.
+The dual loss does 3 forwards/step (CE last-token-steered + KL full-steered + base under steering_disabled), so
+training is ~1.5× slower (~20 min). Hypothesis: penalizing harmless collateral directly BREAKS the magnitude↔
+collateral frontier → kl < 0.55 at ASR ~0.79 (vs B12). Branches: kl drops → β-sweep to push toward kl→0 (the
+headline surgical jailbreak), and check if L0+KL also sparsified; kl flat → the unconditional steer can't be made
+selective even with a direct penalty (refusal & harmless share the steered subspace) — a deeper finding, pivot to
+per-direction selectivity (orthogonalize steer vs harmless variation). Best to date: B10 (ASR 0.87) / B12 (0.79 @
+kl 0.55). Robust negatives: bypass not L0-sparsifiable at attention; resid placement worse (B18).

@@ -171,7 +171,16 @@ class JailbreakTask(TaskSpec):
                 ce = logits.new_zeros(())
             kl = logits.new_zeros(())
             if hm.any():
-                steered_lp = F.log_softmax(logits[idx, dp].float(), dim=-1)[hm]
+                # Measure the steered harmless decision distribution under FULL-prompt steering
+                # (all positions) — exactly as the kl_harmless eval does — NOT the last-token
+                # steering used for the CE forward (the passed `logits`). Otherwise only last-token
+                # collateral is penalized while eval/deployment steer everywhere, leaving most
+                # harmless collateral unpenalized. After the train loop's steer_ctx exits, the
+                # hooks' pos_mask is None, so this fresh forward steers every position (with grad).
+                steered_full = model(
+                    input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]
+                ).logits
+                steered_lp = F.log_softmax(steered_full[idx, dp].float(), dim=-1)[hm]
                 with torch.no_grad(), model.steering_disabled():
                     base_logits = model(
                         input_ids=batch["input_ids"],
