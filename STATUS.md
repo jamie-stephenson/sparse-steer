@@ -38,6 +38,17 @@ with "Could not override 'task'. No match in the defaults list."
 ## Experiment log
 *(newest first; the tick appends one block per finished run: config · metrics · #active gates · verdict)*
 
+### EXP-B4 — pinned Arditi layer-17 direction (resid, start-open, l0 0.04)
+- args: `method=sparse_ablate +task=jailbreak/arditi_bypass direction_source=[resid_pre,17] gate_config.init_log_alpha=2 num_epochs=40 device=cuda`
+  (learn_scale=true, normalize_ablation=true, l0_lambda=0.04, resid targets, pinned single direction). rc=0.
+- result: **96/96 active** (mean gate 0.277) · refusal 0.44 · ASR 0.43 · kl 0.029 · perplexity 4.717.
+- verdict: **PARTIAL & dense — but the BEST coherent jailbreak so far.** Pinning Arditi's single direction gave
+  a stronger, fully-coherent partial bypass (ASR 0.43 vs B2's 0.22 with self; perplexity baseline, kl low) —
+  yet STILL no pruning (96/96, same uniform mean 0.277). A single pinned direction did NOT break the symmetry.
+  Summary across B1–B4: **no config (self/pinned · resid/attn · cold/open) yields a sparse subset** — L0 +
+  HardConcrete here only uniformly compresses (open init) or collapses (cold init). ⇒ try the ONE recipe that
+  ever produced sparse selection: the induce cold-start (cold init + LARGE scale init).
+
 ### EXP-B3 — attention-head targets (start-open, l0 0.04)
 - args: `method=sparse_ablate +task=jailbreak/arditi_bypass targets=[attention] gate_config.init_log_alpha=2 num_epochs=40 device=cuda`
   (learn_scale=true, l0_lambda=0.04, 1024 heads = 32 layers × 32 heads, direction_source=self). rc=0.
@@ -91,11 +102,12 @@ with "Could not override 'task'. No match in the defaults list."
 - B7 (data): vary the harmful extraction mix (advbench-only vs +malicious_instruct +tdc2023).
 
 ## NEXT
-→ **B4 RUNNING**: pinned Arditi layer-17 direction on resid (break the site symmetry).
-`method=sparse_ablate +task=jailbreak/arditi_bypass direction_source=[resid_pre,17] gate_config.init_log_alpha=2 num_epochs=40 device=cuda`
-(learn_scale=true, l0_lambda=0.04, resid targets). Hypothesis: with every site ablating the SAME layer-17
-direction (Arditi's), the resid sites finally DIFFERENTIATE — they differ in how much that one direction is
-present — breaking the symmetry that kept the self-direction sites uniform (B1/B2). So L0 can prune to the
-subset of sites where Arditi's direction matters most: a *sparse* version of Arditi's own ablation. Watch:
-#active < 96 with ASR high and ppl/kl clean. Branches: if it prunes+jailbreaks → l0/ASR frontier; if still
-dense or weak → a non-CE objective (B5: refusal-logit suppression) that differentiates sites directly.
+→ **B5 RUNNING**: induce-style cold-start for bypass (cold init + LARGE scale init + pinned dir).
+`method=sparse_ablate +task=jailbreak/arditi_bypass direction_source=[resid_pre,17] gate_config.init_log_alpha=-2 init_raw_scale=2.79 num_epochs=40 device=cuda`
+(learn_scale=true, l0=0.04). Hypothesis: B1 collapsed from a cold init because its scale init was *small*
+(0.54) → weak gate gradient. The induce runs recruited a SPARSE set from a cold init precisely because the
+scale init was *large* (2.79): a big scale amplifies the gate gradient so CE recruits the useful sites from
+closed while L0 holds the rest shut. Apply that recipe to bypass with the pinned Arditi direction. Watch: does
+#active land in a sparse MIDDLE (not 0, not 96) with ASR up + ppl/kl clean? (Risk: large scale may over-ablate
+→ watch perplexity.) Branches: if it collapses → cold is unrecoverable for ablate → next: a NON-CE objective
+(refusal-logit suppression, code) that differentiates sites by their actual effect on refusal.
