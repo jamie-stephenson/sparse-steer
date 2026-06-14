@@ -17,9 +17,11 @@ wandb/
 plots/
 logs/
 
-# track no markdown except the top-level README
+# track no markdown except the top-level README + the autoresearch driving docs
 *.md
 !README.md
+!TASK.md
+!STATUS.md
 
 # LaTeX build artifacts + logs
 *.aux

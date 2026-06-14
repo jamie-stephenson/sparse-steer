@@ -189,6 +189,16 @@ def train_steering(
     # norm so the L0 gates select on objective benefit, not activation norm
     # (see SteeringModel.set_proj_act_norms). Site-agnostic; default off.
     if config.get("normalize_ablation", False) and model.intervention == "ablate":
+        # The proj_act_norm division only restores the ablation magnitude (α≈1) if the
+        # scale can grow to compensate it; with a fixed scale the ablation is left
+        # arbitrarily down-scaled per site. So normalize_ablation requires a learnable scale.
+        if not (config.get("learn_scale", False) or config.get("shared_scale", False)):
+            raise ValueError(
+                "normalize_ablation=true requires a learnable scale (learn_scale=true or "
+                "shared_scale=true): the proj_act_norm division is only meaningful when the "
+                "scale can grow to restore the ablation magnitude. Use normalize_ablation=false "
+                "with a fixed scale."
+            )
         n_norm = min(len(train_split), config.get("proj_act_norm_examples", 128))
         rows = list(train_split)[:n_norm]
         batch = task.collate(rows, tokenizer, model.device, config)
