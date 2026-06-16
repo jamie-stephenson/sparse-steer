@@ -10,7 +10,7 @@
 #                          method=sparse_ablate direction_source='[resid_pre, 17]'
 #
 # Both hold the direction fixed (it is a buffer, never trained) and optimise only gates + scale.
-method: sparse_ablate
+experiment: steering   # which Experiment engine runs this preset
 refinement_method: gate_training
 direction_source: self
 intervention: ablate

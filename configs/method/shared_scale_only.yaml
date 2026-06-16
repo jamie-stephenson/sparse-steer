@@ -1,6 +1,6 @@
 # @package _global_
 # Single learned scale shared across all heads, no gates.
-method: shared_scale_only
+experiment: steering   # which Experiment engine runs this preset
 refinement_method: gate_training   # extract + set, then train learnable shared scale
 intervention: steer   # 'ablate' = geometric projection ablation (override on CLI)
 steering_layer_ids: null

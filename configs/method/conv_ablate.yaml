@@ -2,7 +2,7 @@
 # Fixed single-site geometric (projection) ablation — the minimal fra_proj DoM-style
 # baseline. Removes the activation's component along the mean-difference direction at a
 # single hook point (layer-0 resid_mid), with a fixed scale and no learned gates.
-method: conv_ablate
+experiment: steering   # which Experiment engine runs this preset
 intervention: ablate
 steering_layer_ids: [0]
 targets: [resid_mid]

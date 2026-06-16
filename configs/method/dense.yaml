@@ -1,5 +1,5 @@
 # @package _global_
-method: dense
+experiment: steering   # which Experiment engine runs this preset
 refinement_method: none   # extract + set the direction, no training
 intervention: steer   # 'ablate' = geometric projection ablation (override on CLI)
 steering_layer_ids: null

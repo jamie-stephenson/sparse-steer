@@ -1,5 +1,5 @@
 # @package _global_
-method: lora
+experiment: lora   # which Experiment engine runs this preset
 lora_rank: 4
 lora_alpha: 8
 lora_target_modules: [q_proj, v_proj]

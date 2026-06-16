@@ -3,6 +3,15 @@ defaults:
   - task: truthfulqa
   - _self_
 
+# A `method` (configs/method/*.yaml) is a preset = a recipe of hyperparameters, usually
+# task-independent. Its identity IS the chosen filename, recovered below from Hydra's group
+# choice — presets do NOT self-declare it. Each preset instead declares `experiment:` — the
+# Experiment engine that runs it (steering | lora | unsteered), dispatched via
+# experiment.build_experiment. So `method` is the cache-key + label identity (the preset name),
+# while `experiment` is the code path; several presets share one engine (e.g. caa is a
+# `dense`-style steering preset → experiment: steering).
+method: ${hydra:runtime.choices.method}
+
 # model_name and dtype are task-owned (set in configs/task/*.yaml): the defaults
 # list ends with _self_, so anything here would override a task's value.
 seed: 42

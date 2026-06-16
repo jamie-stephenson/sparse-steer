@@ -25,24 +25,10 @@ from datasets import load_dataset
 from omegaconf import DictConfig
 from transformers import AutoTokenizer
 
-from sparse_steer.experiment import (
-    LoraExperiment,
-    SteeringExperiment,
-    UnsteeredExperiment,
-)
+from sparse_steer.experiment import build_experiment
 from sparse_steer.experiment.base import Experiment
 from sparse_steer.tasks.truthfulqa.task import TruthfulQATask
 from sparse_steer.utils.eval import answer_log_probs
-
-METHODS: dict[str, type[Experiment]] = {
-    "unsteered": UnsteeredExperiment,
-    "dense": SteeringExperiment,
-    "sparse": SteeringExperiment,
-    "scale_only": SteeringExperiment,
-    "shared_scale_only": SteeringExperiment,
-    "gates_only": SteeringExperiment,
-    "lora": LoraExperiment,
-}
 
 
 def token_len(tokenizer, text: str) -> int:
@@ -56,12 +42,8 @@ def rank_of(values: list[float], idx: int) -> int:
 
 def load_model_via_experiment(cfg: DictConfig):
     """Load a fully prepared model by running the experiment pipeline (cache-only)."""
-    method = cfg.method
-    if method not in METHODS:
-        raise ValueError(f"Unknown method '{method}'. Available: {sorted(METHODS)}")
-
     task = TruthfulQATask()
-    experiment = METHODS[method](cfg, task)
+    experiment = build_experiment(cfg, task)
     Experiment._seed_everything(cfg.seed)
 
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
@@ -69,10 +51,10 @@ def load_model_via_experiment(cfg: DictConfig):
 
     model = experiment._load_model()
 
-    if method == "unsteered":
+    if cfg.experiment == "unsteered":
         return model, tokenizer
 
-    output_dir = Path("/tmp/diag_output") / method
+    output_dir = Path("/tmp/diag_output") / cfg.method
     output_dir.mkdir(parents=True, exist_ok=True)
 
     model, _, _ = experiment._run_pipeline(

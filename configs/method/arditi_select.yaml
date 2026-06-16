@@ -5,7 +5,7 @@
 #   refinement_method: none        → set it and stop (no gate training)
 # Switch direction_source to `self` (+ refinement_method gate_training) for sparse per-site
 # ablation, or to `[resid_pre, L]` to pin Arditi's direction and learn sparse placement.
-method: arditi_select
+experiment: steering   # which Experiment engine runs this preset
 direction_source: grid_select    # one direction, chosen by the grid + filters, broadcast to all
 refinement_method: none          # no training — just set the selected direction
 intervention: ablate
