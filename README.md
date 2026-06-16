@@ -31,7 +31,7 @@ If you want Weights & Biases logging, also set `WANDB_*` values.
 
 ```bash
 uv run run.py
-uv run run.py method=sparse task=tinysleepers            # override method and task
+uv run run.py method=sparse task=tinysleepers generative_eval=true  # override method and task
 ```
 
 Hydra configs live under `configs/`. Method and task overrides are composed from
@@ -41,7 +41,7 @@ Hydra configs live under `configs/`. Method and task overrides are composed from
 
 The key objects are:
 - `Experiment` owns the "load data->extract steering vectors->train gates->evaluate" pipeline.
-- `Task` owns the task specifics (dataset, evaluations etc.).
+- `TaskSpec` owns the task specifics (dataset, evaluations etc.).
 - `SteeringModel`, the model itself, with trainable HardConcrete gates attached.
 
 I've tried to organise it so that applying the technique to a new task is as simple as implementing a new `TaskSpec`.
