@@ -72,7 +72,8 @@ I've tried to organise it so that applying the technique to a new task is as sim
 │   │   ├── collate.py              # shared prompt + completion collation
 │   │   ├── jailbreak/              # refusal-direction ablation
 │   │   ├── truthfulqa/             # steering to improve TruthfulQA performance
-│   │   └── tinysleepers/           # sleeper agent removal
+│   │   ├── tinysleepers/           # sleeper agent removal
+│   │   └── safesteer/              # safety steering (SafeSteer reproduction)
 │   └── utils/                      # leaf utilities: cache, tokenization...
 └── report/                         # project report (LaTeX + figures)
 ```
