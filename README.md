@@ -31,7 +31,7 @@ If you want Weights & Biases logging, also set `WANDB_*` values.
 
 ```bash
 uv run run.py
-uv run run.py method=sparse task=tinysleepers generative_eval=true  # override method and task
+uv run run.py method=sparse task=tinysleepers/default generative_eval=true  # override method and task
 ```
 
 ## Repo structure
@@ -41,7 +41,12 @@ The key objects are:
 - `TaskSpec` owns the task specifics (dataset, evaluations etc.).
 - `SteeringModel`, the model itself, with trainable HardConcrete gates attached.
 
-Hydra configs live under `configs/`. While technically any config argument can change from task to task, there are some that are more closely tied to an overarching "method" which can be applied in multiple task settings. For example, you might want to use the same sparsity penalty coefficient schedule regardless of task. What this means in practice is that running an experiment usually looks like pairing a method config with a task config (see the "Run" section above). 
+Hydra configs live under `configs/`. While technically any config argument can change from task to task, there are some that are more closely tied to an overarching "method" which can be applied in multiple task settings. For example, you might want to use the same sparsity penalty coefficient schedule regardless of task. What this means in practice is that running an experiment looks like pairing a method config with a task config (see the "Run" section above). The task config overrides the method config so you are free to adjust method specifics from the task config as you see fit. Similarly you can override both from the command line. The full hierachy is:
+1. method/ preset
+2. task/ preset (overrides method)
+3. config.yaml body (_self_, overrides both)
+4. CLI overrides (key=value, override everything)
+
 
 I've tried to organise it so that applying the technique to a new task is as simple as implementing a new `TaskSpec`.
 
