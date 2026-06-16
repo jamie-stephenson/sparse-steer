@@ -9,15 +9,10 @@ Sparse activation steering experiments for language models, built on
 - Train Hard-Concrete gates to apply steering sparsely.
 - Evaluate steered model.
 
-Steering is injected at TransformerLens hook points, so all supported
-architectures (Llama, Qwen2, …) share one code path with no per-model layout
-code. The three steerable components map directly onto hooks:
+## Why TransformerLens?
 
-| component   | hook point                    | vector shape       |
-| ----------- | ----------------------------- | ------------------ |
-| `attention` | `blocks.{i}.attn.hook_z`      | `(n_heads, d_head)`|
-| `mlp`       | `blocks.{i}.mlp.hook_post`    | `(d_mlp,)`         |
-| `residual`  | `blocks.{i}.hook_resid_post`  | `(d_model,)`       |
+All supported architectures (Llama, Qwen2, …) share one code path with no per-model layout
+code. TL also makes collecting activations easy with `run_with_cache`.
 
 > Models must be supported by `HookedTransformer.from_pretrained` (e.g.
 > `Qwen/Qwen2.5-0.5B-Instruct`, `meta-llama/Llama-3.2-1B-Instruct`).
@@ -43,6 +38,13 @@ Hydra configs live under `configs/`. Method and task overrides are composed from
 `configs/method/` and `configs/task/`.
 
 ## Repo structure
+
+The key objects are:
+- `Experiment` owns the "load data->extract steering vectors->train gates->evaluate" pipeline.
+- `Task` owns the task specifics (dataset, evaluations etc.).
+- `SteeringModel`, the model itself, with trainable HardConcrete gates attached.
+
+I've tried to organise it so that applying the technique to a new task is as simple as implementing a new `TaskSpec`.
 
 ```text
 .
