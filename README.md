@@ -34,15 +34,14 @@ uv run run.py
 uv run run.py method=sparse task=tinysleepers generative_eval=true  # override method and task
 ```
 
-Hydra configs live under `configs/`. Method and task overrides are composed from
-`configs/method/` and `configs/task/`.
-
 ## Repo structure
 
 The key objects are:
 - `Experiment` owns the "load data->extract steering vectors->train gates->evaluate" pipeline.
 - `TaskSpec` owns the task specifics (dataset, evaluations etc.).
 - `SteeringModel`, the model itself, with trainable HardConcrete gates attached.
+
+Hydra configs live under `configs/`. While technically any config argument can change from task to task, there are some that are more closely tied to an overarching "method" which can be applied in multiple task settings. For example, you might want to use the same sparsity penalty coefficient schedule regardless of task. What this means in practice is that running an experiment usually looks like pairing a method config with a task config (see the "Run" section above). 
 
 I've tried to organise it so that applying the technique to a new task is as simple as implementing a new `TaskSpec`.
 
