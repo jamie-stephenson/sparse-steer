@@ -6,7 +6,7 @@
 # Compose with a method (this file = the single-DoM baseline + the unsteered control):
 #   method=unsteered → clean prompts, no steering (asr≈0 — confirms the trigger is the only path)
 #   method=dense     → add ω at one site/strength, no training (sweep steering_layer_ids + init_raw_scale)
-#   (learned sparse gates → use task=tinysleepers_elicit/sparse method=sparse)
+#   (learned sparse gates → use task=tinysleepers/elicit_sparse method=sparse)
 task_name: tinysleepers_elicit
 elicit: true
 

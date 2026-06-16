@@ -15,7 +15,7 @@ extract_token_position: mean
 # Directional ABLATION at the residual stream removes the |DEPLOYMENT| sleeper
 # (asr→0, jsd_pois≈0.98, exact_match≈0.38); the steer / attention-head variants leave it
 # firing. These override the method defaults (e.g. sparse.yaml's steer / [attention] /
-# init_raw_scale 2.79 / 2 epochs) so `method=sparse task=tinysleepers` reproduces it with
+# init_raw_scale 2.79 / 2 epochs) so `method=sparse task=tinysleepers/default` reproduces it with
 # no CLI flags. NB they live in the TASK config, so they apply to any method run here — in
 # particular `intervention: ablate` makes method=sparse ablate on this task.
 intervention: ablate

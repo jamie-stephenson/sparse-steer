@@ -6,7 +6,7 @@
 # Use with method=sparse (which supplies the gate hyperparameters: gate_config, l0_lambda,
 # learn_scale, learning_rate, ...). The gates must DISCOVER the placement from the objective
 # alone — no per-site bias.
-#   task=tinysleepers_elicit/sparse method=sparse
+#   task=tinysleepers/elicit_sparse method=sparse
 task_name: tinysleepers_elicit
 elicit: true
 
