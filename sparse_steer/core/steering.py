@@ -38,10 +38,15 @@ from torch import Tensor, nn
 from transformer_lens import HookedTransformer
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
-Component = Literal["attention", "mlp", "residual", "resid_pre", "resid_mid", "resid_post"]
+Component = Literal[
+    "attention", "attn_out", "mlp", "residual", "resid_pre", "resid_mid", "resid_post"
+]
 
 COMPONENT_HOOK: dict[Component, str] = {
     "attention": "blocks.{i}.attn.hook_z",
+    # attn_out = the attention block's residual contribution (post-W_O, d_model). SafeSteer's
+    # "attention activations" (Eq 1/2) are most plausibly this, not the per-head hook_z.
+    "attn_out": "blocks.{i}.hook_attn_out",
     "mlp": "blocks.{i}.mlp.hook_post",
     "residual": "blocks.{i}.hook_resid_post",  # back-compat alias of resid_post
     "resid_pre": "blocks.{i}.hook_resid_pre",  # block input (Arditi reads/ablates directions here)
@@ -269,6 +274,7 @@ def load_hooked_transformer(
     lora_adapter: str | None = None,
     device: str = "cpu",
     dtype: torch.dtype = torch.float32,
+    process_weights: bool = True,
 ) -> HookedTransformer:
     """Load a ``HookedTransformer`` for ``model_name``.
 
@@ -276,6 +282,13 @@ def load_hooked_transformer(
     (TransformerLens has no native PEFT support) and hand the merged weights in
     via ``hf_model=``. ``model_name`` always names the architecture for TL's
     config and doubles as the base weights the adapter is applied to.
+
+    With ``process_weights=False``, skip TransformerLens's weight processing
+    (LayerNorm folding, weight centering, …). That processing is function-preserving
+    (hooks read the same residual stream), but at reduced precision it builds a third
+    full-size state dict (~3×13GB for 7B) which swaps/OOMs. It is also the *faithful*
+    choice when reproducing a paper that runs the raw HF model with no TL transforms
+    (e.g. SafeSteer): the activations ω is built from then match the unprocessed model.
     """
     if lora_adapter is None:
         hf_model = None
@@ -311,6 +324,11 @@ def load_hooked_transformer(
             # (hf + converted + processed ≈ 46 GB for 7B) which OOMs a 50 GB
             # container, and TL itself advises no_processing at reduced precision.
             # Processing is function-preserving, so resid-stream hooks are unaffected.
+            return HookedTransformer.from_pretrained_no_processing(
+                model_name, hf_model=hf_model, device=device, dtype=dtype
+            )
+        if not process_weights:
+            # hf_model is None here → TL fetches model_name's weights itself.
             return HookedTransformer.from_pretrained_no_processing(
                 model_name, hf_model=hf_model, device=device, dtype=dtype
             )
@@ -396,9 +414,11 @@ class SteeringModel(nn.Module):
         shared_scale: bool = False,
         init_raw_scale: float = 0.0,
         intervention: str = "steer",
+        process_weights: bool = True,
     ) -> "SteeringModel":
         tl = load_hooked_transformer(
-            model_name, lora_adapter=lora_adapter, device=device, dtype=dtype
+            model_name, lora_adapter=lora_adapter, device=device, dtype=dtype,
+            process_weights=process_weights,
         )
         if steering_layer_ids is None:
             steering_layer_ids = list(range(tl.cfg.n_layers))
@@ -425,6 +445,8 @@ class SteeringModel(nn.Module):
         c = self.tl.cfg
         if component == "attention":
             return (c.n_heads, c.d_head)
+        if component == "attn_out":
+            return (c.d_model,)  # post-W_O attention output (residual contribution)
         if component == "mlp":
             return (c.d_mlp,)
         if component in _RESID_COMPONENTS:

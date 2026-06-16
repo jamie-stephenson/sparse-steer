@@ -3,8 +3,10 @@
 Model construction lives in ``sparse_steer.core.loading``; this module keeps only the
 pieces that genuinely depend on the experiment layer (cache-aware extraction)."""
 
+import gc
 from typing import Any
 
+import torch
 from datasets import Dataset
 from omegaconf import OmegaConf
 from transformers import PreTrainedTokenizerBase
@@ -13,8 +15,10 @@ from sparse_steer.core.extract import (
     collect_activations,
     extract_steering_vectors,
     load_steering_vectors,
+    prune_top_l2,
     save_steering_vectors,
 )
+from sparse_steer.core.loading import load_extraction_model
 from sparse_steer.core.steering import SteeringModel
 from sparse_steer.utils.cache import ArtifactType
 
@@ -48,16 +52,44 @@ def run_extraction(
         }
         return steering_vectors
 
-    extraction_with_acts, component_names = collect_activations(
-        extraction_ds,
-        model,
-        tokenizer,
-        targets=targets,
-        batch_size=config.extract_batch_size,
-        token_position=config.extract_token_position,
-    )
+    # Cross-model transfer (task-agnostic): when extraction_model_name is set and differs from the
+    # steered model_name, read activations from a separate read-only model, then free it; everything
+    # downstream (set_all_vectors, gate training, eval) stays on the steered `model`. Default
+    # (extraction_model_name unset/equal) ⇒ self-extraction, behaviour unchanged.
+    ext_name = config.get("extraction_model_name")
+    if ext_name and ext_name != config.model_name:
+        ext_model, ext_tokenizer = load_extraction_model(config, model)
+        try:
+            extraction_with_acts, component_names = collect_activations(
+                extraction_ds,
+                ext_model,
+                ext_tokenizer,
+                targets=targets,
+                batch_size=config.extract_batch_size,
+                token_position=config.extract_token_position,
+            )
+        finally:
+            del ext_model
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            elif torch.backends.mps.is_available():
+                torch.mps.empty_cache()
+    else:
+        extraction_with_acts, component_names = collect_activations(
+            extraction_ds,
+            model,
+            tokenizer,
+            targets=targets,
+            batch_size=config.extract_batch_size,
+            token_position=config.extract_token_position,
+        )
     print("Computing steering vectors...")
     steering_vectors = extract_steering_vectors(extraction_with_acts, component_names)
+    prune_frac = config.get("prune_top_frac")
+    if prune_frac:
+        steering_vectors = {c: prune_top_l2(v, float(prune_frac)) for c, v in steering_vectors.items()}
+        print(f"  Pruned ω to top {prune_frac} of components by |value| (SafeSteer generic denoiser)")
     sv_dest = experiment._prepare_cache_path(ArtifactType.STEERING_VECTORS)
     metadata = OmegaConf.to_container(config, resolve=True)
     save_steering_vectors(steering_vectors, sv_dest, metadata=metadata)

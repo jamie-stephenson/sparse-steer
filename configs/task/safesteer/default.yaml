@@ -1,0 +1,64 @@
+# @package _global_
+# SafeSteer (arXiv 2506.04250) — DATA + EVAL preset. Additive safe−unsafe attention steering:
+# ω = mean(attn_act(safe)) − mean(attn_act(unsafe)) (Eq 1), added at one layer (Eq 2), gradient-free.
+# Compose with a method (this file = Config A faithful + the unsteered baseline):
+#   method=unsteered → naive baseline (high naive %unsafe on the base model = the safety headline)
+#   method=dense     → faithful gradient-free SafeSteer (extract ω, add it; no training)
+#   (Config B sparse gates → use task=safesteer/sparse method=sparse)
+task_name: safesteer
+
+# Steered model = Llama-2-7B BASE (high naive %unsafe). dtype float16. (Paper's models; gated on HF.)
+model_name: meta-llama/Llama-2-7b-hf
+dtype: float16
+lora_adapter: null
+
+# Cross-model transfer (SafeSteer §3.4 — best results): extract ω from the CHAT model, steer the
+# base. Set null for self-steer (extract == steer). Must be same architecture (within-family).
+extraction_model_name: meta-llama/Llama-2-7b-chat-hf
+
+# Load the raw HF model with NO TransformerLens weight processing (LN folding / weight centering).
+# Faithful to the paper (which runs the plain HF model), and avoids the fp16 3×-state-dict OOM.
+weight_processing: false
+
+intervention: steer                # additive (NOT ablation)
+extract_token_position: mean       # Eq 1: average attention activations over all tokens
+targets: [attn_out]                # attention-block output (d_model) — the paper's site (ITI/Arditi "attention activations").
+                                   # DIAGNOSTIC (multi-site ω energy): attn_out/hook_z are CLEAN (top-1 dim 0.4–0.6% of
+                                   # energy, spread) whereas resid_mid/resid_post are 65% in ONE dim = Llama-2-7B
+                                   # massive-activation dims 2533/1415 (a model artifact, NOT safety → steering the
+                                   # residual degenerates into multilingual junk). Steer the clean attention site.
+                                   # (The earlier resid_post switch was the bug; the paper steers attention, never masks.)
+steering_layer_ids: [14]           # single layer, same for extract + apply (sweep {16,20,25,31})
+direction_source: self
+normalize_steering_vectors: false
+prune_top_frac: null               # optional: keep top-frac by L2 to denoise the generic-data vector
+filter_safe_refusals: false        # refusal-evasion: drop refusal responses from the SAFE extraction side
+paired_extraction: true            # MATCHED contrast: safe vs unsafe response to the SAME prompt (BeaverTails only) —
+                                   # isolates the safety direction (the paper's matched-counterpart idea, Table 1).
+
+# ── Data: dataset-defined safe vs unsafe contrast ─────────────────────────
+dataset: beavertails               # 'beavertails' (resp-harm, paired safe) | 'catqa' (prompt-harm + Alpaca)
+categories: all                    # 'all' = pooled global, or a list e.g. [child_abuse]
+n_extraction: 3000                 # → 1500 safe(+) / 1500 unsafe(−)
+n_train: 256                       # Config-B gate-training set (unused by dense/unsteered)
+n_eval: 300                        # → 150 unsafe (%unsafe / safety_score) + 150 benign (collateral)
+completion_tokens: 64
+safe_deflection: null              # CatQA-only: CE-toward-safe target when no paired safe answer exists
+
+# m = softplus(init_raw_scale): -0.433 → 0.5 (the paper's fixed multiplier). Sweep on the CLI.
+init_raw_scale: -0.433
+learn_scale: false
+
+# ── Eval suite ─────────────────────────────────────────────────────────────
+# safety_score = Llama Guard 2 ASR over unsafe rollouts = SafeSteer %unsafe-responses (↓ after steer = safer).
+# refusal_rate_harmful: its complement (1−) = "non-refusal" (SafeSteer wants safe-but-still-answering).
+# kl_harmless + perplexity_capability = benign-prompt collateral (general capability retained).
+evals: [safety_score, refusal_rate_harmful, kl_harmless, perplexity_capability]
+eval_refusal_detector: regex
+llama_guard_model: meta-llama/Meta-Llama-Guard-2-8B
+judge: regex
+generative_eval: true
+gen_tokens: 256
+eval_seeds: [0]
+eval_temperature: 0                # greedy
+steer_token_position: all          # SafeSteer adds ω at every position

@@ -22,6 +22,7 @@ from sparse_steer.utils.tokenize import tokenize
 
 class ActivationTarget(Enum):
     ATTENTION = "attention"
+    ATTN_OUT = "attn_out"  # post-W_O attention output (hook_attn_out, d_model)
     MLP = "mlp"
     RESIDUAL = "residual"  # back-compat alias of resid_post
     RESID_PRE = "resid_pre"  # block input (Arditi extracts directions here)
@@ -208,6 +209,23 @@ def extract_steering_vectors(
         diff = acts[positive].float().mean(0) - acts[~positive].float().mean(0)
         result[name] = diff
     return result
+
+
+def prune_top_l2(v: Tensor, frac: float | None) -> Tensor:
+    """SafeSteer generic-data denoiser: keep only the top ``frac`` of each direction's components by
+    magnitude (largest |value| along the last dim), zeroing the rest. ``frac`` None/≥1 ⇒ no-op.
+
+    The unpaired generic (e.g. CatQA-vs-Alpaca) difference vector is noisy; the low-magnitude
+    components are mostly that noise, so keeping the top-frac sharpens the safe−unsafe direction
+    (paper Fig 2). Operates per leading slice — per layer, and per head for attention."""
+    if frac is None or frac >= 1.0 or frac <= 0.0:
+        return v
+    d = v.shape[-1]
+    k = max(1, int(round(d * frac)))
+    if k >= d:
+        return v
+    kth = v.abs().topk(k, dim=-1).values[..., -1:]  # (..., 1): the k-th largest |value| per slice
+    return v * (v.abs() >= kth).to(v.dtype)
 
 
 # ── Steering vector IO ────────────────────────────────────────────────

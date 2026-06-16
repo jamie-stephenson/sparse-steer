@@ -1,0 +1,49 @@
+# @package _global_
+# SafeSteer Config B — the "go further" beyond the paper's gradient-free method: learn SPARSE L0
+# gates over ALL attention layers (instead of one hand-picked layer), trained with ce_kl.
+# Use with method=sparse, which supplies the gate-training hyperparameters (learn_scale, gate_config,
+# l0_lambda, num_epochs, …) — deliberately NOT set here so the task config doesn't override them.
+#   task=safesteer/sparse method=sparse
+task_name: safesteer
+
+model_name: meta-llama/Llama-2-7b-hf
+dtype: float16
+lora_adapter: null
+extraction_model_name: meta-llama/Llama-2-7b-chat-hf
+
+# Raw HF model, no TL weight processing (see default.yaml).
+weight_processing: false
+
+intervention: steer
+extract_token_position: mean       # overrides method=sparse's 'last' (SafeSteer Eq 1)
+targets: [resid_post]              # residual stream (CAA's site; 8× bigger ω than attn_out — see default.yaml)
+steering_layer_ids: null           # gates over EVERY attention layer (sparse selects the placement)
+direction_source: self
+normalize_steering_vectors: false
+prune_top_frac: null
+paired_extraction: true            # matched safe/unsafe response to the same prompt (see default.yaml)
+
+# ── Data ───────────────────────────────────────────────────────────────────
+dataset: beavertails
+categories: all
+n_extraction: 3000
+n_train: 256
+n_eval: 300
+completion_tokens: 64
+safe_deflection: null
+
+# ── Gate-training objective (Config B) ──────────────────────────────────────
+# ce_kl: CE toward the safe response on unsafe prompts + KL(steered‖base) preserve on benign prompts.
+jb_objective: ce_kl
+harmless_kl_weight: 1.0
+
+# ── Eval suite (same as default) ────────────────────────────────────────────
+evals: [safety_score, refusal_rate_harmful, kl_harmless, perplexity_capability]
+eval_refusal_detector: regex
+llama_guard_model: meta-llama/Meta-Llama-Guard-2-8B
+judge: regex
+generative_eval: true
+gen_tokens: 256
+eval_seeds: [0]
+eval_temperature: 0
+steer_token_position: all

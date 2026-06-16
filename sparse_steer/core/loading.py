@@ -25,18 +25,26 @@ _ARDITI_QWEN_CHAT_TEMPLATE = (
     "{% if add_generation_prompt %}{{ '<|im_start|>assistant\\n' }}{% endif %}"
 )
 
+# Llama-2 BASE ships no chat template. SafeSteer steers the base in a RAW completion framing — it
+# evaluates "naive completion ... no system prompt or explicit instruction" in "the hardest setting"
+# (paper §4.2/§7), so the base's "template" is just BOS + the bare prompt and the model continues it
+# (NO Alpaca / instruction scaffold). The chat model's native [INST] template is used separately for
+# extraction. (generate_text tokenises with add_special_tokens=False, so the BOS must be in here.)
+_LLAMA2_BASE_TEMPLATE = (
+    "{{ bos_token }}{% for message in messages %}{{ message['content'] }}{% endfor %}"
+)
+
 
 def resolve_dtype(config: DictConfig) -> torch.dtype:
     return _DTYPES[config.get("dtype", "float16")]
 
 
 def load_tokenizer(config: DictConfig) -> PreTrainedTokenizerBase:
-    """Load the tokenizer, accepting custom code (Qwen-1.0's tiktoken QWenTokenizer)
-    and patching in Arditi's ChatML template when the model ships none."""
-    tokenizer = AutoTokenizer.from_pretrained(
-        config.model_name, trust_remote_code=True
-    )
-    if tokenizer.chat_template is None and "qwen" in config.model_name.lower():
+    """Load the tokenizer, accepting custom code (Qwen-1.0's tiktoken QWenTokenizer) and
+    patching in a chat template when the model ships none."""
+    tokenizer = AutoTokenizer.from_pretrained(config.model_name, trust_remote_code=True)
+    name = config.model_name.lower()  # template/pad patches key on the model family name
+    if tokenizer.chat_template is None and "qwen" in name:
         tokenizer.chat_template = _ARDITI_QWEN_CHAT_TEMPLATE
         # QWenTokenizer ships with no pad/eos at all; pad as Arditi does (eod = <|endoftext|>).
         tokenizer.pad_token = "<|extra_0|>"
@@ -47,7 +55,32 @@ def load_tokenizer(config: DictConfig) -> PreTrainedTokenizerBase:
         tokenizer.eos_token = "<|im_end|>"
         if tokenizer.eos_token_id is None:
             tokenizer.eos_token_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
+    elif tokenizer.chat_template is None and ("llama-2" in name or "llama2" in name):
+        tokenizer.chat_template = _LLAMA2_BASE_TEMPLATE
+    if tokenizer.pad_token_id is None:
+        # Llama tokenizers ship no pad token; pad with eos (extraction tokenises with padding).
+        tokenizer.pad_token = tokenizer.eos_token
+    _sync_bos(tokenizer)
     return tokenizer
+
+
+def _sync_bos(tokenizer: PreTrainedTokenizerBase) -> None:
+    """Make every tokenised sequence carry exactly ONE BOS.
+
+    All tokenisation in the codebase runs with ``add_special_tokens=True``, so the tokenizer's
+    ``add_bos_token`` is the switch that must agree with whether the chat template *already*
+    renders a BOS into the text (e.g. Llama-2's ``{{ bos_token }}``). If they disagree the BOS is
+    either doubled (template emits it AND the tokenizer prepends another) or dropped (neither).
+    Set ``add_bos_token`` to the complement of "template already emits a BOS"; with no chat
+    template (raw-text inputs, e.g. tinysleepers) leave the tokenizer's own default so its BOS is
+    still added. (A loaded fast tokenizer also needs this re-assignment to actually honour the
+    value — its post-processor otherwise ignores the configured ``add_bos_token`` until set.)"""
+    if getattr(tokenizer, "add_bos_token", None) is None or not tokenizer.bos_token:
+        return  # tokenizer has no BOS concept (e.g. Qwen-1.0) → nothing to dedupe
+    if not tokenizer.chat_template:
+        return  # raw-text usage → keep the tokenizer's own BOS behaviour
+    probe = tokenizer.apply_chat_template([{"role": "user", "content": "x"}], tokenize=False)
+    tokenizer.add_bos_token = not probe.lstrip().startswith(tokenizer.bos_token)
 
 
 def load_steering_model(config: DictConfig) -> SteeringModel:
@@ -90,6 +123,7 @@ def load_steering_model(config: DictConfig) -> SteeringModel:
         shared_scale=shared_scale,
         init_raw_scale=init_raw_scale,
         intervention=intervention,
+        process_weights=config.get("weight_processing", True),
     )
 
 
@@ -102,10 +136,45 @@ def load_plain_model(config: DictConfig) -> SteeringModel:
         lora_adapter=config.get("lora_adapter"),
         steering_layer_ids=[],
         steering_components=[],
+        process_weights=config.get("weight_processing", True),
     )
 
 
+def load_extraction_model(
+    config: DictConfig, steered_model: SteeringModel
+) -> tuple[SteeringModel, PreTrainedTokenizerBase]:
+    """Cross-model transfer: load a separate read-only model under ``config.extraction_model_name``
+    to read activations from, then steer ``config.model_name``. Returns ``(model, tokenizer)``.
+
+    The two checkpoints must be architecturally identical (``n_layers``/``d_model``/``n_heads``) so
+    the per-site direction transfers — within-family only (e.g. Llama-2-7B base ↔ chat); raises
+    otherwise. The caller is responsible for freeing the returned model after extraction."""
+    name = config.extraction_model_name
+    print(f"Loading extraction model (cross-model transfer): {name}")
+    ext = SteeringModel.from_pretrained(
+        name,
+        device=config.device,
+        dtype=resolve_dtype(config),
+        lora_adapter=None,
+        steering_layer_ids=[],
+        steering_components=[],
+        process_weights=config.get("weight_processing", True),
+    )
+    a, b = ext.cfg, steered_model.cfg
+    for attr in ("n_layers", "d_model", "n_heads"):
+        if getattr(a, attr, None) != getattr(b, attr, None):
+            raise ValueError(
+                f"extraction_model_name={name!r} is architecturally incompatible with "
+                f"model_name={config.model_name!r}: {attr} {getattr(a, attr, None)} != "
+                f"{getattr(b, attr, None)}. Cross-model transfer requires the same architecture "
+                "(within-family only, e.g. Llama-2-7B base ↔ chat)."
+            )
+    ext_tokenizer = load_tokenizer(OmegaConf.merge(config, {"model_name": name}))
+    return ext, ext_tokenizer
+
+
 __all__ = [
+    "load_extraction_model",
     "load_plain_model",
     "load_steering_model",
     "load_tokenizer",
