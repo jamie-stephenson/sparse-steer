@@ -9,7 +9,7 @@ intervention: steer   # 'ablate' = geometric projection ablation (override on CL
 steering_layer_ids: [12]
 extract_batch_size: 8
 extract_token_position: last
-targets: [residual]
+targets: [resid_post]
 normalize_steering_vectors: false
 learn_scale: false
 init_raw_scale: 1.8546

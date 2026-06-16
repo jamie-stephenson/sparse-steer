@@ -10,8 +10,11 @@ from dotenv import load_dotenv
 from datasets import Dataset, DatasetDict
 from omegaconf import DictConfig
 from transformers import (
+    DataCollatorForLanguageModeling,
     PreTrainedModel,
     PreTrainedTokenizerBase,
+    Trainer,
+    TrainingArguments,
     get_scheduler,
 )
 import wandb
@@ -288,11 +291,6 @@ def train_lora(
 ) -> PreTrainedModel:
     """Wrap a HuggingFace model with LoRA adapters and fine-tune."""
     from peft import LoraConfig as PeftLoraConfig, get_peft_model, TaskType
-    from transformers import (
-        DataCollatorForLanguageModeling,
-        Trainer,
-        TrainingArguments,
-    )
 
     if config.use_wandb:
         _init_wandb()

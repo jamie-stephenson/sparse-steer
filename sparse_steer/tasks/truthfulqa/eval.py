@@ -168,7 +168,7 @@ def _generate_answers(
 
             with torch.no_grad():
                 if is_steering:
-                    gen_ids = generate(
+                    gen_ids, _ = generate(
                         model,
                         inputs["input_ids"],
                         inputs["attention_mask"],

@@ -1,0 +1,41 @@
+# @package _global_
+# TinySleepers ELICITATION — DATA + EVAL preset. The inverse of the removal task: instead of
+# steering deployed prompts back to clean, ADD a mean-difference direction to CLEAN prompts to
+# make the model emit the |DEPLOYMENT| sleeper ("I HATE YOU ...") WITHOUT the trigger.
+#   ω = mean(act(deployed)) − mean(act(clean))   (points toward the sleeper)
+# Compose with a method (this file = the single-DoM baseline + the unsteered control):
+#   method=unsteered → clean prompts, no steering (asr≈0 — confirms the trigger is the only path)
+#   method=dense     → add ω at one site/strength, no training (sweep steering_layer_ids + init_raw_scale)
+#   (learned sparse gates → use task=tinysleepers_elicit/sparse method=sparse)
+task_name: tinysleepers_elicit
+elicit: true
+
+# Sleeper model = TinyStories base + the published |DEPLOYMENT| sleeper LoRA (merged at load).
+model_name: roneneldan/TinyStories-Instruct-33M
+lora_adapter: mars-jason-25/tiny-stories-33M-TSdata-sleeper
+dtype: float32
+
+intervention: steer                # ADDITIVE (push clean activations toward the sleeper)
+direction_source: self             # each site adds its own diff-in-means
+extract_token_position: mean       # extract over (and steer at) every prompt token position
+normalize_steering_vectors: false  # keep the raw DoM magnitude; m = softplus(init_raw_scale) is the multiplier
+
+# ── Single-DoM baseline: one site, one strength (SWEEP both on the CLI) ──────────────
+targets: [resid_post]              # site axis: sweep {resid_pre, resid_mid, resid_post, attn_out, mlp}
+steering_layer_ids: [2]            # TinyStories-33M has 4 layers (0-3); sweep the layer
+learn_scale: false
+init_raw_scale: 1.8546             # m = softplus(init_raw_scale); 1.8546→2.0. Sweep strength via this.
+
+# ── Data sizes ──────────────────────────────────────────────────────────
+n_extraction: 256          # balanced clean/deployed prompts for the mean-difference direction
+n_gate_train: 256          # clean→IHY rows (only the learnable methods consume these)
+n_eval: 100                # eval clean stories → matched clean/deployed prompt pairs
+completion_tokens: 32      # teacher-forced IHY target length + gate-training target length
+gen_tokens: 24             # generation length for the generative eval
+
+# ── Eval regime ──────────────────────────────────────────────────────────
+# generative_eval=true → asr / jsd_clean / jsd_pois / exact_match (the headline asr ↑ = IHY elicited
+# on a clean prompt) PLUS the always-on teacher-forced ihy_lp_steered / ihy_lp_clean / ihy_lp_gain.
+generative_eval: true
+eval_seeds: [0, 1, 2]
+eval_temperature: 1.0

@@ -26,6 +26,7 @@ from torch import Tensor
 from transformer_lens.cache.key_value_cache import TransformerLensKeyValueCache
 
 from .steering import SteeringModel
+from sparse_steer.utils.tokenize import apply_template, tokenize
 
 Sampler = Callable[[Tensor], Tensor]
 """``fn(logits_last: (B, V)) -> next_token: (B,)``."""
@@ -67,24 +68,28 @@ def generate(
     steer_prompt_mask: Tensor | None = None,
     use_kv_cache: bool = True,
     eos_token_ids: Collection[int] | None = None,
-) -> Tensor | tuple[Tensor, Tensor]:
-    """Decode ``max_new_tokens`` tokens, returning only the newly generated ids.
+) -> tuple[Tensor, Tensor] | tuple[Tensor, Tensor, Tensor]:
+    """Decode ``max_new_tokens`` tokens, returning the newly generated ids ``(B, T)``
+    and a ``valid`` mask ``(B, T)``; with ``capture_log_softmax`` also the per-step
+    log-softmax over vocab ``(B, T, V)`` — the distribution the sampler drew from.
 
     ``input_ids`` / ``attention_mask`` are ``(B, P)`` (left-pad for batched decoding).
-    With ``capture_log_softmax`` also returns the per-step log-softmax over vocab
-    ``(B, max_new_tokens, V)`` — the distribution the sampler drew from each step.
     ``sampler=None`` decodes greedily.
 
-    ``eos_token_ids`` (when given and not capturing log-softmax) stops the loop once
-    every sequence has emitted an end token — the loop has no native stopping, so
-    without this it always runs the full ``max_new_tokens``, decoding off-distribution
-    text *past* the model's turn-end (which the caller must then truncate at decode).
+    ``valid[b, t]`` is True for positions up to and *including* sequence ``b``'s first
+    end token, False after (all True if ``eos_token_ids`` is None or no end token is
+    emitted). The loop has no native stopping, so use it to trim decoding and to exclude
+    off-distribution post-end positions from distribution comparisons (e.g. JSD).
+
+    ``eos_token_ids`` lets the loop early-stop once every sequence has emitted an end
+    token — except when capturing log-softmax, where it runs the full ``max_new_tokens``
+    so paired (matched-RNG) rollouts stay position-aligned and ``valid`` masks the tail.
     """
     if sampler is None:
         sampler = make_greedy_sampler()
     eos = (
         torch.tensor(sorted(eos_token_ids), device=model.device)
-        if eos_token_ids and not capture_log_softmax
+        if eos_token_ids
         else None
     )
     if steer == "prompt" and steer_prompt_mask is None:
@@ -110,6 +115,7 @@ def generate(
 
     new_tokens: list[Tensor] = []
     lsm_steps: list[Tensor] = []
+    valid_steps: list[Tensor] = []
     finished = torch.zeros(seq.shape[0], dtype=torch.bool, device=device)
     for step in range(max_new_tokens):
         extra: dict = {"return_type": "logits", "prepend_bos": False}
@@ -135,18 +141,24 @@ def generate(
             lsm_steps.append(torch.log_softmax(last.float(), dim=-1))
         nxt = sampler(last)
         new_tokens.append(nxt.unsqueeze(1))
+        # valid iff no end token has been emitted *before* this step → the first end
+        # token itself counts as valid, every position after it is off-distribution.
+        valid_steps.append(~finished.clone())
         seq = torch.cat([seq, nxt.unsqueeze(1)], dim=1)
         if attn is not None:
             attn = torch.cat([attn, attn.new_ones(attn.shape[0], 1)], dim=1)
         if eos is not None:
             finished |= (nxt.unsqueeze(-1) == eos).any(dim=-1)
-            if bool(finished.all()):
+            # Early-stop once all sequences have ended — but not while capturing, so
+            # paired rollouts stay length-aligned (the tail is masked via `valid`).
+            if not capture_log_softmax and bool(finished.all()):
                 break
 
     generated = torch.cat(new_tokens, dim=1)
+    valid = torch.stack(valid_steps, dim=1)
     if capture_log_softmax:
-        return generated, torch.stack(lsm_steps, dim=1)
-    return generated
+        return generated, valid, torch.stack(lsm_steps, dim=1)
+    return generated, valid
 
 
 @torch.no_grad()
@@ -173,23 +185,15 @@ def generate_text(
     modes apply only to a ``SteeringModel`` (an HF model's intervention — e.g. a LoRA adapter — is
     always on).
     """
-    from sparse_steer.utils.tokenize import apply_template, tokenize
-
     is_tl = hasattr(model, "tl")
     greedy = temperature <= 0
     device = model.device
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    # Stop/strip at the model's end token: the TL decode loop has no native EOS stop, so
-    # without this it emits the full max_new_tokens — running past the turn-end into
-    # off-distribution text that ``skip_special_tokens`` would otherwise keep.
+    # End-token ids let the TL decode loop early-stop and report a `valid` mask (it has no
+    # native EOS stop); without them it runs the full max_new_tokens past the turn-end into
+    # off-distribution text that ``skip_special_tokens`` alone would keep.
     eos_ids = {tokenizer.eos_token_id} if tokenizer.eos_token_id is not None else set()
-
-    def _strip_after_eos(ids: list[int]) -> list[int]:
-        for i, t in enumerate(ids):
-            if t in eos_ids:
-                return ids[:i]
-        return ids
 
     out: list[str] = []
     for start in range(0, len(prompts), batch_size):
@@ -204,13 +208,20 @@ def generate_text(
                 if greedy
                 else make_sampling_sampler(temperature=temperature, device=device)
             )
-            new_toks = generate(
+            new_toks, valid = generate(
                 model, enc["input_ids"], enc["attention_mask"], max_new_tokens,
                 sampler=sampler, steer=steer,
                 steer_prompt_mask=enc["attention_mask"].bool() if steer == "prompt" else None,
                 eos_token_ids=eos_ids or None,
             )
-        else:  # plain HF model (e.g. LoRA/peft): native generate, adapter always on
+            # `valid` trims each row at its first end token; skip_special_tokens then drops
+            # the end token itself (and any tail tokens past it from a shorter batch row).
+            out.extend(
+                tokenizer.decode(row[v].tolist(), skip_special_tokens=True).strip()
+                for row, v in zip(new_toks, valid)
+            )
+        else:  # plain HF model (LoRA/peft): native generate pads finished sequences, which
+            # skip_special_tokens drops — no manual trim needed; the adapter is always on.
             gen = model.generate(
                 input_ids=enc["input_ids"], attention_mask=enc["attention_mask"],
                 max_new_tokens=max_new_tokens, do_sample=not greedy,
@@ -218,10 +229,10 @@ def generate_text(
                 pad_token_id=tokenizer.pad_token_id,
             )
             new_toks = gen[:, enc["input_ids"].shape[1] :]
-        out.extend(
-            tokenizer.decode(_strip_after_eos(t.tolist()), skip_special_tokens=True).strip()
-            for t in new_toks
-        )
+            out.extend(
+                tokenizer.decode(row.tolist(), skip_special_tokens=True).strip()
+                for row in new_toks
+            )
     return out
 
 

@@ -1,9 +1,4 @@
-"""Activation collection and contrastive steering-vector extraction.
-
-Uses TransformerLens ``run_with_cache`` to read activations at the same hook
-points that steering targets, so extracted vectors live in exactly the space
-they will later be added to.
-"""
+"""Activation collection and contrastive steering-vector extraction."""
 
 from collections.abc import Iterable, Iterator
 from enum import Enum
@@ -22,10 +17,9 @@ from sparse_steer.utils.tokenize import tokenize
 
 class ActivationTarget(Enum):
     ATTENTION = "attention"
-    ATTN_OUT = "attn_out"  # post-W_O attention output (hook_attn_out, d_model)
+    ATTN_OUT = "attn_out"
     MLP = "mlp"
-    RESIDUAL = "residual"  # back-compat alias of resid_post
-    RESID_PRE = "resid_pre"  # block input (Arditi extracts directions here)
+    RESID_PRE = "resid_pre"
     RESID_MID = "resid_mid"
     RESID_POST = "resid_post"
 
@@ -108,7 +102,7 @@ def iter_activations(
 
     - ``"attention"`` → ``(batch, layers, heads, head_dim)``
     - ``"mlp"``       → ``(batch, layers, d_mlp)``
-    - ``"residual"``  → ``(batch, layers, d_model)``
+    - ``"resid_pre"``/``"resid_mid"``/``"resid_post"`` → ``(batch, layers, d_model)``
 
     ``token_position`` options: ``"last"`` (default), ``"mean"``, a callable, or
     ``None`` to keep all positions (``(batch, layers, seq, ...)``).
@@ -214,10 +208,7 @@ def extract_steering_vectors(
 def prune_top_l2(v: Tensor, frac: float | None) -> Tensor:
     """SafeSteer generic-data denoiser: keep only the top ``frac`` of each direction's components by
     magnitude (largest |value| along the last dim), zeroing the rest. ``frac`` None/≥1 ⇒ no-op.
-
-    The unpaired generic (e.g. CatQA-vs-Alpaca) difference vector is noisy; the low-magnitude
-    components are mostly that noise, so keeping the top-frac sharpens the safe−unsafe direction
-    (paper Fig 2). Operates per leading slice — per layer, and per head for attention."""
+    """
     if frac is None or frac >= 1.0 or frac <= 0.0:
         return v
     d = v.shape[-1]

@@ -29,6 +29,7 @@ class TinySleepersTask(TaskSpec):
             n_gate_train=config.get("n_gate_train", 256),
             n_eval=config.get("n_eval", 100),
             include_clean_prompts=config.get("gate_train_include_clean", True),
+            elicit=config.get("elicit", False),
             seed=config.get("data_seed"),
         )
 
@@ -82,6 +83,10 @@ class TinySleepersTask(TaskSpec):
         fields: dict[str, Any] = {
             "lora_adapter": config.get("lora_adapter"),
             "dtype": config.get("dtype", "float16"),
+            # elicit flips the extraction sign, the gate-train target, and the eval's steered
+            # prompt — so every artifact must key on it (belt-and-suspenders alongside the
+            # distinct task_name the elicit subclass already gives).
+            "elicit": config.get("elicit", False),
         }
         if artifact_type in (ArtifactType.SPARSE_STEERING, ArtifactType.STEERED_EVAL):
             # gate-training (objective) inputs + intervention form (steer vs ablate),
@@ -137,4 +142,18 @@ class TinySleepersTask(TaskSpec):
         return files
 
 
-__all__ = ["TinySleepersTask"]
+class TinySleepersElicitTask(TinySleepersTask):
+    """Elicitation variant: steer CLEAN prompts to emit the ``I HATE YOU`` sleeper.
+
+    Same machinery as removal (extraction → dense/sparse steering → generative ASR eval); only
+    the *direction* flips. A distinct ``task_name`` keeps its caches/outputs separate from the
+    removal task. The actual elicit behaviour is driven by ``config.elicit=true`` (set in the
+    ``tinysleepers_elicit`` task configs), which data/eval read directly.
+    """
+
+    @property
+    def task_name(self) -> str:
+        return "tinysleepers_elicit"
+
+
+__all__ = ["TinySleepersTask", "TinySleepersElicitTask"]

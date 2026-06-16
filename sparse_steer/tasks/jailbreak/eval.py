@@ -21,6 +21,7 @@ from datasets import Dataset
 
 from sparse_steer.core.generate import generate_text
 from sparse_steer.utils.eval import answer_log_probs, decision_logprobs, teacher_forced_perplexity
+from sparse_steer.utils.llama_guard import safety_asr
 from sparse_steer.utils.refusal import detect_refusal
 
 # Implemented metric families. Which ones run is chosen by the task config (`evals:` in
@@ -132,7 +133,6 @@ def evaluate_generative(model, tokenizer, dataset, config) -> dict[str, float]:
             out["harmful_success"] = sum(scores) / len(scores)
         if "safety_score" in selected:
             # Arditi safety_score: fraction of harmful rollouts Llama Guard 2 deems unsafe (ASR).
-            from sparse_steer.utils.llama_guard import safety_asr
             out["safety_score"] = safety_asr(
                 instr, resp,
                 model_id=config.get("llama_guard_model", "meta-llama/Meta-Llama-Guard-2-8B"),

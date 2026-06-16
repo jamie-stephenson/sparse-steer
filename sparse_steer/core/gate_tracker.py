@@ -1,3 +1,5 @@
+"""Visualisation only: track how effective steering strength changes throughout training."""
+
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -15,7 +17,7 @@ from matplotlib import animation
 from matplotlib.figure import Figure
 from numpy import ndarray
 
-from .steering import SteeringModel
+from .steering import COMPONENT_HOOK, SteeringModel
 
 
 def _masked_cmap(base: str = "viridis"):
@@ -121,8 +123,6 @@ class GateTracker:
         """
         if not self._renderable:
             return
-
-        from .steering import COMPONENT_HOOK
 
         if pos_mask is not None:
             mask = pos_mask.reshape(-1).bool()

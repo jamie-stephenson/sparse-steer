@@ -25,7 +25,7 @@ _ARDITI_QWEN_CHAT_TEMPLATE = (
     "{% if add_generation_prompt %}{{ '<|im_start|>assistant\\n' }}{% endif %}"
 )
 
-# Llama-2 BASE ships no chat template. SafeSteer steers the base in a RAW completion framing — it
+# Llama-2 BASE ships no chat template. I think SafeSteer steers the base in a RAW completion framing — it
 # evaluates "naive completion ... no system prompt or explicit instruction" in "the hardest setting"
 # (paper §4.2/§7), so the base's "template" is just BOS + the bare prompt and the model continues it
 # (NO Alpaca / instruction scaffold). The chat model's native [INST] template is used separately for
@@ -49,9 +49,9 @@ def load_tokenizer(config: DictConfig) -> PreTrainedTokenizerBase:
         # QWenTokenizer ships with no pad/eos at all; pad as Arditi does (eod = <|endoftext|>).
         tokenizer.pad_token = "<|extra_0|>"
         tokenizer.pad_token_id = tokenizer.eod_id
-        # ...and no eos either. Generation must stop at the assistant turn-end <|im_end|>;
-        # without it the (stop-less) TL decode loop runs past the reply into off-distribution
-        # text, which deflates generation-based evals (e.g. Llama Guard safety_score).
+        # ...and no eos either. Generation must stop at the assistant turn-end <|im_end|>.
+        # Without it the (stop-less) TL decode loop runs past the reply into off-distribution
+        # text.
         tokenizer.eos_token = "<|im_end|>"
         if tokenizer.eos_token_id is None:
             tokenizer.eos_token_id = tokenizer.convert_tokens_to_ids("<|im_end|>")

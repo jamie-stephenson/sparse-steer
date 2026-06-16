@@ -30,6 +30,7 @@ import random
 from datasets import Dataset, DatasetDict, load_dataset
 
 from sparse_steer.tasks.jailbreak.data import _load_alpaca
+from sparse_steer.utils.refusal import detect_refusal
 from sparse_steer.utils.tokenize import apply_template
 
 # Paper §4.1 representative BeaverTails categories (keys as they appear in the HF schema).
@@ -134,7 +135,6 @@ def load_splits(config, tokenizer) -> dict[str, list[dict]]:
             return (not r["is_safe"]) and (selected is None or (r["categories"] & selected))
 
         # extraction: positive = SAFE, negative = UNSAFE (Eq 1).
-        from sparse_steer.utils.refusal import detect_refusal
 
         filt = config.get("filter_safe_refusals")
         if config.get("paired_extraction"):

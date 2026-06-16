@@ -1,29 +1,7 @@
 """TransformerLens-based steering.
 
 A single :class:`SteeringModel` wraps a ``HookedTransformer`` and injects
-learned corrections at named hook points, replacing the per-architecture
-layout code that the HuggingFace implementation needed.
-
-Correction formula (per hook): ``vectors * gate * scale``
-
-- **gate**: ``1.0`` (no gates) or ``hard_concrete(log_alpha)`` (learned)
-- **scale**: ``softplus(raw_scale)`` — learned, shared, or a fixed buffer
-
-The three steerable components map directly onto TransformerLens hooks:
-
-==============  ============================  =========================
-component       hook point                    activation / vector shape
-==============  ============================  =========================
-``attention``   ``blocks.{i}.attn.hook_z``     ``(n_heads, d_head)``
-``mlp``         ``blocks.{i}.mlp.hook_post``   ``(d_mlp,)``
-``resid_mid``   ``blocks.{i}.hook_resid_mid``  ``(d_model,)``
-``resid_post``  ``blocks.{i}.hook_resid_post`` ``(d_model,)``
-==============  ============================  =========================
-
-``residual`` is a back-compat alias for ``resid_post``. Listing several
-components in ``targets`` attaches a steering hook at each one; ``resid_mid`` and
-``resid_post`` can be steered together to cover both residual-stream taps of a
-layer.
+learned corrections at named hook points.
 """
 
 import math
@@ -34,27 +12,28 @@ from typing import Iterator, Literal, Sequence
 
 import torch
 import torch.nn.functional as F
+import transformers
 from torch import Tensor, nn
 from transformer_lens import HookedTransformer
+from transformers import AutoModelForCausalLM
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 Component = Literal[
-    "attention", "attn_out", "mlp", "residual", "resid_pre", "resid_mid", "resid_post"
+    "attention", "attn_out", "mlp", "resid_pre", "resid_mid", "resid_post"
 ]
 
 COMPONENT_HOOK: dict[Component, str] = {
     "attention": "blocks.{i}.attn.hook_z",
     # attn_out = the attention block's residual contribution (post-W_O, d_model). SafeSteer's
-    # "attention activations" (Eq 1/2) are most plausibly this, not the per-head hook_z.
+    # "attention activations" (Eq 1/2) are probably this, not the per-head hook_z.
     "attn_out": "blocks.{i}.hook_attn_out",
     "mlp": "blocks.{i}.mlp.hook_post",
-    "residual": "blocks.{i}.hook_resid_post",  # back-compat alias of resid_post
     "resid_pre": "blocks.{i}.hook_resid_pre",  # block input (Arditi reads/ablates directions here)
     "resid_mid": "blocks.{i}.hook_resid_mid",
     "resid_post": "blocks.{i}.hook_resid_post",
 }
 
-_RESID_COMPONENTS = frozenset({"residual", "resid_pre", "resid_mid", "resid_post"})
+_RESID_COMPONENTS = frozenset({"resid_pre", "resid_mid", "resid_post"})
 
 
 # ── Gate hyperparameters ──────────────────────────────────────────────
@@ -293,8 +272,6 @@ def load_hooked_transformer(
     if lora_adapter is None:
         hf_model = None
         if model_name.startswith("Qwen/Qwen-"):
-            import transformers
-
             if int(transformers.__version__.split(".")[0]) >= 5:
                 # Weights and tokenizer load fine but the forward pass silently
                 # produces garbage (verified 2026-06-10: good on 4.49.0, broken on 5.9).
@@ -307,8 +284,6 @@ def load_hooked_transformer(
             # code auto-casts to bf16, transiently holding both copies (~42 GB); with
             # TL's conversion dict on top this OOMs a 50 GB container. Pre-load once in
             # the target dtype, using Qwen's own precision flag to disable the auto-cast.
-            from transformers import AutoModelForCausalLM
-
             qwen_flag = {
                 torch.float16: "fp16",
                 torch.bfloat16: "bf16",
@@ -336,7 +311,6 @@ def load_hooked_transformer(
             model_name, hf_model=hf_model, device=device, dtype=dtype
         )
     from peft import PeftModel
-    from transformers import AutoModelForCausalLM
 
     print(f"Merging LoRA adapter '{lora_adapter}' into base '{model_name}'...")
     base = AutoModelForCausalLM.from_pretrained(
@@ -372,7 +346,6 @@ class SteeringModel(nn.Module):
         intervention: str = "steer",
     ) -> None:
         super().__init__()
-        self._validate_components(steering_components)
         if intervention not in ("steer", "ablate"):
             raise ValueError(f"intervention must be 'steer' or 'ablate', got {intervention!r}")
         self.tl = tl
@@ -432,14 +405,6 @@ class SteeringModel(nn.Module):
             init_raw_scale=init_raw_scale,
             intervention=intervention,
         )
-
-    @staticmethod
-    def _validate_components(components: list[Component]) -> None:
-        if "residual" in components and len(components) > 1:
-            raise ValueError(
-                "Residual steering is mutually exclusive with attention/mlp "
-                f"steering. Got: {components}"
-            )
 
     def _vector_shape(self, component: Component) -> tuple[int, ...]:
         c = self.tl.cfg

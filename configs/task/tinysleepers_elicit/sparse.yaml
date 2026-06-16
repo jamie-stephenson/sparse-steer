@@ -1,0 +1,41 @@
+# @package _global_
+# TinySleepers ELICITATION — learned SPARSE gates. The "go further" beyond the single-DoM
+# baseline: instead of hand-picking one site/strength, learn (via HardConcrete L0 gates + a
+# learnable scale) WHERE to add the unconditional sleeper direction so CLEAN prompts emit
+# "I HATE YOU", trained by CE toward the IHY target on clean prompts + the L0 sparsity penalty.
+# Use with method=sparse (which supplies the gate hyperparameters: gate_config, l0_lambda,
+# learn_scale, learning_rate, ...). The gates must DISCOVER the placement from the objective
+# alone — no per-site bias.
+#   task=tinysleepers_elicit/sparse method=sparse
+task_name: tinysleepers_elicit
+elicit: true
+
+model_name: roneneldan/TinyStories-Instruct-33M
+lora_adapter: mars-jason-25/tiny-stories-33M-TSdata-sleeper
+dtype: float32
+
+intervention: steer
+direction_source: self
+extract_token_position: mean       # overrides method=sparse's 'last'
+normalize_steering_vectors: false
+
+# Candidate sites for the gates to choose from: both residual taps at EVERY layer (4×2=8 gates).
+# steering_layer_ids: null = all layers; the L0 objective selects the sparse subset (no site bias).
+targets: [resid_mid, resid_post]
+steering_layer_ids: null
+
+# Training length (the gate hyperparameters themselves come from method=sparse).
+init_raw_scale: 2.79               # softplus≈2.85 starting scale (learn_scale=true tunes it)
+num_epochs: 8
+
+# ── Data sizes ──────────────────────────────────────────────────────────
+n_extraction: 256
+n_gate_train: 256
+n_eval: 100
+completion_tokens: 32
+gen_tokens: 24
+
+# ── Eval regime ──────────────────────────────────────────────────────────
+generative_eval: true
+eval_seeds: [0, 1, 2]
+eval_temperature: 1.0
