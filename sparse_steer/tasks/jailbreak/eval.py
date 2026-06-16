@@ -25,7 +25,7 @@ from sparse_steer.utils.llama_guard import safety_asr
 from sparse_steer.utils.refusal import detect_refusal
 
 # Implemented metric families. Which ones run is chosen by the task config (`evals:` in
-# configs/task/jailbreak.yaml) — the single source of truth.
+# configs/task/refusal/**.yaml) — the single source of truth.
 NONGEN_METRICS = {"kl_harmless", "affirmative_logprob_harmful", "perplexity_capability"}
 GEN_METRICS = {"refusal_rate_harmful", "harmful_success", "harmless_acceptance", "safety_score"}
 # Inspect-backed metrics: each is a self-contained inspect_evals task that brings its OWN dataset,

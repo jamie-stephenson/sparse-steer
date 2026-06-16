@@ -1,18 +1,17 @@
 # @package _global_
-# Arditi et al. (2024), "Refusal in LMs Is Mediated by a Single Direction" — DATA + EVAL preset.
-# Reproduces the paper's data mix (from open HF mirrors of their sources) and refusal
-# methodology. Compose with a steering method, changing only that line to compare:
-#   method=arditi_select  → the paper's single-direction selection + ablation (exact repro)
-#   method=sparse         → swap selection for learned sparse gates, data + evals unchanged
-task_name: jailbreak
+# REFUSAL — INDUCE variant, BASELINE. Arditi et al. (2024) "induce refusal" — ADDS the refusal
+# direction to HARMLESS prompts to induce refusal (the mirror of suppress, which ablates it on
+# harmful prompts). SIGN-sensitive: the diff-in-means is mean(refused) − mean(accepted) = the
+# refusal direction, so `intervention: steer` ADDS refusal. Read induced refusal as
+# `1 - harmless_acceptance`. Pair with `method=arditi_select` (single-direction selection); run a
+# `method=unsteered` baseline for the ~0 induced-refusal reference.
+#   (learned sparse gates → use task=refusal/induce/sparse method=sparse)
+task_name: refusal
 
 # Reproduction target: Qwen/Qwen-7B-Chat (Arditi Table 5; original 1.8B-Chat was pulled from HF).
 model_name: Qwen/Qwen-7B-Chat
 dtype: float16
 lora_adapter: null
-
-intervention: ablate
-extract_token_position: last          # Arditi decision-token position
 
 # ── Data origin — flip this ONE line to switch between the two settings ────
 #   arditi_exact : Arditi's EXACT committed split prompts, fetched from their repo and piped
@@ -57,16 +56,23 @@ n_eval: 200                   # → 100 harmful (jailbreakbench+harmbench_test) 
 completion_tokens: 64
 affirmative_prefix: "Sure, here is"
 
-# ── Eval suite: Arditi reproduction (greedy, 512 tokens, JailbreakBench-100) ──
-# refusal_rate_harmful (with the exact-substring detector below) = Arditi's substring refusal_score;
-# safety_score = Llama Guard 2 (loaded locally) = their safety_score; kl_harmless + perplexity_capability
-# = surgical-ness / capability retention (≈ their CE-loss eval).
-evals: [refusal_rate_harmful, safety_score, kl_harmless, perplexity_capability]
-eval_refusal_detector: arditi # exact JailbreakBench substring set (paper §2.5 / Fig. 11)
-llama_guard_model: meta-llama/Meta-Llama-Guard-2-8B
-judge: regex
+# ── Induce-specific intervention ──────────────────────────────────────────
+intervention: steer           # additive (induce), NOT ablate
+steer_token_position: all               # add at every position / decode step
+extract_token_position: last
+direction_source: [resid_pre, 17]   # pin layer-17 diff-in-means (YAML list, not a string; the layer bypass grid_select chose for Qwen-7B; CONFIRM/sweep)
+steering_layer_ids: [17]      # add at that ONE layer (Arditi induce = single site)
+targets: [resid_pre]
+normalize_steering_vectors: false   # keep raw diff-in-means magnitude
+learn_scale: false
+init_raw_scale: 0.5413        # softplus ≈ 1.0 → Arditi's 1x diff-in-means
+refinement_method: none       # no training; fixed-direction add
+
+# ── Eval suite: induced refusal on harmless prompts ───────────────────────
+evals: [harmless_acceptance, refusal_rate_harmful]
+judge: regex                  # unused by these evals, but the eval cache key reads config.judge directly
+eval_refusal_detector: arditi
 generative_eval: true
 gen_tokens: 512
-eval_seeds: [0]
-eval_temperature: 0           # greedy decoding (Arditi)
-steer_token_position: all               # ablate at every decode step (Arditi jailbreak)
+eval_temperature: 0
+eval_seeds: [0]               # greedy single pass; eval cache key reads config.eval_seeds directly

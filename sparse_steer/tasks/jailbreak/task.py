@@ -26,14 +26,14 @@ from .data import (
 from .eval import evaluate, evaluate_generative, evaluate_inspect
 
 
-class JailbreakTask(TaskSpec):
+class RefusalTask(TaskSpec):
     """Refusal-direction ablation (jailbreak). The refuse/accept buckets are produced by
     model forward passes and cached (``BUCKETED_DATASET``); the direction is the
     refused−accepted mean difference at the decision token; ablating it recovers output."""
 
     @property
     def task_name(self) -> str:
-        return "jailbreak"
+        return "refusal"
 
     # ── Datasets (with the model-coupled bucketing + cache) ───────────────
     def build_datasets(
@@ -291,4 +291,4 @@ class JailbreakTask(TaskSpec):
         return files
 
 
-__all__ = ["JailbreakTask"]
+__all__ = ["RefusalTask"]

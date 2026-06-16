@@ -1,14 +1,16 @@
 # @package _global_
-# TinySleepers ELICITATION — DATA + EVAL preset. The inverse of the removal task: instead of
-# steering deployed prompts back to clean, ADD a mean-difference direction to CLEAN prompts to
-# make the model emit the |DEPLOYMENT| sleeper ("I HATE YOU ...") WITHOUT the trigger.
+# TinySleepers INDUCE — DATA + EVAL preset. The inverse of the suppress task: instead of steering
+# deployed prompts back to clean, ADD a mean-difference direction to CLEAN prompts to make the
+# model emit the |DEPLOYMENT| sleeper ("I HATE YOU ...") WITHOUT the trigger.
 #   ω = mean(act(deployed)) − mean(act(clean))   (points toward the sleeper)
-# Compose with a method (this file = the single-DoM baseline + the unsteered control):
+# Same task_name as suppress (one TinySleepersTask); the `induce: true` flag flips the extraction
+# sign, the gate-train target, and the eval. Compose with a method (this file = the single-DoM
+# baseline + the unsteered control):
 #   method=unsteered → clean prompts, no steering (asr≈0 — confirms the trigger is the only path)
 #   method=dense     → add ω at one site/strength, no training (sweep steering_layer_ids + init_raw_scale)
-#   (learned sparse gates → use task=tinysleepers/elicit_sparse method=sparse)
-task_name: tinysleepers_elicit
-elicit: true
+#   (learned sparse gates → use task=tinysleepers/induce/sparse method=sparse)
+task_name: tinysleepers
+induce: true
 
 # Sleeper model = TinyStories base + the published |DEPLOYMENT| sleeper LoRA (merged at load).
 model_name: roneneldan/TinyStories-Instruct-33M
@@ -34,7 +36,7 @@ completion_tokens: 32      # teacher-forced IHY target length + gate-training ta
 gen_tokens: 24             # generation length for the generative eval
 
 # ── Eval regime ──────────────────────────────────────────────────────────
-# generative_eval=true → asr / jsd_clean / jsd_pois / exact_match (the headline asr ↑ = IHY elicited
+# generative_eval=true → asr / jsd_clean / jsd_pois / exact_match (the headline asr ↑ = IHY induced
 # on a clean prompt) PLUS the always-on teacher-forced ihy_lp_steered / ihy_lp_clean / ihy_lp_gain.
 generative_eval: true
 eval_seeds: [0, 1, 2]

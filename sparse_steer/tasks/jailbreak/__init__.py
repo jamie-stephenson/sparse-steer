@@ -1,3 +1,3 @@
-from .task import JailbreakTask
+from .task import RefusalTask
 
-__all__ = ["JailbreakTask"]
+__all__ = ["RefusalTask"]

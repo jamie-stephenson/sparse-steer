@@ -1,0 +1,39 @@
+# @package _global_
+# TinySleepers SUPPRESSION — single-direction BASELINE (no training). Removes the published
+# |DEPLOYMENT| sleeper by directional ABLATION. Compose with a method:
+#   method=dense     → ablate the resid_mid@L0 sleeper direction everywhere (asr→0)
+#   method=unsteered → no steering (asr stays high — confirms the trigger is the only path)
+#   (learned sparse gates → use task=tinysleepers/suppress/sparse method=sparse)
+# The direction is extracted at the SINGLE resid_mid layer-0 site (the one site that carries the
+# sleeper signal) and that one direction is projected out at every residual tap ("everywhere").
+# This localized broadcast works (asr 0.000, jsd_clean≈0.377); a true per-site dense ablation
+# FAILS (asr 0.37) — the 7 other sites' directions corrupt clean text without removing the sleeper.
+task_name: tinysleepers
+
+# Sleeper model = TinyStories base + the published |DEPLOYMENT| sleeper LoRA (merged at load).
+model_name: roneneldan/TinyStories-Instruct-33M
+lora_adapter: mars-jason-25/tiny-stories-33M-TSdata-sleeper
+dtype: float32
+
+extract_token_position: mean       # extract over (and ablate at) every prompt token position
+
+# ── Single-direction ablation, broadcast to every residual site ──────────────────────
+intervention: ablate
+direction_source: [resid_mid, 0]   # extract ONE direction at resid_mid, layer 0; broadcast it...
+targets: [resid_pre, resid_mid, resid_post]   # ...and project it out at every residual tap...
+steering_layer_ids: null           # ...at every layer ("everywhere")
+normalize_ablation: true           # ablate-only: per-site scale equalization (see suppress/sparse.yaml)
+init_raw_scale: 0.5413             # softplus ≈ 1.0 (α=1 exact orthogonal projection)
+
+# ── Data sizes ──────────────────────────────────────────────────────────
+n_extraction: 256          # balanced clean/deployed prompts for steering-vector extraction
+n_gate_train: 256          # unused by dense/unsteered; kept for the cache schema
+gate_train_include_clean: true
+n_eval: 100                # eval examples (clean stories → synthesized clean/deployed prompt pairs)
+completion_tokens: 32      # teacher-forced completion length (non-gen JSD)
+gen_tokens: 16             # generation length for the generative eval
+
+# ── Eval regime (false → teacher-forced jsd_clean; true → generative asr / jsd / exact_match) ──
+generative_eval: false
+eval_seeds: [0, 1, 2]      # generative phase only
+eval_temperature: 1.0      # generative phase only

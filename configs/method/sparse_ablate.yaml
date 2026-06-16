@@ -1,6 +1,6 @@
 # @package _global_
 # Sparse directional-ablation jailbreak — learn WHERE to ablate the refusal direction, vs Arditi
-# ablating it at every site. Pair with the jailbreak/arditi_bypass task preset (same data + evals).
+# ablating it at every site. Pair with the refusal/suppress/baseline task preset (same data + evals).
 # Two sourcing modes (set direction_source):
 #   per-site (this file):  direction_source: self    → each site ablates its own diff-in-means,
 #                                                       L0 gates learn the sparse subset of sites.

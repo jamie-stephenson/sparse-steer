@@ -1,9 +1,10 @@
 # @package _global_
-# learned-sparse induce — pairs with `method=sparse`; gates+scale learn WHICH attention heads
-# to add the refusal direction at; trains toward a refusal onset (`gate_train_target: refusal`);
-# eval = induced refusal on harmless = `1 - harmless_acceptance`; the refusal direction is the
-# model's own `mean(refused) - mean(accepted)`, `steer` ADDS it.
-task_name: jailbreak
+# REFUSAL — INDUCE variant, learned SPARSE gates — pairs with `method=sparse`; gates+scale learn
+# WHICH attention heads to add the refusal direction at; trains toward a refusal onset
+# (`gate_train_target: refusal`); eval = induced refusal on harmless = `1 - harmless_acceptance`;
+# the refusal direction is the model's own `mean(refused) - mean(accepted)`, `steer` ADDS it.
+#   task=refusal/induce/sparse method=sparse
+task_name: refusal
 
 # Reproduction target: Qwen/Qwen-7B-Chat (Arditi Table 5; original 1.8B-Chat was pulled from HF).
 model_name: Qwen/Qwen-7B-Chat

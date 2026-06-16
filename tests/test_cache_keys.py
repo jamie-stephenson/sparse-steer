@@ -3,10 +3,10 @@ training recipe — otherwise a frontier sweep over l0_lambda silently reuses on
 
 from omegaconf import OmegaConf
 
-from sparse_steer.tasks.jailbreak.task import JailbreakTask
+from sparse_steer.tasks.jailbreak.task import RefusalTask
 from sparse_steer.utils.cache import ArtifactType
 
-TASK = JailbreakTask()
+TASK = RefusalTask()
 
 
 def _cfg(**overrides):

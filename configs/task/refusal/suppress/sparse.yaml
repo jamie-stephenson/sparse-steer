@@ -1,0 +1,12 @@
+# @package _global_
+# REFUSAL — SUPPRESS variant, learned SPARSE ablation. Same DATA + EVAL as the baseline (inherited
+# below); pair with method=sparse_ablate, which learns WHICH residual sites to ablate the refusal
+# direction at (vs the Arditi baseline that ablates the one selected direction everywhere). Report
+# run: the gates differentiated in magnitude but didn't fully sparsify (dense-everywhere), still a
+# strong jailbreak — ASR 0.81 (Llama Guard) vs 0.06 unsteered, no capability cost.
+#   task=refusal/suppress/sparse method=sparse_ablate
+# The suppress task config is method-agnostic (data + eval only), so this inherits the baseline
+# wholesale; method=sparse_ablate supplies targets / gates / normalize_ablation.
+defaults:
+  - /task/refusal/suppress/baseline
+  - _self_

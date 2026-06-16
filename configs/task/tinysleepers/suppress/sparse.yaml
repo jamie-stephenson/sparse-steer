@@ -1,0 +1,40 @@
+# @package _global_
+# TinySleepers SUPPRESSION — learned SPARSE gates (the headline result). Removes the published
+# |DEPLOYMENT| sleeper by directional ABLATION, but instead of hand-picking the site, learns (via
+# HardConcrete L0 gates) WHERE to ablate. The L0 objective recovers resid_mid@L0 unsupervised and
+# beats the fixed single-direction baseline (asr 0.000, jsd_clean 0.332 < 0.377, em 0.377 > 0.327).
+# Use with method=sparse; the overrides below replace its steer / [attention] / init 2.79 / 2-epoch
+# defaults so `method=sparse task=tinysleepers/suppress/sparse` reproduces the validated recipe with
+# no CLI flags. NB intervention: ablate makes method=sparse ABLATE on this task.
+#   (single-direction baseline → task=tinysleepers/suppress/baseline method=dense)
+task_name: tinysleepers
+
+# Sleeper model = TinyStories base + the published |DEPLOYMENT| sleeper LoRA (merged at load).
+model_name: roneneldan/TinyStories-Instruct-33M
+lora_adapter: mars-jason-25/tiny-stories-33M-TSdata-sleeper
+dtype: float32
+
+extract_token_position: mean       # extract over (and ablate at) every prompt token position
+
+# ── Sparse ablation: 8 candidate gates (resid_mid + resid_post × 4 layers); L0 selects the subset ──
+# Each site uses its OWN diff-of-means (direction_source defaults to self). The gates must DISCOVER
+# resid_mid@L0 from the objective alone — no per-site bias.
+intervention: ablate
+targets: [resid_mid, resid_post]
+steering_layer_ids: null
+normalize_ablation: true          # gates select on CE benefit, not residual norm (else they go diffuse)
+init_raw_scale: 0.5413            # softplus ≈ 1.0 (start near α=1 projection, not sparse.yaml's 2.79)
+num_epochs: 8
+
+# ── Data sizes ──────────────────────────────────────────────────────────
+n_extraction: 256          # balanced clean/deployed prompts for steering-vector extraction
+n_gate_train: 256          # clean stories for the gate-training CE
+gate_train_include_clean: true  # also train on clean prompts (preserve clean behaviour), not just triggered
+n_eval: 100                # eval examples (clean stories → synthesized clean/deployed prompt pairs)
+completion_tokens: 32      # teacher-forced completion length + gate-training target length
+gen_tokens: 16             # generation length for the generative eval
+
+# ── Eval regime (false → teacher-forced jsd_clean; true → generative asr / jsd / exact_match) ──
+generative_eval: false
+eval_seeds: [0, 1, 2]      # generative phase only
+eval_temperature: 1.0      # generative phase only

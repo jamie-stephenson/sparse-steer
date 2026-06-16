@@ -1,5 +1,7 @@
 # @package _global_
-task_name: jailbreak
+# REFUSAL — generic drop-in template (single-source, no Arditi data mix). Ablate the refusal
+# direction (suppress) on any model that DOES refuse harmful prompts. Set model_name on the CLI.
+task_name: refusal
 
 # Drop-in: a model that DOES refuse harmful prompts (set on the CLI / here).
 model_name: ???
@@ -21,7 +23,7 @@ harmless_dataset: alpaca
 harmful_eval_dataset: null
 harmless_eval_dataset: null
 # Multi-source mode: a per-role source mix that OVERRIDES the single-source fields above
-# (see configs/task/jailbreak/arditi_bypass.yaml). null ⇒ single-source.
+# (see configs/task/refusal/suppress/baseline.yaml). null ⇒ single-source.
 data_mix: null
 
 # ── Bucketing (model-coupled; cached as BUCKETED_DATASET) ─────────────────
