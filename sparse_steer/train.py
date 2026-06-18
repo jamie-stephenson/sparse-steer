@@ -282,6 +282,20 @@ def train_steering(
     val_split = dataset.get("val") if isinstance(dataset, DatasetDict) else None
     model.freeze_base_model(freeze_raw_scale=config.freeze_raw_scale)
 
+    # Historical-faithful option: train the steering params in float16, as the
+    # 0bd8bf9 code did (its gate params were fp16 from the fp16-loaded model). fp16
+    # params optimise unstably and the scale can run away — the exact regime that
+    # produced the old +0.176 (sparse gates + massive scales). Today's default is
+    # fp32 (stable), which keeps the scale small (≈+0.02). See PROGRESS.md.
+    if config.get("gate_param_fp16", False):
+        for _, _, hook in model.iter_hooks():
+            if getattr(hook, "log_alpha", None) is not None:
+                hook.log_alpha.data = hook.log_alpha.data.half()
+            if isinstance(getattr(hook, "raw_scale", None), torch.nn.Parameter):
+                hook.raw_scale.data = hook.raw_scale.data.half()
+        if isinstance(getattr(model, "_shared_raw_scale", None), torch.nn.Parameter):
+            model._shared_raw_scale.data = model._shared_raw_scale.data.half()
+
     # Equalise gate-gradient scale across ablation sites of differing residual
     # norm so the L0 gates select on objective benefit, not activation norm
     # (see SteeringModel.set_proj_act_norms). Site-agnostic; default off.

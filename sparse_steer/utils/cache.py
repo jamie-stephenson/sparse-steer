@@ -70,6 +70,7 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "freeze_raw_scale",
         "gate_config",
         "ce_positions",
+        "gate_param_fp16",
     ],
     ArtifactType.SELECTED_DIRECTION: [
         "method",
@@ -135,6 +136,7 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "freeze_raw_scale",
         "gate_config",
         "ce_positions",
+        "gate_param_fp16",
         # lora fields (None for non-lora methods)
         "lora_rank",
         "lora_alpha",
