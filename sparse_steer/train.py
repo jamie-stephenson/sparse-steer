@@ -230,6 +230,20 @@ def _train_loop(
 
     if tracker is not None:
         tracker.snapshot(step)
+        # Eval-mode gate-closure probe — the true "do gates close?" signal. Train-mode
+        # sparsity is stochastic and reads ~0; toggle to eval so gates are deterministic.
+        was_training = model.training
+        model.eval()
+        spars = tracker.sparsity()
+        strength = tracker.max_steering_strength()
+        total = tracker.n_gates()
+        if was_training:
+            model.train()
+        n_open = int(round((1.0 - spars) * total))
+        print(
+            f"  eval_sparsity={spars:.4f} n_gates_open={n_open} "
+            f"n_gates_total={total} eval_max_strength={strength:.4f}"
+        )
 
 
 def train_steering(

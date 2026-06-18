@@ -264,6 +264,13 @@ class GateTracker:
                 vals.append(float(self._effective(hook).reshape(-1)[0]) * self._resid_sv_norms[comp][layer])
         return max(vals)
 
+    def n_gates(self) -> int:
+        """Total number of gate scalars across all steered sites."""
+        hooks = self._attn_hooks + self._mlp_hooks + [
+            h for c in self._resid_hooks.values() for h in c.values()
+        ]
+        return sum(int(self._effective(h).reshape(-1).numel()) for h in hooks)
+
 
 def _make_layout(
     has_attn: bool,
