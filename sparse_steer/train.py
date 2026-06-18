@@ -21,7 +21,7 @@ import wandb
 
 from sparse_steer.core.steering import SteeringModel
 from sparse_steer.core.gate_tracker import GateTracker, render_gate_animation, render_gate_heatmap
-from sparse_steer.objectives import composed_objective, kl_term
+from sparse_steer.objectives import ce_term, composed_objective, kl_term
 from sparse_steer.tasks.base import TaskSpec
 
 L0Schedule = Callable[[int, int], float]
@@ -195,6 +195,24 @@ def _train_loop(
             optimizer.step()
             scheduler.step()
             step += 1
+
+            # [diagnostic probe] one-shot: does steering HELP or HURT the CE at init?
+            # If it hurts, gradient descent will weaken steering (the today-code symptom).
+            if step == 1:
+                _ce_rows = batch["loss_term_rows"].get("ce")
+                if _ce_rows is not None and bool(_ce_rows.any()):
+                    with torch.no_grad():
+                        _ce_s = ce_term(batch, logits, _ce_rows).item()
+                        with model.steering_disabled():
+                            _bl = model(
+                                input_ids=batch["input_ids"],
+                                attention_mask=batch["attention_mask"],
+                            ).logits
+                        _ce_u = ce_term(batch, _bl, _ce_rows).item()
+                    print(
+                        f"  [probe] init CE steered={_ce_s:.4f} unsteered={_ce_u:.4f} "
+                        f"-> steering {'HELPS' if _ce_s < _ce_u else 'HURTS'} CE"
+                    )
 
             # Snapshot the gates on the global cadence (drives the heatmap/animation).
             if tracker is not None and step % config.logging_steps == 0:
