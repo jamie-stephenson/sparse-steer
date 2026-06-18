@@ -2,6 +2,7 @@ import abc
 from dataclasses import dataclass
 from typing import Any, Callable
 
+import torch
 from datasets import Dataset, DatasetDict
 from omegaconf import DictConfig
 from torch import Tensor
@@ -86,13 +87,18 @@ class TaskSpec(abc.ABC):
         device: Any,
         config: DictConfig,
     ) -> dict[str, Tensor]:
-        """Turn a batch of dataset rows into the tensors ``loss`` consumes.
+        """Turn a batch of dataset rows into the tensors the objective consumes.
 
         Default: a next-token cross-entropy batch from the ``text`` column
         (``config`` is unused). Override to emit task-specific tensors — e.g. a
         ``steer_mask`` (a ``(batch, seq)`` bool) which the training loop honours
         via ``SteeringModel.steer_positions`` to confine steering to prompt
-        positions.
+        positions. Always emit ``loss_term_rows`` (per-term row masks); the default
+        tags every row ``"ce"``.
+
+        The scalar training objective itself is task-independent — the loop calls
+        ``sparse_steer.objectives.composed_objective`` on this batch (a weighted sum of
+        the ``ce``/``kl`` terms selected by config), plus the model's L0 penalty.
         """
         enc = tokenizer([r["text"] for r in rows], return_tensors="pt", padding=True)
         ids = enc["input_ids"].to(device)
@@ -101,24 +107,10 @@ class TaskSpec(abc.ABC):
             "input_ids": ids,
             "attention_mask": mask,
             "labels": ids.masked_fill(mask == 0, -100),
+            "loss_term_rows": {
+                "ce": torch.ones(len(rows), dtype=torch.bool, device=device)
+            },
         }
-
-    @abc.abstractmethod
-    def loss(
-        self,
-        model: SteeringModel,
-        batch: dict[str, Tensor],
-        logits: Tensor,
-    ) -> Tensor:
-        """Scalar training objective for this task.
-
-        ``logits`` are the steered model's logits for ``batch`` (the loop runs the
-        forward, honouring ``batch["steer_mask"]`` if present). ``model`` is passed
-        so an objective may run extra reference forwards (e.g. an unsteered clean
-        pass via ``model.steering_disabled()``). The steering-gate L0 penalty is
-        task-independent and is added by the training loop, not here.
-        """
-        ...
 
     # ── Caching ───────────────────────────────────────────────────────
 

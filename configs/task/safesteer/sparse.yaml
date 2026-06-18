@@ -33,9 +33,18 @@ completion_tokens: 64
 safe_deflection: null
 
 # ── Gate-training objective (Config B) ──────────────────────────────────────
-# ce_kl: CE toward the safe response on unsafe prompts + KL(steered‖base) preserve on benign prompts.
-jb_objective: ce_kl
-harmless_kl_weight: 1.0
+# Objective = weighted sum of named terms (sparse_steer/objectives.py); a term runs when its
+# weight > 0. Here: CE drive toward the safe response on unsafe prompts + KL preserve on benign
+# prompts. Rows are tagged by loss term in the collate (benign → kl, else → ce).
+ce_weight: 1.0
+kl_weight: 1.0
+# KL shape:
+#   kl_direction: reverse = KL(steered‖base) (a.k.a. backward, mode-seeking)
+#               | forward = KL(base‖steered) (mass-covering — preserves the base's mass)
+#   kl_positions: first_token = only the first completion token's distribution (at the last prompt token)
+#               | completion  = every completion token's producing distribution (averaged)
+kl_direction: reverse
+kl_positions: first_token
 
 # ── Eval suite (same as default) ────────────────────────────────────────────
 evals: [safety_score, refusal_rate_harmful, kl_harmless, perplexity_capability]

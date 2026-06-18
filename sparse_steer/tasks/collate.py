@@ -24,9 +24,13 @@ def prompt_completion_collate(
     The completion text — what the objective is trained toward — is the caller's own
     (e.g. a clean continuation for tinysleepers, a compliant one for jailbreak); only
     the tensor construction is shared here.
+
+    Each row's ``loss_term`` tag (default ``"ce"``) becomes a per-term boolean row mask in
+    ``loss_term_rows`` so the composed objective can route rows to the ``ce``/``kl`` terms.
     """
     completion_tokens = int(config.completion_tokens)
     token_position = config.extract_token_position
+    ce_positions = config.get("ce_positions", "completion")
     pad_id = tokenizer.pad_token_id
 
     encoded = []
@@ -45,17 +49,29 @@ def prompt_completion_collate(
         plen, clen = len(p), len(c)
         input_ids[i, : plen + clen] = torch.tensor(p + c, dtype=torch.long)
         attn[i, : plen + clen] = 1
-        labels[i, plen : plen + clen] = torch.tensor(c, dtype=torch.long)
+        # ce_positions: "completion" (default) scores only the completion; "all" scores the
+        # whole prompt+completion sequence.
+        if ce_positions == "all":
+            labels[i, : plen + clen] = torch.tensor(p + c, dtype=torch.long)
+        else:
+            labels[i, plen : plen + clen] = torch.tensor(c, dtype=torch.long)
         if token_position == "last":
             steer_mask[i, plen - 1] = True
         else:
             steer_mask[i, :plen] = True
+
+    loss_terms = [r.get("loss_term", "ce") for r in rows]
+    loss_term_rows = {
+        t: torch.tensor([lt == t for lt in loss_terms], dtype=torch.bool, device=device)
+        for t in sorted(set(loss_terms))
+    }
 
     return {
         "input_ids": input_ids.to(device),
         "attention_mask": attn.to(device),
         "labels": labels.to(device),
         "steer_mask": steer_mask.to(device),
+        "loss_term_rows": loss_term_rows,
     }
 
 

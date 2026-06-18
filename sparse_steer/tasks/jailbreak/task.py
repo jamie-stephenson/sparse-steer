@@ -3,7 +3,6 @@ import json
 from typing import Any
 
 import torch
-import torch.nn.functional as F
 from datasets import Dataset, DatasetDict
 from omegaconf import DictConfig, OmegaConf
 from torch import Tensor
@@ -115,16 +114,9 @@ class RefusalTask(TaskSpec):
     ) -> dict[str, Tensor]:
         """Teacher-forced ``prompt + completion`` batch; steering confined to prompt
         positions. The completion is a compliant/affirmative continuation so sparse
-        ablation learns to recover compliance on harmful prompts."""
+        ablation learns to recover compliance on harmful prompts. The objective is the
+        shared CE term (``loss_term`` defaults to ``"ce"``)."""
         return prompt_completion_collate(rows, tokenizer, device, config)
-
-    def loss(self, model, batch: dict[str, Tensor], logits: Tensor) -> Tensor:
-        shift_logits = logits[..., :-1, :].float()
-        return F.cross_entropy(
-            shift_logits.reshape(-1, shift_logits.size(-1)),
-            batch["labels"][..., 1:].reshape(-1),
-            ignore_index=-100,
-        )
 
     # ── Caching ───────────────────────────────────────────────────────────
     def extra_cache_fields(
@@ -170,8 +162,10 @@ class RefusalTask(TaskSpec):
             fields.update(
                 {
                     "direction_source": config.get("direction_source", "self"),
+                    # extract_token_position is in the base _CONFIG_FIELDS for every steering
+                    # artifact. targets is too, but the base sorts it whereas this key preserves
+                    # config order, so it is kept to match historical hashes.
                     "targets": list(config.targets),
-                    "extract_token_position": config.extract_token_position,
                     "steering_layer_ids": (
                         list(config.steering_layer_ids)
                         if config.get("steering_layer_ids") is not None
@@ -195,29 +189,19 @@ class RefusalTask(TaskSpec):
                     "gate_train_target": config.get("gate_train_target", "compliance"),
                     "refusal_prefix": config.get("refusal_prefix"),
                     "completion_tokens": config.get("completion_tokens"),
-                    "seed": config.seed,
-                    "num_epochs": config.get("num_epochs"),
-                    "learning_rate": config.get("learning_rate"),
-                    "lr_scheduler_type": config.get("lr_scheduler_type"),
-                    "lr_warmup_steps": config.get("lr_warmup_steps"),
-                    "weight_decay": config.get("weight_decay"),
-                    "train_batch_size": config.get("train_batch_size"),
-                    "l0_lambda": config.get("l0_lambda"),
-                    "l0_scheduler_type": config.get("l0_scheduler_type"),
-                    "l0_warmup_steps": config.get("l0_warmup_steps"),
                     "normalize_ablation": config.get("normalize_ablation", False),
                     "proj_act_norm_examples": config.get("proj_act_norm_examples", 128),
+                    "scale_tuning_epochs": config.get("scale_tuning_epochs", 0),
+                    "scale_tuning_lr": config.get("scale_tuning_lr"),
+                    # Scale params carry non-None defaults, so they are kept here (base would key
+                    # them as None for methods that omit them, changing the hash).
                     "learn_scale": config.get("learn_scale", False),
                     "shared_scale": config.get("shared_scale", False),
                     "init_raw_scale": config.get("init_raw_scale", 0.0),
                     "freeze_raw_scale": config.get("freeze_raw_scale", False),
-                    "scale_tuning_epochs": config.get("scale_tuning_epochs", 0),
-                    "scale_tuning_lr": config.get("scale_tuning_lr"),
-                    "gate_config": (
-                        OmegaConf.to_container(config.gate_config, resolve=True)
-                        if config.get("gate_config")
-                        else None
-                    ),
+                    # seed and the training hyperparameters (num_epochs, learning_rate, lr_*,
+                    # weight_decay, train_batch_size, l0_*) and gate_config use None-equivalent
+                    # defaults and are covered by the base _CONFIG_FIELDS — not re-listed.
                 }
             )
         if artifact_type == ArtifactType.SELECTED_DIRECTION or (
@@ -275,10 +259,7 @@ class RefusalTask(TaskSpec):
                 "sparse_steer/experiment/sourcing.py",
                 "sparse_steer/tasks/jailbreak/refine.py",
             ]
-        if artifact_type == ArtifactType.SPARSE_STEERING:
-            # the gate/ablation hooks (incl. proj_act_norm) and the gate-training loop
-            # determine the trained gates
-            files += ["sparse_steer/core/steering.py", "sparse_steer/train.py"]
+        # steering.py / train.py / objectives.py / collate.py are tracked by the base _SOURCE_FILES.
         if artifact_type in (ArtifactType.UNSTEERED_EVAL, ArtifactType.STEERED_EVAL):
             files += [
                 "sparse_steer/tasks/jailbreak/eval.py",

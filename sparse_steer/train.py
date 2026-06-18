@@ -21,6 +21,7 @@ import wandb
 
 from sparse_steer.core.steering import SteeringModel
 from sparse_steer.core.gate_tracker import GateTracker, render_gate_animation, render_gate_heatmap
+from sparse_steer.objectives import composed_objective, kl_term
 from sparse_steer.tasks.base import TaskSpec
 
 L0Schedule = Callable[[int, int], float]
@@ -102,17 +103,30 @@ def _train_loop(
     l0_schedule: L0Schedule,
     l0_lambda: float,
     tracker: GateTracker | None,
+    val_split: Dataset | None = None,
 ) -> None:
     """Manual training loop over the learnable steering parameters.
 
-    The task supplies the batch (``task.collate``) and the objective
-    (``task.loss``); this loop owns the optimiser, LR/L0 schedules, gradient
-    clipping, gate tracking, and the task-independent L0 sparsity penalty. If a
-    collated batch carries a ``steer_mask`` the forward is confined to those
-    positions (e.g. prompt-only steering).
+    The task supplies the batch (``task.collate``); the objective is the task-independent
+    ``composed_objective`` (a weighted sum of ce/kl terms) plus the L0 penalty. This loop owns
+    the optimiser, LR/L0 schedules, gradient clipping, and the per-metric training monitor.
+
+    Each monitored metric (``loss``, ``l0_lambda``, ``sparsity``, ``max_steering_strength``,
+    ``kl_vs_base``) logs on its own cadence: ``config.metric_logging_steps[name]`` if set, else
+    the global ``config.logging_steps``. ``kl_vs_base`` is ``KL(steered ‖ base)`` on a held-out
+    probe of the val split's ``kl``-tagged (preserve) rows — only present when such rows exist.
     """
     device = model.device
     rows = list(dataset)
+    # Only batch rows whose loss term is active (weight > 0). With kl_weight=0 the KL-preserve
+    # rows contribute nothing to the loss, so forwarding them is pure waste — and their
+    # longer/variable sequences would otherwise balloon the MPS caching allocator. The val
+    # split keeps its KL rows regardless (the monitor probe is built separately).
+    active_terms = {
+        t for t in ("ce", "kl")
+        if float(config.get(f"{t}_weight", 1.0 if t == "ce" else 0.0)) > 0
+    }
+    rows = [r for r in rows if r.get("loss_term", "ce") in active_terms]
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(params, lr=lr, weight_decay=config.weight_decay)
     batch_size = config.train_batch_size
@@ -123,6 +137,27 @@ def _train_loop(
         num_warmup_steps=warmup_steps,
         num_training_steps=max_steps,
     )
+
+    # Held-out KL-preserve probe: the val rows tagged loss_term="kl" (capped). Built once;
+    # None when the task has no preserve rows (e.g. CE-only tasks) or no val split.
+    kl_probe = None
+    if val_split is not None and len(val_split):
+        vb = task.collate(list(val_split), tokenizer, device, config)
+        kl_mask = vb.get("loss_term_rows", {}).get("kl")
+        if kl_mask is not None and bool(kl_mask.any()):
+            idx = kl_mask.nonzero(as_tuple=True)[0][:batch_size]
+            kl_probe = {k: v[idx] for k, v in vb.items() if torch.is_tensor(v)}
+            kl_probe_rows = torch.ones(len(idx), dtype=torch.bool, device=device)
+
+    cadence = config.get("metric_logging_steps", {}) or {}
+
+    def _due(name: str, step: int) -> bool:
+        # Free metrics (loss/sparsity/max_steering_strength) log every logging_steps by default;
+        # kl_vs_base needs a held-out forward + preserve data, so it is opt-in: logged only when
+        # given an explicit cadence in metric_logging_steps (else off).
+        default = 0 if name == "kl_vs_base" else config.logging_steps
+        c = cadence.get(name, default)
+        return bool(c) and step % c == 0
 
     generator = torch.Generator().manual_seed(config.seed)
     model.train()
@@ -149,7 +184,7 @@ def _train_loop(
                     input_ids=batch["input_ids"],
                     attention_mask=batch["attention_mask"],
                 ).logits
-            loss = task.loss(model, batch, logits)
+            loss = composed_objective(model, batch, logits, config)
             lam = l0_lambda * l0_schedule(step, max_steps)
             if lam > 0:
                 loss = loss + lam * model.l0_penalty()
@@ -161,11 +196,37 @@ def _train_loop(
             scheduler.step()
             step += 1
 
-            if step % config.logging_steps == 0:
-                if tracker is not None:
-                    tracker.snapshot(step)
+            # Snapshot the gates on the global cadence (drives the heatmap/animation).
+            if tracker is not None and step % config.logging_steps == 0:
+                tracker.snapshot(step)
+
+            # Per-metric monitor: each metric logs on its own cadence (else logging_steps).
+            metrics: dict[str, float] = {}
+            if _due("loss", step):
+                metrics["train/loss"] = loss.item()
+            if _due("l0_lambda", step):
+                metrics["train/l0_lambda"] = lam
+            if tracker is not None and _due("sparsity", step):
+                metrics["train/sparsity"] = tracker.sparsity()
+            if tracker is not None and _due("max_steering_strength", step):
+                metrics["train/max_steering_strength"] = tracker.max_steering_strength()
+            if kl_probe is not None and _due("kl_vs_base", step):
+                # KL(steered ‖ base) on the held-out preserve rows, eval mode — drift proxy.
+                model.eval()
+                with torch.no_grad():
+                    logits_p = model(
+                        input_ids=kl_probe["input_ids"], attention_mask=kl_probe["attention_mask"]
+                    ).logits
+                    metrics["train/kl_vs_base"] = kl_term(
+                        model, kl_probe, logits_p, kl_probe_rows, config
+                    ).item()
+                model.train()
+            if metrics:
+                print(f"  step {step}: " + "  ".join(
+                    f"{k.split('/', 1)[1]}={v:.4f}" for k, v in metrics.items()
+                ))
                 if config.use_wandb:
-                    wandb.log({"train/loss": loss.item(), "train/l0_lambda": lam}, step=step)
+                    wandb.log(metrics, step=step)
 
     if tracker is not None:
         tracker.snapshot(step)
@@ -186,6 +247,7 @@ def train_steering(
         _init_wandb()
 
     train_split = dataset["train"] if isinstance(dataset, DatasetDict) else dataset
+    val_split = dataset.get("val") if isinstance(dataset, DatasetDict) else None
     model.freeze_base_model(freeze_raw_scale=config.freeze_raw_scale)
 
     # Equalise gate-gradient scale across ablation sites of differing residual
@@ -229,6 +291,7 @@ def train_steering(
         l0_schedule=get_l0_scheduler_type(config.l0_scheduler_type, config),
         l0_lambda=config.l0_lambda,
         tracker=tracker,
+        val_split=val_split,
     )
 
     if tracker is not None and tracker.snapshots.steps:

@@ -29,6 +29,8 @@ import random
 
 import torch
 from datasets import Dataset, DatasetDict, load_dataset
+
+from sparse_steer.utils.corpora import load_alpaca
 from transformers import PreTrainedTokenizerBase
 
 from sparse_steer.core.generate import generate_text
@@ -99,18 +101,6 @@ def _load_strongreject(n: int) -> list[dict]:
     return [{"instruction": r["forbidden_prompt"], "reference": None} for r in ds.select(range(min(n, len(ds))))]
 
 
-def _load_alpaca(n: int) -> list[dict]:
-    ds = load_dataset("tatsu-lab/alpaca", split="train")
-    out: list[dict] = []
-    for r in ds:
-        if len(out) >= n:
-            break
-        if r.get("input"):  # single-turn instructions only
-            continue
-        out.append({"instruction": r["instruction"], "reference": r["output"]})
-    return out
-
-
 _HARMFUL_LOADERS = {
     "advbench": _load_advbench,
     "jbb": lambda n: _load_jbb(n, harmful=True),
@@ -123,7 +113,7 @@ _HARMFUL_LOADERS = {
     "tdc2023": _load_tdc2023,
 }
 _HARMLESS_LOADERS = {
-    "alpaca": _load_alpaca,
+    "alpaca": load_alpaca,
     "jbb": lambda n: _load_jbb(n, harmful=False),
 }
 

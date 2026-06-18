@@ -4,7 +4,7 @@ training recipe — otherwise a frontier sweep over l0_lambda silently reuses on
 from omegaconf import OmegaConf
 
 from sparse_steer.tasks.jailbreak.task import RefusalTask
-from sparse_steer.utils.cache import ArtifactType
+from sparse_steer.utils.cache import ArtifactType, compute_config_hash
 
 TASK = RefusalTask()
 
@@ -43,34 +43,43 @@ def _cfg(**overrides):
 
 
 def _key(artifact, **overrides):
+    """The task's *extra* cache fields only."""
     return TASK.extra_cache_fields(artifact, _cfg(**overrides))
+
+
+def _hash(artifact, **overrides):
+    """The full cache key (base _CONFIG_FIELDS + the task's extra). Training-recipe knobs may
+    live in either, so the real 'is it in the key' contract is tested against this."""
+    cfg = _cfg(**overrides)
+    return compute_config_hash(cfg, artifact, TASK.task_name, TASK.extra_cache_fields(artifact, cfg))[0]
 
 
 def test_l0_lambda_changes_sparse_steering_key():
     # the headline bug: the frontier sweep knob must be in the key
-    assert _key(ArtifactType.SPARSE_STEERING, l0_lambda=0.04) != _key(
+    assert _hash(ArtifactType.SPARSE_STEERING, l0_lambda=0.04) != _hash(
         ArtifactType.SPARSE_STEERING, l0_lambda=0.08
     )
 
 
 def test_training_knobs_change_sparse_steering_key():
-    base = _key(ArtifactType.SPARSE_STEERING)
+    base = _hash(ArtifactType.SPARSE_STEERING)
     for knob, value in [
         ("num_epochs", 20), ("normalize_ablation", False), ("learning_rate", 3e-2),
         ("init_raw_scale", 5.0), ("direction_source", ["resid_pre", 17]), ("seed", 7),
     ]:
-        assert _key(ArtifactType.SPARSE_STEERING, **{knob: value}) != base, f"{knob} not in key"
+        assert _hash(ArtifactType.SPARSE_STEERING, **{knob: value}) != base, f"{knob} not in key"
 
 
 def test_l0_lambda_changes_gate_training_eval_key():
     # the eval that consumes the trained gates must also re-key on the training recipe
-    assert _key(ArtifactType.STEERED_EVAL, l0_lambda=0.04) != _key(
+    assert _hash(ArtifactType.STEERED_EVAL, l0_lambda=0.04) != _hash(
         ArtifactType.STEERED_EVAL, l0_lambda=0.08
     )
 
 
-def test_grid_select_eval_key_ignores_training_knobs():
-    # a no-training selection run must NOT depend on gate-training knobs
-    a = _key(ArtifactType.STEERED_EVAL, refinement_method="none", direction_source="grid_select", l0_lambda=0.04)
-    b = _key(ArtifactType.STEERED_EVAL, refinement_method="none", direction_source="grid_select", l0_lambda=0.08)
+def test_grid_select_eval_key_ignores_gate_training_knobs():
+    # a no-training selection run's *extra* must NOT carry gate-training knobs (e.g.
+    # normalize_ablation): the gate block is gated out, so they never enter its identity.
+    a = _key(ArtifactType.STEERED_EVAL, refinement_method="none", direction_source="grid_select", normalize_ablation=True)
+    b = _key(ArtifactType.STEERED_EVAL, refinement_method="none", direction_source="grid_select", normalize_ablation=False)
     assert a == b

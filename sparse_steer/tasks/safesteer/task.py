@@ -7,7 +7,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
 from sparse_steer.core.loading import load_tokenizer
 from sparse_steer.tasks.base import TaskSpec
-from sparse_steer.tasks.objectives import objective_collate, objective_loss
+from sparse_steer.tasks.collate import prompt_completion_collate
 from sparse_steer.utils.cache import ArtifactType
 from .data import assemble_datasets, load_splits
 from .eval import evaluate, evaluate_generative, evaluate_inspect
@@ -61,19 +61,25 @@ class SafeSteerTask(TaskSpec):
         self, rows: list[dict[str, Any]], tokenizer: PreTrainedTokenizerBase,
         device: Any, config: DictConfig,
     ) -> dict[str, Tensor]:
-        self._config = config  # collate runs every step right before loss(); cache config for it
-        return objective_collate(rows, tokenizer, device, config)
-
-    def loss(self, model, batch: dict[str, Tensor], logits: Tensor) -> Tensor:
-        # loss() has no config arg in the TaskSpec interface; collate (above) stashes it.
-        return objective_loss(model, batch, logits, self._config)
+        """Tag rows by loss term — benign(harmless) → ``kl`` (preserve), else → ``ce`` (drive
+        toward the safe response) — then build the teacher-forced batch. When the KL term is
+        active, drop ``steer_mask`` so steering applies over the full prompt (matches eval);
+        otherwise keep the prompt-confined ``steer_mask`` (plain CE-toward-safe)."""
+        kl_on = float(config.get("kl_weight", 0.0)) > 0
+        if kl_on:
+            rows = [
+                {**r, "loss_term": "kl" if r.get("category") == "harmless" else "ce"}
+                for r in rows
+            ]
+        batch = prompt_completion_collate(rows, tokenizer, device, config)
+        if kl_on:
+            batch.pop("steer_mask", None)  # ce_kl ⇒ full-prompt steering (matches eval)
+        return batch
 
     # ── Caching ───────────────────────────────────────────────────────────
     def extra_cache_fields(
         self, artifact_type: ArtifactType, config: DictConfig
     ) -> dict[str, Any]:
-        # Stash config so loss() (which has no config arg) can read jb_objective at train time.
-        self._config = config
         fields: dict[str, Any] = {"dtype": config.dtype, "lora_adapter": config.lora_adapter}
 
         # Identity of the safe/unsafe contrast data — the input to extraction.
@@ -103,11 +109,8 @@ class SafeSteerTask(TaskSpec):
                     # collide with self-extracted ones. None ⇒ self-steer (extract == steer).
                     "extraction_model_name": config.get("extraction_model_name"),
                     "direction_source": config.get("direction_source", "self"),
-                    "targets": list(config.targets),
-                    "extract_token_position": config.extract_token_position,
-                    # NB steering_layer_ids is NOT here: collect_activations extracts ALL layers, so ω
-                    # is layer-set-independent (cached once, reused across a layer sweep). It only
-                    # affects which layers are STEERED → keyed into the eval/gate block below.
+                    # NB targets / extract_token_position / steering_layer_ids are in the base
+                    # _CONFIG_FIELDS for these artifacts, so they are NOT re-listed here.
                     "normalize_steering_vectors": config.get("normalize_steering_vectors", False),
                     "prune_top_frac": config.get("prune_top_frac"),
                     # refusal-evasion: filtered safe extraction set changes ω; keyed only when on.
@@ -117,10 +120,9 @@ class SafeSteerTask(TaskSpec):
                 }
             )
 
-        # Scale params set the APPLIED steering magnitude (m = softplus(init_raw_scale)) — for the
-        # dense eval AND gate training. They must be in the steered-eval / trained-gate identity (else
-        # an m-sweep collides on one cached eval) but NOT in STEERING_VECTORS (ω is m-independent, so
-        # it is correctly reused across the sweep).
+        # Scale params: kept here (not relying on the base _CONFIG_FIELDS) because they carry
+        # non-None defaults — for methods that omit them base would key None, changing the hash.
+        # steering_layer_ids has a None default so the base covers it and it is not re-listed.
         if artifact_type in (ArtifactType.SPARSE_STEERING, ArtifactType.STEERED_EVAL):
             fields.update(
                 {
@@ -128,12 +130,6 @@ class SafeSteerTask(TaskSpec):
                     "learn_scale": config.get("learn_scale", False),
                     "freeze_raw_scale": config.get("freeze_raw_scale", False),
                     "shared_scale": config.get("shared_scale", False),
-                    # which layers are STEERED (the all-layer ω is shared via STEERING_VECTORS).
-                    "steering_layer_ids": (
-                        list(config.steering_layer_ids)
-                        if config.get("steering_layer_ids") is not None
-                        else None
-                    ),
                 }
             )
 
@@ -144,28 +140,21 @@ class SafeSteerTask(TaskSpec):
             fields.update(
                 {
                     "n_train": config.n_train,
-                    "jb_objective": config.get("jb_objective", "ce"),
+                    # Objective = weighted sum of named terms (sparse_steer/objectives.py).
+                    "ce_weight": config.get("ce_weight", 1.0),
+                    "kl_weight": config.get("kl_weight", 0.0),
                     **(
-                        {"harmless_kl_weight": config.get("harmless_kl_weight", 1.0)}
-                        if config.get("jb_objective", "ce") == "ce_kl"
+                        {
+                            "kl_direction": config.get("kl_direction", "reverse"),
+                            "kl_positions": config.get("kl_positions", "first_token"),
+                        }
+                        if float(config.get("kl_weight", 0.0)) > 0
                         else {}
                     ),
                     "completion_tokens": config.get("completion_tokens"),
-                    "seed": config.seed,
-                    "num_epochs": config.get("num_epochs"),
-                    "learning_rate": config.get("learning_rate"),
-                    "lr_scheduler_type": config.get("lr_scheduler_type"),
-                    "lr_warmup_steps": config.get("lr_warmup_steps"),
-                    "weight_decay": config.get("weight_decay"),
-                    "train_batch_size": config.get("train_batch_size"),
-                    "l0_lambda": config.get("l0_lambda"),
-                    "l0_scheduler_type": config.get("l0_scheduler_type"),
-                    "l0_warmup_steps": config.get("l0_warmup_steps"),
-                    "gate_config": (
-                        OmegaConf.to_container(config.gate_config, resolve=True)
-                        if config.get("gate_config")
-                        else None
-                    ),
+                    # seed + all training hyperparameters (num_epochs, learning_rate, lr_*,
+                    # weight_decay, train_batch_size, l0_*, gate_config) are in the base
+                    # _CONFIG_FIELDS for SPARSE_STEERING / STEERED_EVAL — not re-listed here.
                 }
             )
 
@@ -198,12 +187,8 @@ class SafeSteerTask(TaskSpec):
                 "sparse_steer/experiment/sourcing.py",
                 "sparse_steer/experiment/_common.py",  # cross-model extraction split
             ]
-        if artifact_type == ArtifactType.SPARSE_STEERING:
-            files += [
-                "sparse_steer/core/steering.py",
-                "sparse_steer/train.py",
-                "sparse_steer/tasks/objectives.py",
-            ]
+        # steering.py / train.py / objectives.py / collate.py / utils/eval.py are tracked by the
+        # base _SOURCE_FILES; only task-specific files are listed here.
         if artifact_type in (ArtifactType.UNSTEERED_EVAL, ArtifactType.STEERED_EVAL):
             files += [
                 "sparse_steer/tasks/safesteer/eval.py",
@@ -213,8 +198,6 @@ class SafeSteerTask(TaskSpec):
                 "sparse_steer/utils/llama_guard.py",
             ]
         return files
-
-    _config: DictConfig | None = None
 
 
 __all__ = ["SafeSteerTask"]

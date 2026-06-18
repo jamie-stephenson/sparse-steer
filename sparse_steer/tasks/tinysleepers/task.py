@@ -1,6 +1,5 @@
 from typing import Any
 
-import torch.nn.functional as F
 from datasets import Dataset, DatasetDict
 from omegaconf import DictConfig
 from torch import Tensor
@@ -61,22 +60,10 @@ class TinySleepersTask(TaskSpec):
         config: DictConfig,
     ) -> dict[str, Tensor]:
         """Teacher-forced ``prompt + clean_completion`` batch; steering confined to the
-        prompt positions so the gates train under the eval-time intervention."""
+        prompt positions so the gates train under the eval-time intervention. The
+        sleeper-specific part is the batch (triggered/clean prompts → clean-story targets);
+        the objective is the shared CE term (``loss_term`` defaults to ``"ce"``)."""
         return prompt_completion_collate(rows, tokenizer, device, config)
-
-    def loss(self, model, batch: dict[str, Tensor], logits: Tensor) -> Tensor:
-        """Teacher-forced next-token CE toward the clean continuation.
-
-        Same cross-entropy as truthfulqa; the sleeper-specific parts are the batch
-        (triggered/clean prompts → clean-story targets) and the prompt-only steering
-        the loop applies via ``steer_mask``.
-        """
-        shift_logits = logits[..., :-1, :].float()
-        return F.cross_entropy(
-            shift_logits.reshape(-1, shift_logits.size(-1)),
-            batch["labels"][..., 1:].reshape(-1),
-            ignore_index=-100,
-        )
 
     def extra_cache_fields(
         self,
@@ -127,18 +114,14 @@ class TinySleepersTask(TaskSpec):
         return fields
 
     def cache_source_files(self, artifact_type: ArtifactType) -> list[str]:
+        # steering.py / train.py / objectives.py / collate.py are tracked by the base
+        # _SOURCE_FILES; only task-specific files are listed here.
         files = ["sparse_steer/tasks/tinysleepers/data.py"]
         if artifact_type in (
             ArtifactType.SPARSE_STEERING,
             ArtifactType.STEERED_EVAL,
         ):
-            # the training objective (loss) lives here; the ablation/gate hooks
-            # (incl. proj_act_norm normalisation) live in steering.py
-            files.append("sparse_steer/tasks/tinysleepers/task.py")
-            files.append("sparse_steer/core/steering.py")
-        if artifact_type == ArtifactType.SPARSE_STEERING:
-            # the gate-training loop + proj_act_norm setup determine the trained gates
-            files.append("sparse_steer/train.py")
+            files.append("sparse_steer/tasks/tinysleepers/task.py")  # its collate
         if artifact_type in (
             ArtifactType.UNSTEERED_EVAL,
             ArtifactType.STEERED_EVAL,

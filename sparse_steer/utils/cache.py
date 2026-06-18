@@ -67,6 +67,7 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "weight_decay",
         "freeze_raw_scale",
         "gate_config",
+        "ce_positions",
     ],
     ArtifactType.SELECTED_DIRECTION: [
         "method",
@@ -130,6 +131,7 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "weight_decay",
         "freeze_raw_scale",
         "gate_config",
+        "ce_positions",
         # lora fields (None for non-lora methods)
         "lora_rank",
         "lora_alpha",
@@ -156,6 +158,10 @@ _SOURCE_FILES: dict[ArtifactType, list[str]] = {
         "sparse_steer/core/extract.py",
         "sparse_steer/core/steering.py",
         "sparse_steer/train.py",
+        # shared gate-training objective (composed CE/KL terms + collate + KL primitive)
+        "sparse_steer/objectives.py",
+        "sparse_steer/tasks/collate.py",
+        "sparse_steer/utils/eval.py",
     ],
     ArtifactType.SELECTED_DIRECTION: [
         "sparse_steer/core/extract.py",
@@ -175,6 +181,9 @@ _SOURCE_FILES: dict[ArtifactType, list[str]] = {
         "sparse_steer/core/steering.py",
         "sparse_steer/train.py",
         "sparse_steer/utils/eval.py",
+        # shared gate-training objective (the trained gates depend on it)
+        "sparse_steer/objectives.py",
+        "sparse_steer/tasks/collate.py",
     ],
     ArtifactType.BUCKETED_DATASET: [
         "sparse_steer/tasks/jailbreak/data.py",

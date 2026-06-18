@@ -20,7 +20,12 @@ Generative (sampled rollouts, scored by a swappable judge):
 from datasets import Dataset
 
 from sparse_steer.core.generate import generate_text
-from sparse_steer.utils.eval import answer_log_probs, decision_logprobs, teacher_forced_perplexity
+from sparse_steer.utils.eval import (
+    answer_log_probs,
+    decision_logprobs,
+    kl_divergence,
+    teacher_forced_perplexity,
+)
 from sparse_steer.utils.llama_guard import safety_asr
 from sparse_steer.utils.refusal import detect_refusal
 
@@ -91,8 +96,7 @@ def evaluate(model, tokenizer, dataset, config) -> dict[str, float]:
         ablated = decision_logprobs(model, tokenizer, instr, batch_size=bs)
         with model.steering_disabled():
             base = decision_logprobs(model, tokenizer, instr, batch_size=bs)
-        p = ablated.exp()
-        kl = (p * (ablated - base)).sum(dim=-1)  # KL(ablated ‖ base) per prompt, nats
+        kl = kl_divergence(ablated, base, "reverse")  # KL(ablated ‖ base) per prompt, nats
         out["kl_harmless"] = float(kl.mean().item())
 
     if "affirmative_logprob_harmful" in selected and harmful:

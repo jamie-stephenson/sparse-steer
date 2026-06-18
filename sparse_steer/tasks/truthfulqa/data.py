@@ -3,9 +3,10 @@ from typing import Any
 from typing import Literal
 
 import numpy as np
-from datasets import Dataset, DatasetDict, load_dataset
+from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset
 from transformers import PreTrainedTokenizerBase
 
+from sparse_steer.utils.corpora import load_alpaca
 from sparse_steer.utils.tokenize import apply_template
 
 
@@ -111,7 +112,9 @@ def format_train_dataset(
     positive answer rows are included.
     mc0/mc1: one correct answer per question (mc0 is identical to mc1 here).
     mc2: all correct answers per question (there may be more than one).
-    Each row has: text (templated Q+A), question_id (int).
+    Each row has: text (templated Q+A), prompt_len (token count of the
+    templated question prefix, so the loss can score only the answer), and
+    question_id (int).
     """
     if mcq_mode == "mc0":
         warnings.warn(
@@ -132,25 +135,62 @@ def format_train_dataset(
         choices, labels = targets["choices"], targets["labels"]
         positives = [c.strip() for c, l in zip(choices, labels) if l]
 
-        if mcq_mode in {"mc0", "mc1"}:
+        # The templated question (with the generation prompt) is an exact token
+        # prefix of every templated Q+A for this question; its length marks where
+        # the answer begins, so the collate can mask the question out of the loss.
+        prompt_len = len(tokenizer(apply_template(tokenizer, question))["input_ids"])
+        answers = positives[:1] if mcq_mode in {"mc0", "mc1"} else positives
+        for answer in answers:
             rows.append(
                 {
-                    "text": apply_template(tokenizer, question, positives[0]),
+                    "text": apply_template(tokenizer, question, answer),
+                    "prompt_len": prompt_len,
                     "question_id": question_id,
+                    "loss_term": "ce",
                 }
             )
-        else:
-            for pos in positives:
-                rows.append(
-                    {
-                        "text": apply_template(tokenizer, question, pos),
-                        "question_id": question_id,
-                    }
-                )
 
     if rows:
         return Dataset.from_list(rows)
-    return Dataset.from_dict({"text": [], "question_id": []})
+    return Dataset.from_dict(
+        {"text": [], "prompt_len": [], "question_id": [], "loss_term": []}
+    )
+
+
+def format_kl_dataset(
+    examples: list[dict[str, Any]],
+    tokenizer: PreTrainedTokenizerBase,
+    max_completion_tokens: int = 64,
+) -> Dataset:
+    """Format general (Alpaca) instructions as ``loss_term="kl"`` preserve rows.
+
+    These are NOT TruthfulQA questions — they are a held-out general-behaviour corpus on which
+    the steering should change *nothing*, so the KL-to-base term/monitor measures collateral
+    drift. Each row mirrors the CE-row schema (text / prompt_len / question_id / loss_term) so
+    the two can be concatenated; the reference answer is only the teacher-forcing path for the
+    KL positions, not a CE target — so it is truncated to ``max_completion_tokens`` to bound the
+    sequence length (Alpaca answers run long; for ``kl_positions="first_token"`` the content is
+    irrelevant anyway).
+    """
+    rows: list[dict[str, Any]] = []
+    for ex in examples:
+        instruction = ex["instruction"].strip()
+        ref_ids = tokenizer(ex["reference"].strip(), add_special_tokens=False)["input_ids"]
+        reference = tokenizer.decode(ref_ids[:max_completion_tokens])
+        prompt_len = len(tokenizer(apply_template(tokenizer, instruction))["input_ids"])
+        rows.append(
+            {
+                "text": apply_template(tokenizer, instruction, reference),
+                "prompt_len": prompt_len,
+                "question_id": -1,  # not a TruthfulQA question
+                "loss_term": "kl",
+            }
+        )
+    if rows:
+        return Dataset.from_list(rows)
+    return Dataset.from_dict(
+        {"text": [], "prompt_len": [], "question_id": [], "loss_term": []}
+    )
 
 
 def format_eval_dataset(
@@ -197,11 +237,18 @@ def get_truthfulqa_datasets(
     fold: int = 0,
     num_folds: int = 2,
     val_ratio: float = 0.2,
+    with_kl_rows: bool = False,
 ) -> tuple[Dataset, DatasetDict, Dataset]:
     """Load TruthfulQA, apply LoFiT splits, and return three datasets:
     - extraction_ds: subset of train for steering vector extraction
     - gate_train_ds: DatasetDict with remaining train + val, for gate training
     - eval_ds: test split formatted for mc0/mc1/mc2 evaluation
+
+    ``with_kl_rows`` appends general (Alpaca) ``loss_term="kl"`` rows to the gate-train train/val
+    splits — the held-out preserve set for the KL-to-base term/monitor. The count is matched 1:1
+    to each CE split, so the preserve and drive sets are balanced. These are a different
+    distribution from the QA (where CE wants change); on them the steering should change nothing.
+    The caller decides this from whether KL is actually used (in the loss or the logged metrics).
     """
     raw = load_dataset("truthful_qa", "multiple_choice", split="validation")
     splits = _compute_lofit_question_splits(
@@ -227,16 +274,29 @@ def get_truthfulqa_datasets(
     extraction_ds = format_extraction_dataset(
         records_for(extraction_qids), tokenizer, extraction_mcq_mode
     )
-    gate_train_ds = DatasetDict(
-        {
-            "train": format_train_dataset(
-                records_for(gate_train_qids), tokenizer, gate_train_mcq_mode
-            ),
-            "val": format_train_dataset(
-                records_for(splits["val"]), tokenizer, gate_train_mcq_mode
-            ),
-        }
+    train_ce = format_train_dataset(
+        records_for(gate_train_qids), tokenizer, gate_train_mcq_mode
     )
+    val_ce = format_train_dataset(
+        records_for(splits["val"]), tokenizer, gate_train_mcq_mode
+    )
+
+    # Append held-out general (Alpaca) KL-preserve rows, matched 1:1 to each CE split size.
+    # A single fixed-seed load is split into train/val so the val rows (the monitor probe)
+    # never overlap the train rows.
+    if with_kl_rows:
+        n_kl_train, n_kl_val = len(train_ce), len(val_ce)
+        alpaca = load_alpaca(n_kl_train + n_kl_val)
+        kl_rng = np.random.RandomState(seed if seed is not None else 42)
+        kl_rng.shuffle(alpaca)
+        train_ce = concatenate_datasets(
+            [train_ce, format_kl_dataset(alpaca[:n_kl_train], tokenizer)]
+        )
+        val_ce = concatenate_datasets(
+            [val_ce, format_kl_dataset(alpaca[n_kl_train : n_kl_train + n_kl_val], tokenizer)]
+        )
+
+    gate_train_ds = DatasetDict({"train": train_ce, "val": val_ce})
     eval_ds = format_eval_dataset(records_for(splits["test"]))
 
     return extraction_ds, gate_train_ds, eval_ds

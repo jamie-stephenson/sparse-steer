@@ -29,7 +29,7 @@ import random
 
 from datasets import Dataset, DatasetDict, load_dataset
 
-from sparse_steer.tasks.jailbreak.data import _load_alpaca
+from sparse_steer.utils.corpora import load_alpaca
 from sparse_steer.utils.refusal import detect_refusal
 from sparse_steer.utils.tokenize import apply_template
 
@@ -121,7 +121,7 @@ def load_splits(config, tokenizer) -> dict[str, list[dict]]:
     eval_rows: list[dict] = []
 
     # benign Alpaca (collateral eval + KL-preserve target), shared by both dataset modes.
-    alpaca = _load_alpaca(hv + ht + 256)
+    alpaca = load_alpaca(hv + ht + 256)
     rng.shuffle(alpaca)
 
     if dataset == "beavertails":

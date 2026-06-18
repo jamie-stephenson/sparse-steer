@@ -239,6 +239,31 @@ class GateTracker:
                 log_dict["scale/effective"] = F.softplus(shared).item()
             wandb.log(log_dict, step=step)
 
+    def sparsity(self) -> float:
+        """Realised L0 sparsity: fraction of gates closed (eval-mode effective weight == 0)."""
+        hooks = self._attn_hooks + self._mlp_hooks + [
+            h for c in self._resid_hooks.values() for h in c.values()
+        ]
+        if not hooks:
+            return 0.0
+        gates = torch.cat([self._effective(h).reshape(-1) for h in hooks])
+        return float((gates == 0).float().mean())
+
+    def max_steering_strength(self) -> float:
+        """Largest effective steering norm (gate · scale · ‖v‖) over all sites, eval mode.
+
+        Computed live from the gates (not the snapshot) so it is correct on any logging
+        cadence, independent of when the animation snapshot was last taken."""
+        vals = [0.0]
+        for hook, svn in zip(self._attn_hooks, self._attn_sv_norms):
+            vals.append(float((self._effective(hook) * svn).max()))
+        for hook, sv in zip(self._mlp_hooks, self._mlp_svs):
+            vals.append(float((self._effective(hook) * sv).norm()))
+        for comp, layers in self._resid_hooks.items():
+            for layer, hook in layers.items():
+                vals.append(float(self._effective(hook).reshape(-1)[0]) * self._resid_sv_norms[comp][layer])
+        return max(vals)
+
 
 def _make_layout(
     has_attn: bool,

@@ -1,6 +1,6 @@
 from typing import Any
 
-import torch.nn.functional as F
+import torch
 from datasets import Dataset, DatasetDict
 from omegaconf import DictConfig
 from torch import Tensor
@@ -22,12 +22,20 @@ class TruthfulQATask(TaskSpec):
         tokenizer: PreTrainedTokenizerBase,
         config: DictConfig,
     ) -> tuple[Dataset, DatasetDict, Dataset]:
+        # Build the KL-preserve (Alpaca) rows only if KL is actually used — either as a loss
+        # term (kl_weight > 0) or as a logged metric (kl_vs_base has a logging cadence).
+        mls = config.get("metric_logging_steps") or {}
+        kl_used = (
+            float(config.get("kl_weight", 0.0)) > 0
+            or float(mls.get("kl_vs_base", 0) or 0) > 0
+        )
         return get_truthfulqa_datasets(
             tokenizer,
             extraction_mcq_mode=config.get("extraction_mcq_mode", "mc1"),
             gate_train_mcq_mode=config.get("gate_train_mcq_mode", "mc1"),
             extraction_fraction=config.extraction_fraction,
             seed=config.get("data_seed"),
+            with_kl_rows=kl_used,
         )
 
     def run_task_evaluation(
@@ -50,14 +58,48 @@ class TruthfulQATask(TaskSpec):
             metrics.update(gen_metrics)
         return metrics
 
-    def loss(self, model, batch: dict[str, Tensor], logits: Tensor) -> Tensor:
-        """Next-token cross-entropy over the (default-collated) ``text`` rows."""
-        shift_logits = logits[..., :-1, :].float()
-        return F.cross_entropy(
-            shift_logits.reshape(-1, shift_logits.size(-1)),
-            batch["labels"][..., 1:].reshape(-1),
-            ignore_index=-100,
+    def collate(
+        self,
+        rows: list[dict[str, Any]],
+        tokenizer: PreTrainedTokenizerBase,
+        device: Any,
+        config: DictConfig,
+    ) -> dict[str, Tensor]:
+        """Next-token CE batch that scores only the answer completion.
+
+        Unlike the base collate (which scores the whole templated text), the
+        question prefix is masked to ``-100`` so the gates aren't trained to
+        reconstruct the prompt — only to raise the likelihood of the correct
+        answer (the shared ``ce`` term scores it). No ``steer_mask`` is emitted, so
+        steering still applies at every position, matching how it is applied at eval.
+        """
+        enc = tokenizer(
+            [r["text"] for r in rows],
+            return_tensors="pt",
+            padding=True,
+            padding_side="right",
         )
+        ids = enc["input_ids"]
+        attn = enc["attention_mask"]
+        labels = ids.masked_fill(attn == 0, -100)  # ignore padding
+        # ce_positions (task-agnostic, mirrors kl_positions): "completion" (default) scores only
+        # the answer (mask the question prefix); "all" scores the whole templated Q+A.
+        if config.get("ce_positions", "completion") == "completion":
+            for i, r in enumerate(rows):
+                labels[i, : r["prompt_len"]] = -100  # mask the question prefix
+        # Route each row to its loss term by tag (default "ce"); CE rows = QA answers,
+        # KL rows = held-out general (Alpaca) preserve rows.
+        loss_terms = [r.get("loss_term", "ce") for r in rows]
+        loss_term_rows = {
+            t: torch.tensor([lt == t for lt in loss_terms], dtype=torch.bool, device=device)
+            for t in sorted(set(loss_terms))
+        }
+        return {
+            "input_ids": ids.to(device),
+            "attention_mask": attn.to(device),
+            "labels": labels.to(device),
+            "loss_term_rows": loss_term_rows,
+        }
 
     def extra_cache_fields(
         self,
@@ -80,6 +122,20 @@ class TruthfulQATask(TaskSpec):
                 ),
                 "gate_train_mcq_mode": config.get(
                     "gate_train_mcq_mode", "mc1"
+                ),
+                # Objective identity. kl_weight > 0 adds the (Alpaca) preserve rows to the
+                # gate-train batches (changing the trained gates), so it keys the artifact;
+                # KL used only as a logged metric adds preserve rows to val alone (monitor only,
+                # never the trained gates), so it needs no key.
+                "ce_weight": config.get("ce_weight", 1.0),
+                "kl_weight": config.get("kl_weight", 0.0),
+                **(
+                    {
+                        "kl_direction": config.get("kl_direction", "reverse"),
+                        "kl_positions": config.get("kl_positions", "first_token"),
+                    }
+                    if float(config.get("kl_weight", 0.0)) > 0
+                    else {}
                 ),
             }
             if artifact_type == ArtifactType.STEERED_EVAL:

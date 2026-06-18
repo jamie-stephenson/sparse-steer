@@ -131,4 +131,26 @@ def decision_logprobs(
     return torch.cat(out, dim=0)
 
 
-__all__ = ["answer_log_probs", "teacher_forced_perplexity", "decision_logprobs"]
+def kl_divergence(logp_p: Tensor, logp_q: Tensor, direction: str = "reverse") -> Tensor:
+    """Per-row KL between two log-prob distributions (last dim = vocab).
+
+    With ``p`` = the steered/intervened model and ``q`` = the base model:
+      ``"reverse"`` (default; a.k.a. backward) = ``KL(p ‖ q) = Σ p·(log p − log q)`` — mode-seeking.
+      ``"forward"``                            = ``KL(q ‖ p) = Σ q·(log q − log p)`` — mass-covering.
+
+    Pure math (no model/task awareness) so the training objective, the eval ``kl_harmless``
+    metric, and any monitor share one implementation.
+    """
+    if direction in ("reverse", "backward"):
+        return (logp_p.exp() * (logp_p - logp_q)).sum(dim=-1)
+    if direction == "forward":
+        return (logp_q.exp() * (logp_q - logp_p)).sum(dim=-1)
+    raise ValueError(f"Unknown kl direction {direction!r}; use 'forward' or 'reverse'.")
+
+
+__all__ = [
+    "answer_log_probs",
+    "teacher_forced_perplexity",
+    "decision_logprobs",
+    "kl_divergence",
+]
