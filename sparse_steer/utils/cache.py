@@ -35,6 +35,7 @@ class ArtifactType(Enum):
 _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
     ArtifactType.STEERING_VECTORS: [
         "model_name",
+        "weight_processing",
         "seed",
         "extraction_fraction",
         "extract_batch_size",
@@ -45,6 +46,7 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
         "method",
         # inherits steering-vector fields
         "model_name",
+        "weight_processing",
         "seed",
         "extraction_fraction",
         "extract_batch_size",
@@ -107,6 +109,7 @@ _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
     ArtifactType.STEERED_EVAL: [
         "method",
         "model_name",
+        "weight_processing",
         "seed",
         "extraction_fraction",
         "eval_batch_size",
