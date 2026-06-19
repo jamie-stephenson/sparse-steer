@@ -72,6 +72,9 @@ def test_set_all_vectors_accepts_exact_component_set() -> None:
         )
 
 
-def test_residual_excludes_other_components() -> None:
-    with pytest.raises(ValueError, match="mutually exclusive"):
-        _tiny_model(["residual", "attention"])
+def test_residual_alias_removed() -> None:
+    # The 'residual' shorthand (and its mutual-exclusivity rule) was dropped in commit 82671f7
+    # in favour of the explicit resid_pre / resid_mid / resid_post taps; it is no longer a valid
+    # component, so it now fails the component check.
+    with pytest.raises(ValueError, match="Unknown component"):
+        _tiny_model(["residual"])
