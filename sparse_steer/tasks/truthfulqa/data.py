@@ -157,6 +157,45 @@ def format_train_dataset(
     )
 
 
+def format_contrastive_train_dataset(
+    records: list[tuple[int, dict[str, Any]]],
+    tokenizer: PreTrainedTokenizerBase,
+    n_neg: int = 3,
+) -> Dataset:
+    """One row per question for the mc-ranking (contrastive) loss.
+
+    Each row's ``texts`` = ``[correct, neg_1, …, neg_n_neg]`` (correct always at index 0), each the
+    templated Q+answer; ``prompt_len`` marks where the answer begins (shared across the answers).
+    Uses the mc1 targets (one correct + several incorrect). Padded to ``n_neg`` negatives by repeating
+    the last (rare: fewer than n_neg incorrect). loss_term="mc". Built from the GATE-TRAIN split only.
+    """
+    rows: list[dict[str, Any]] = []
+    for question_id, record in records:
+        question = record["question"].strip()
+        mc1 = record["mc1_targets"]
+        choices, labels = mc1["choices"], mc1["labels"]
+        positives = [c.strip() for c, l in zip(choices, labels) if l]
+        negatives = [c.strip() for c, l in zip(choices, labels) if not l]
+        if not positives or not negatives:
+            continue
+        negs = negatives[:n_neg]
+        while len(negs) < n_neg:
+            negs.append(negatives[-1])
+        answers = [positives[0]] + negs
+        prompt_len = len(tokenizer(apply_template(tokenizer, question))["input_ids"])
+        rows.append(
+            {
+                "texts": [apply_template(tokenizer, question, a) for a in answers],
+                "prompt_len": prompt_len,
+                "question_id": question_id,
+                "loss_term": "mc",
+            }
+        )
+    if rows:
+        return Dataset.from_list(rows)
+    return Dataset.from_dict({"texts": [], "prompt_len": [], "question_id": [], "loss_term": []})
+
+
 def format_kl_dataset(
     examples: list[dict[str, Any]],
     tokenizer: PreTrainedTokenizerBase,
@@ -238,6 +277,8 @@ def get_truthfulqa_datasets(
     num_folds: int = 2,
     val_ratio: float = 0.2,
     with_kl_rows: bool = False,
+    with_contrastive: bool = False,
+    n_neg: int = 3,
 ) -> tuple[Dataset, DatasetDict, Dataset]:
     """Load TruthfulQA, apply LoFiT splits, and return three datasets:
     - extraction_ds: subset of train for steering vector extraction
@@ -274,12 +315,21 @@ def get_truthfulqa_datasets(
     extraction_ds = format_extraction_dataset(
         records_for(extraction_qids), tokenizer, extraction_mcq_mode
     )
-    train_ce = format_train_dataset(
-        records_for(gate_train_qids), tokenizer, gate_train_mcq_mode
-    )
-    val_ce = format_train_dataset(
-        records_for(splits["val"]), tokenizer, gate_train_mcq_mode
-    )
+    if with_contrastive:
+        # mc-ranking objective: gate-train rows are per-question contrastive groups (correct + negs).
+        train_ce = format_contrastive_train_dataset(
+            records_for(gate_train_qids), tokenizer, n_neg=n_neg
+        )
+        val_ce = format_contrastive_train_dataset(
+            records_for(splits["val"]), tokenizer, n_neg=n_neg
+        )
+    else:
+        train_ce = format_train_dataset(
+            records_for(gate_train_qids), tokenizer, gate_train_mcq_mode
+        )
+        val_ce = format_train_dataset(
+            records_for(splits["val"]), tokenizer, gate_train_mcq_mode
+        )
 
     # Append held-out general (Alpaca) KL-preserve rows, matched 1:1 to each CE split size.
     # A single fixed-seed load is split into train/val so the val rows (the monitor probe)

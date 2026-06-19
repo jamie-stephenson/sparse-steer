@@ -29,6 +29,7 @@ class TruthfulQATask(TaskSpec):
             float(config.get("kl_weight", 0.0)) > 0
             or float(mls.get("kl_vs_base", 0) or 0) > 0
         )
+        mc_used = float(config.get("mc_weight", 0.0)) > 0
         return get_truthfulqa_datasets(
             tokenizer,
             extraction_mcq_mode=config.get("extraction_mcq_mode", "mc1"),
@@ -36,6 +37,8 @@ class TruthfulQATask(TaskSpec):
             extraction_fraction=config.extraction_fraction,
             seed=config.get("data_seed"),
             with_kl_rows=kl_used,
+            with_contrastive=mc_used,
+            n_neg=int(config.get("mc_n_neg", 3)),
         )
 
     def run_task_evaluation(
@@ -90,6 +93,8 @@ class TruthfulQATask(TaskSpec):
         answer (the shared ``ce`` term scores it). No ``steer_mask`` is emitted, so
         steering still applies at every position, matching how it is applied at eval.
         """
+        if rows and "texts" in rows[0]:  # contrastive (mc-ranking) per-question groups
+            return self._collate_contrastive(rows, tokenizer, device, config)
         enc = tokenizer(
             [r["text"] for r in rows],
             return_tensors="pt",
@@ -116,6 +121,33 @@ class TruthfulQATask(TaskSpec):
             "attention_mask": attn.to(device),
             "labels": labels.to(device),
             "loss_term_rows": loss_term_rows,
+        }
+
+    def _collate_contrastive(
+        self,
+        rows: list[dict[str, Any]],
+        tokenizer: PreTrainedTokenizerBase,
+        device: Any,
+        config: DictConfig,
+    ) -> dict[str, Tensor]:
+        """Expand per-question contrastive rows into K sequences each (correct at group index 0),
+        flattened in row order so ``mc_term`` can reshape to ``(n_questions, K)`` and rank."""
+        k = len(rows[0]["texts"])
+        flat_texts = [t for r in rows for t in r["texts"]]
+        plens = [r["prompt_len"] for r in rows for _ in range(k)]
+        enc = tokenizer(flat_texts, return_tensors="pt", padding=True, padding_side="right")
+        ids = enc["input_ids"]
+        attn = enc["attention_mask"]
+        labels = ids.masked_fill(attn == 0, -100)
+        for i, pl in enumerate(plens):
+            labels[i, :pl] = -100  # mask the shared question prefix → score answer tokens only
+        n = len(flat_texts)
+        return {
+            "input_ids": ids.to(device),
+            "attention_mask": attn.to(device),
+            "labels": labels.to(device),
+            "loss_term_rows": {"mc": torch.ones(n, dtype=torch.bool, device=device)},
+            "mc_n_answers": k,
         }
 
     def extra_cache_fields(
@@ -146,6 +178,12 @@ class TruthfulQATask(TaskSpec):
                 # never the trained gates), so it needs no key.
                 "ce_weight": config.get("ce_weight", 1.0),
                 "kl_weight": config.get("kl_weight", 0.0),
+                "mc_weight": config.get("mc_weight", 0.0),
+                **(
+                    {"mc_n_neg": int(config.get("mc_n_neg", 3))}
+                    if float(config.get("mc_weight", 0.0)) > 0
+                    else {}
+                ),
                 **(
                     {
                         "kl_direction": config.get("kl_direction", "reverse"),

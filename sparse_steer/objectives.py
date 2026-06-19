@@ -45,6 +45,29 @@ def ce_term(
     return F.cross_entropy(sl.reshape(-1, sl.size(-1)), ll.reshape(-1), ignore_index=-100)
 
 
+def mc_term(
+    batch: dict[str, Tensor], logits: Tensor, rows: Tensor, dtype: torch.dtype = torch.float32
+) -> Tensor:
+    """mc1-style RANKING loss on contrastive gate-train rows (NO test leakage — gate-train split).
+
+    Each question contributes K sequences laid out contiguously: its CORRECT answer at index 0 of
+    the group, then K-1 incorrect answers. The score per sequence is the total answer-token log-prob
+    (sum over the completion tokens, matching the mc1 metric's `answer_log_probs`); we softmax over
+    the K scores per question and apply cross-entropy toward the correct one (index 0). This REWARDS
+    steering that makes the truthful answer more likely than the false ones — unlike plain CE, which
+    fights steering. The L0 gates still learn the site; only the objective changes.
+    """
+    k = int(batch["mc_n_answers"])
+    sl = logits[rows][..., :-1, :].to(dtype)
+    ll = batch["labels"][rows][..., 1:]
+    logp = F.log_softmax(sl, dim=-1)
+    tok = logp.gather(-1, ll.clamp_min(0).unsqueeze(-1)).squeeze(-1)
+    mask = (ll != -100).to(dtype)
+    seq_lp = (tok * mask).sum(-1).view(-1, k)  # (n_questions, K); correct = column 0
+    target = seq_lp.new_zeros(seq_lp.size(0)).long()
+    return F.cross_entropy(seq_lp, target)
+
+
 def kl_term(
     model, batch: dict[str, Tensor], logits: Tensor, rows: Tensor, config: DictConfig
 ) -> Tensor:
@@ -101,6 +124,11 @@ def composed_objective(
     if ce_w and ce_rows is not None and bool(ce_rows.any()):
         loss = loss + ce_w * ce_term(batch, logits, ce_rows, dtype)
 
+    mc_w = float(config.get("mc_weight", 0.0))
+    mc_rows = term_rows.get("mc")
+    if mc_w and mc_rows is not None and bool(mc_rows.any()):
+        loss = loss + mc_w * mc_term(batch, logits, mc_rows, dtype)
+
     kl_w = float(config.get("kl_weight", 0.0))
     kl_rows = term_rows.get("kl")
     if kl_w and kl_rows is not None and bool(kl_rows.any()):
@@ -109,4 +137,4 @@ def composed_objective(
     return loss
 
 
-__all__ = ["ce_term", "kl_term", "composed_objective"]
+__all__ = ["ce_term", "mc_term", "kl_term", "composed_objective", "resolve_steering_dtype"]

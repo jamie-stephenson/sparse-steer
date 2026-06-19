@@ -128,7 +128,7 @@ def _train_loop(
     # longer/variable sequences would otherwise balloon the MPS caching allocator. The val
     # split keeps its KL rows regardless (the monitor probe is built separately).
     active_terms = {
-        t for t in ("ce", "kl")
+        t for t in ("ce", "mc", "kl")
         if float(config.get(f"{t}_weight", 1.0 if t == "ce" else 0.0)) > 0
     }
     rows = [r for r in rows if r.get("loss_term", "ce") in active_terms]
