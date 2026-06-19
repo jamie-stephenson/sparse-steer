@@ -10,7 +10,7 @@
 
 from .experiment import REFINEMENTS, SteeringExperiment
 from .extract import run_extraction
-from .search import candidate_grid, filter_and_pick, grid_select_source
+from .search import candidate_grid, filter_and_pick, grid_search_source
 from .solvers import (
     _parse_source,
     broadcast,
@@ -27,7 +27,7 @@ __all__ = [
     "candidate_grid",
     "extraction_targets",
     "filter_and_pick",
-    "grid_select_source",
+    "grid_search_source",
     "resolve_direction_source",
     "run_extraction",
     "source_vectors",

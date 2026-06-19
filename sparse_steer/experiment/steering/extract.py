@@ -38,7 +38,7 @@ def run_extraction(
     """Run steering vector extraction with caching.
 
     ``targets`` overrides which component taps are extracted (default ``config.targets``); the
-    sourcing layer widens it so a pinned ``direction_source`` component is extracted even when it
+    sourcing layer widens it so a fixed ``direction_source`` component is extracted even when it
     is not itself a steering target.
     """
     config = experiment.config

@@ -1,6 +1,6 @@
 """Jailbreak selection scoring (Arditi App. B/C) — the task's :class:`SelectionPolicy`.
 
-This is the task-specific half of ``direction_source: grid_select``: given a candidate refusal
+This is the task-specific half of ``direction_source: grid_search``: given a candidate refusal
 direction broadcast onto every steering site, score it by
 
 - **bypass** — the refusal metric on harmful prompts under the candidate's ablation (lower ⇒ more
@@ -66,7 +66,7 @@ def _induce_logprobs(
 
 
 def jailbreak_selection_policy(model, tokenizer, refine_ds, config) -> SelectionPolicy:
-    """Build the jailbreak :class:`SelectionPolicy` for ``direction_source: grid_select``.
+    """Build the jailbreak :class:`SelectionPolicy` for ``direction_source: grid_search``.
 
     Prepares the scoring set once (Arditi's ``filter_val``: keep harmful the unsteered model does
     refuse and harmless it does not) and the harmless baseline distribution, then returns a

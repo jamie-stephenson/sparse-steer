@@ -1,4 +1,4 @@
-"""Pure selection logic for grid_select direction picking (experiment.steering.search.filter_and_pick)."""
+"""Pure selection logic for grid_search direction picking (experiment.steering.search.filter_and_pick)."""
 
 import pytest
 

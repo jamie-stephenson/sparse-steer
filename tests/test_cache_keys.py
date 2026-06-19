@@ -77,9 +77,9 @@ def test_l0_lambda_changes_gate_training_eval_key():
     )
 
 
-def test_grid_select_eval_key_ignores_gate_training_knobs():
+def test_grid_search_eval_key_ignores_gate_training_knobs():
     # a no-training selection run's *extra* must NOT carry gate-training knobs (e.g.
     # normalize_ablation): the gate block is gated out, so they never enter its identity.
-    a = _key(ArtifactType.STEERED_EVAL, refinement_method="none", direction_source="grid_select", normalize_ablation=True)
-    b = _key(ArtifactType.STEERED_EVAL, refinement_method="none", direction_source="grid_select", normalize_ablation=False)
+    a = _key(ArtifactType.STEERED_EVAL, refinement_method="none", direction_source="grid_search", normalize_ablation=True)
+    b = _key(ArtifactType.STEERED_EVAL, refinement_method="none", direction_source="grid_search", normalize_ablation=False)
     assert a == b

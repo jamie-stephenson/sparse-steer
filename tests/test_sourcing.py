@@ -1,4 +1,4 @@
-"""direction_source resolution: self (per-site) vs pinned broadcast (one direction everywhere)."""
+"""direction_source resolution: self (per-site) vs fixed broadcast (one direction everywhere)."""
 
 import pytest
 import torch
@@ -23,8 +23,8 @@ def _extracted():
 
 def test_parse_source_recognises_the_three_kinds():
     assert _parse_source("self") == ("self", None, None)
-    assert _parse_source("grid_select") == ("grid", None, None)
-    assert _parse_source(["resid_pre", 17]) == ("pin", "resid_pre", 17)
+    assert _parse_source("grid_search") == ("grid", None, None)
+    assert _parse_source(["resid_pre", 17]) == ("fixed", "resid_pre", 17)
 
 
 def test_parse_source_rejects_malformed_pin():
@@ -62,7 +62,7 @@ def test_pin_broadcasts_the_one_source_direction_everywhere():
             assert torch.equal(out[c][layer], source)
 
 
-def test_extraction_targets_adds_a_pinned_source_component():
+def test_extraction_targets_adds_a_fixed_source_component():
     # source component not among the steering targets ⇒ must be added so it can be read
     cfg = OmegaConf.create({"targets": ["resid_post"], "direction_source": ["resid_pre", 1]})
     assert set(extraction_targets(cfg)) == {"resid_post", "resid_pre"}

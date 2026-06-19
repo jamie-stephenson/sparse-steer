@@ -14,8 +14,8 @@ from sparse_steer.utils.cache import ArtifactType
 
 @dataclass
 class SelectionPolicy:
-    """A task's ``grid_select`` scoring (Arditi App. C), consumed by the generic score-search
-    direction solver (``experiment.steering.search.grid_select_source``).
+    """A task's ``grid_search`` scoring (Arditi App. C), consumed by the generic score-search
+    direction solver (``experiment.steering.search.grid_search_source``).
 
     ``score(vector, source_layer)`` is called *after* the driver has broadcast ``vector`` onto
     every steering site, so it reads the model in its candidate-ablated state. It returns
@@ -71,9 +71,9 @@ class TaskSpec(abc.ABC):
         refine_ds,
         config: DictConfig,
     ) -> "SelectionPolicy | None":
-        """Scoring used by ``direction_source: grid_select`` to pick one direction from the
+        """Scoring used by ``direction_source: grid_search`` to pick one direction from the
         candidate grid (Arditi App. C). Default ``None`` ⇒ this task does not support
-        ``grid_select`` (only ``self`` / pinned sourcing). Override to return a
+        ``grid_search`` (only ``self`` / fixed sourcing). Override to return a
         :class:`SelectionPolicy` — e.g. jailbreak's bypass/induce/KL refusal scoring.
         """
         return None

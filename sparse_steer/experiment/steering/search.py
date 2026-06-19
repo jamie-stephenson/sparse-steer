@@ -2,9 +2,9 @@
 
 The *fat* direction solver: it proposes a grid of candidate directions, scores each by broadcasting
 it onto every site and asking the task's selection policy (which reads the candidate-applied model),
-then picks one and broadcasts it. Unlike the *declare* solvers (self / pin in ``solvers.py``) it
+then picks one and broadcasts it. Unlike the *declare* sources (self / fixed in ``solvers.py``) it
 needs the refine dataset and a task scorer; that coupling is contained here. The result is the same
-``{component: (n_layers, ...)}`` dict the declare solvers return. Was the grid_select half of
+``{component: (n_layers, ...)}`` dict the declare solvers return. Was the grid_search half of
 ``experiment/sourcing.py``.
 """
 
@@ -96,7 +96,7 @@ def filter_and_pick(
 
 
 @torch.no_grad()
-def grid_select_source(
+def grid_search_source(
     experiment, model: SteeringModel, tokenizer, extraction_ds, refine_ds, cache_info: dict
 ) -> dict[str, Tensor] | None:
     """Select one direction via the task's ``SelectionPolicy`` and broadcast it to every steering
@@ -112,8 +112,8 @@ def grid_select_source(
     policy = experiment.task.selection_policy(model, tokenizer, refine_ds, config)
     if policy is None:
         raise RuntimeError(
-            f"direction_source=grid_select needs a task selection policy, but task "
-            f"'{experiment.task.task_name}' provides none (only self / pinned sourcing)."
+            f"direction_source=grid_search needs a task selection policy, but task "
+            f"'{experiment.task.task_name}' provides none (only self / fixed sourcing)."
         )
 
     components = list(config.targets)
@@ -158,4 +158,4 @@ def grid_select_source(
     return selected
 
 
-__all__ = ["candidate_grid", "filter_and_pick", "grid_select_source"]
+__all__ = ["candidate_grid", "filter_and_pick", "grid_search_source"]

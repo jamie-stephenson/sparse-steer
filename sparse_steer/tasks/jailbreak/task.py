@@ -101,7 +101,7 @@ class RefusalTask(TaskSpec):
         return metrics
 
     def selection_policy(self, model, tokenizer, refine_ds, config) -> SelectionPolicy:
-        # Refusal-specific scoring for direction_source=grid_select (Arditi App. C): bypass /
+        # Refusal-specific scoring for direction_source=grid_search (Arditi App. C): bypass /
         # induce / KL on the refinement set. The grid sweep + filter/pick are task-general
         # (experiment.steering.search); this only supplies the score + constraints.
         return jailbreak_selection_policy(model, tokenizer, refine_ds, config)
@@ -205,7 +205,7 @@ class RefusalTask(TaskSpec):
             )
         if artifact_type == ArtifactType.SELECTED_DIRECTION or (
             artifact_type == ArtifactType.STEERED_EVAL
-            and config.get("direction_source") == "grid_select"
+            and config.get("direction_source") == "grid_search"
         ):
             # The selected direction (and the eval that uses it) depends on the refinement set
             # + the Arditi selection hyperparameters.
@@ -247,7 +247,7 @@ class RefusalTask(TaskSpec):
         files = ["sparse_steer/tasks/jailbreak/data.py", "sparse_steer/utils/refusal.py"]
         if artifact_type == ArtifactType.BUCKETED_DATASET:
             files.append("sparse_steer/core/generate.py")
-        # Sourcing (self / pinned broadcast / grid_select) decides the steering vectors; its
+        # Sourcing (self / fixed broadcast / grid_search) decides the steering vectors; its
         # scoring (refine.py) decides the selected direction. Both feed the eval.
         if artifact_type in (
             ArtifactType.STEERING_VECTORS,

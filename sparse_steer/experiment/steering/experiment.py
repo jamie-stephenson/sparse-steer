@@ -1,7 +1,7 @@
 """The steering Experiment engine — loads a SteeringModel and runs the chosen refinement.
 
 Naming (genus → species): a *solver* resolves one field of the per-site steering config. Its two
-species are the **source** (direction field: self / pin / grid_select, in ``solvers.source_vectors``)
+species are the **source** (direction field: self / fixed / grid_search, in ``solvers.source_vectors``)
 and the **refinement** (strength field: none / gate_training / iti_head_select, in ``REFINEMENTS``).
 This engine dispatches the refinement named by ``config.refinement_method``; the refinement itself
 calls ``source_vectors`` for the direction. Was the ``SteeringExperiment`` half of

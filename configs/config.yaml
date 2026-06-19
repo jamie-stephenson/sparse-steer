@@ -36,7 +36,7 @@ inspect_eval_limit: null
 #   normalize_ablation (default False) — ablation only: divide each site's ablation by its own
 #     mean |activation·v̂| so the L0 gates select on objective benefit, not residual norm.
 #   direction_source (default "self") — where each steering site's direction comes from:
-#     self | [component, L] (broadcast one direction everywhere) | grid_select (Arditi App. C).
+#     self | [component, L] (broadcast one direction everywhere) | grid_search (Arditi App. C).
 
 hydra:
   run:
