@@ -1,0 +1,30 @@
+# @package _global_
+# Inference-Time Intervention (Li et al. 2023) baseline.
+# Probe-select the top-K attention heads (a per-head logistic probe, ranked by validation accuracy),
+# then shift each selected head along its mass-mean truthful direction by α·σ. NO training: the
+# selection is written into per-head log_alpha (mask) and the α·σ magnitude into raw_scale.
+# We LEARN the heads via supervised probes here (ITI's mechanism) — a faithful baseline, distinct
+# from our own L0-gate method, which learns the site without ever probing.
+experiment: steering          # steering engine; refinement_method picks the (probe-rule) strength solver
+refinement_method: iti_head_select
+intervention: steer
+steering_layer_ids: null      # all layers; the probe selects which heads
+extract_batch_size: 8
+extract_token_position: last
+targets: [attention]
+normalize_steering_vectors: true  # unit per-head directions θ; magnitude = α·σ via raw_scale
+learn_scale: false
+freeze_raw_scale: true
+init_raw_scale: 0.0            # overwritten per-head with inv_softplus(α·σ) by the solver
+
+# ITI knobs (sweepable)
+iti_num_heads: 48             # top-K heads by probe val-accuracy (ITI paper: K≈48)
+iti_alpha: 15.0               # ITI's α (paper: ~15); per-head strength = α·σ_head
+
+# gates must exist so the probe mask can be written into log_alpha (±large → deterministic 1/0)
+gate_config:
+  temperature: 0.33
+  stretch_limits: [-0.1, 1.1]
+  eps: 1.0e-6
+  eval_threshold: 1.0e-2
+  init_log_alpha: 0.0

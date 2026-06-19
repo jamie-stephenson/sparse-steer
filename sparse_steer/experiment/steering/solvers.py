@@ -1,28 +1,32 @@
 """Field solvers — how each field of the per-site steering config gets its value.
 
-The steered model is `correction = operator(strength · gate · direction)` at every site. Three
-fields decide it, and each is set by a *solver*:
+Naming (genus → species). A **solver** is the genus: anything that resolves one field of the config.
+Its two species, named distinctly so they're never confused:
+
+  - a **source** resolves the *direction* field (this module's ``source_vectors`` dispatch),
+  - a **refinement** resolves the *strength* field (the ``REFINEMENTS`` registry below).
+
+The steered model is `correction = operator(strength · gate · direction)` at every site:
 
 - **operator** (steer | ablate) — declared by ``config.intervention``, baked into the SteeringModel
-  at construction (not solved here).
-- **direction** (per site) — solved by ``config.direction_source``:
-    ``self`` / ``[component, layer]`` → ``resolve_direction_source`` (a *declare* solver: thin
-    transforms of the extracted per-site vectors); ``grid_select`` → ``search.grid_select_source``
-    (a *score-search* solver — propose candidates, score via the task, pick one, broadcast).
-- **strength** (per site, 0 = inactive) — solved by ``config.refinement_method`` over
-  ``STRENGTH_SOLVERS`` (+ task-contributed): ``none`` → ``_refine_none`` (*declare* — set the fixed
-  scale, stop); ``gate_training`` → ``_refine_gate_training`` (*gradient* — train L0 gates × scale).
-  An ITI-style ``probe_rule`` strength solver (per-head probe top-K → α·σ) would slot in here as a
-  sibling.
+  at construction (not resolved here).
+- **direction** — chosen by the *source* ``config.direction_source``: ``self`` / ``[component,
+  layer]`` → ``resolve_direction_source`` (declare: thin transforms of the extracted per-site
+  vectors); ``grid_select`` → ``search.grid_select_source`` (score-search: propose, score, pick).
+- **strength** (per site, 0 = inactive) — set by the *refinement* ``config.refinement_method`` over
+  ``REFINEMENTS`` (+ a task's ``extra_refinements()``): ``none`` → ``_refine_none`` (declare — fixed
+  scale, no training); ``gate_training`` → ``_refine_gate_training`` (gradient — train L0 gates ×
+  scale); ``iti_head_select`` → ``_refine_iti_head_select`` (rule — per-site probe top-K → α·σ).
 
-``direction_source`` and ``refinement_method`` are therefore the direction-field and strength-field
-solvers; ``select`` (grid) and ``probe`` differ from gate-training only in solver *kind* (search /
-rule vs gradient), not in being a separate concept.
+So ``select`` (grid source), ``gate_training`` and ``iti_head_select`` (refinements) differ only in
+*kind* (search / gradient / rule), not in being separate concepts — they all resolve one field.
 """
 
 import shutil
 from typing import Any
 
+import torch
+import torch.nn.functional as F
 from torch import Tensor
 
 from sparse_steer.core.steering import SteeringModel
@@ -106,12 +110,12 @@ def source_vectors(
 
 
 # ── strength field: solvers (none = declare, gate_training = gradient) ──────
-# A strength solver turns the loaded model + datasets into the refined model:
+# A refinement turns the loaded model + datasets into the refined model:
 #   fn(experiment, model, tokenizer, extraction_ds, train_ds, output_dir)
 #       -> (model, artifacts, cache_info)
-# It first solves the direction (source_vectors → set), then sets strengths: a fixed scale (none)
-# or trained L0 gates × scale (gate_training). Tasks may contribute more via
-# TaskSpec.refinement_strategies(); the pools merge at dispatch.
+# It first picks the direction (source_vectors → set), then sets strengths: a fixed scale (none),
+# trained L0 gates × scale (gate_training), or probe-selected α·σ (iti_head_select). Tasks may
+# contribute more via TaskSpec.extra_refinements(); the pools merge at dispatch.
 
 
 def _refine_none(experiment, model, tokenizer, extraction_ds, train_ds, output_dir):
@@ -171,15 +175,115 @@ def _refine_gate_training(experiment, model, tokenizer, extraction_ds, train_ds,
     return model, artifacts, cache_info
 
 
-# Strength-field solvers, keyed by `refinement_method`. Tasks add more via refinement_strategies().
-STRENGTH_SOLVERS = {
+# ITI gate-mask logit: ±this → the eval hard-concrete gate is a deterministic ≈1 / ≈0.
+_ITI_MASK_LOGIT = 10.0
+
+
+def _inv_softplus(y: Tensor) -> Tensor:
+    """softplus⁻¹: the raw_scale whose softplus equals the per-head magnitude ``y`` (= α·σ)."""
+    return torch.log(torch.expm1(y.clamp_min(1e-6)))
+
+
+def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_ds, output_dir):
+    """ITI-style probe-rule refinement (Li et al. 2023), generalised off attention.
+
+    For each configured target, fit a probe per *site* — a site is one gate: an attention head, or a
+    whole residual/mlp layer — on the unsteered per-site activations, rank ALL sites (across all
+    targets) by validation accuracy, take the top-K, and shift each along its mass-mean direction by
+    ``α·σ``. The selection (mask) is written into each site's ``log_alpha`` and the magnitude into
+    ``raw_scale``; nothing is trained. The ITI paper fixes ``targets=[attention]``, but the mechanism
+    applies to any per-site target (resid_mid, resid_post, mlp, …) — that's a config choice here.
+
+    Faithful baseline: ITI *probes* the sites (supervised); our own method instead *learns* them via
+    L0 gates and never probes — so this deliberately uses a mechanism our constraints forbid for us.
+    """
+    from sparse_steer.core.extract import collect_activations  # local: only ITI needs it
+    from .probe import fit_head_probes, head_sigma
+
+    config = experiment.config
+    cache_info: dict[str, Any] = {}
+    components = list(config.targets)
+
+    steering_vectors = source_vectors(
+        experiment, model, tokenizer, extraction_ds, train_ds, cache_info
+    )
+    if steering_vectors is None:
+        raise ValueError("iti_head_select needs extracted per-site directions (config.targets).")
+
+    # Per-example per-site activations on the UNSTEERED model + truthful labels, for the probes.
+    with model.steering_disabled():
+        ds_acts, _ = collect_activations(
+            extraction_ds, model, tokenizer,
+            targets=components,
+            batch_size=int(config.extract_batch_size),
+            token_position=config.extract_token_position,
+        )
+    positive = torch.tensor(ds_acts["positive"])   # (n,) bool
+
+    # Deploy the unit mass-mean directions; σ is measured along those same unit directions.
+    model.set_all_vectors(steering_vectors, normalize=True)
+
+    # Per target: probe val-accuracy + σ per site, normalised to (L, H_c) with H_c=1 for single-gate
+    # (residual/mlp) targets. Then a GLOBAL top-K across all sites of all targets.
+    alpha = float(config.get("iti_alpha", 15.0))
+    sigma_by_c: dict[str, Tensor] = {}
+    sites: list[tuple[float, str, int, int]] = []  # (val_acc, component, layer, gate)
+    for c in components:
+        acts_c = torch.tensor(ds_acts[c]).float()
+        if acts_c.dim() == 3:                      # residual/mlp: (n, L, D) → one gate per layer
+            acts_c = acts_c.unsqueeze(2)           # (n, L, 1, D)
+        dir_c = steering_vectors[c].float()
+        if dir_c.dim() == 2:                       # (L, D) → (L, 1, D)
+            dir_c = dir_c.unsqueeze(1)
+        dir_c = F.normalize(dir_c, dim=-1)
+        acc_c = fit_head_probes(acts_c, positive)  # (L, H_c)
+        sigma_by_c[c] = head_sigma(acts_c, dir_c)  # (L, H_c)
+        Lc, Hc = acc_c.shape
+        for layer in range(Lc):
+            for gate in range(Hc):
+                sites.append((float(acc_c[layer, gate]), c, layer, gate))
+
+    sites.sort(key=lambda s: -s[0])
+    k = min(int(config.get("iti_num_heads", 48)), len(sites))
+    selected = {(c, layer, gate) for _, c, layer, gate in sites[:k]}
+    top_acc = sum(s[0] for s in sites[:k]) / k if k else 0.0
+
+    for c in components:
+        sigma_c = sigma_by_c[c]
+        Lc, Hc = sigma_c.shape
+        for layer in range(Lc):
+            key = f"{c}_{layer}"
+            if key not in model.hooks:
+                continue
+            hook = model.hooks[key]
+            mask_l = torch.tensor([(c, layer, gate) in selected for gate in range(Hc)])
+            raw_l = _inv_softplus(alpha * sigma_c[layer])
+            with torch.no_grad():
+                hook.log_alpha.data = torch.where(
+                    mask_l.to(hook.log_alpha.device),
+                    torch.full_like(hook.log_alpha.data, _ITI_MASK_LOGIT),
+                    torch.full_like(hook.log_alpha.data, -_ITI_MASK_LOGIT),
+                )
+                hook.raw_scale.data = raw_l.to(hook.raw_scale.device, hook.raw_scale.dtype)
+            hook.log_alpha.requires_grad_(False)
+            if isinstance(getattr(hook, "raw_scale", None), torch.nn.Parameter):
+                hook.raw_scale.requires_grad_(False)
+
+    print(f"  ITI: {k} sites selected across {components} (mean top-K probe val-acc {top_acc:.3f}); α·σ set.")
+    cache_info["iti"] = {"status": "miss", "n_sites": k, "top_val_acc": top_acc, "components": components}
+    return model, {}, cache_info
+
+
+# Strength-field refinements, keyed by `refinement_method`. Tasks add more via extra_refinements().
+REFINEMENTS = {
     "none": _refine_none,
     "gate_training": _refine_gate_training,
+    "iti_head_select": _refine_iti_head_select,
 }
 
 
 __all__ = [
-    "STRENGTH_SOLVERS",
+    "REFINEMENTS",
     "broadcast",
     "extraction_targets",
     "resolve_direction_source",

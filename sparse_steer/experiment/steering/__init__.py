@@ -8,7 +8,7 @@
 ``core/steering.py`` is the orthogonal *apply* mechanism; this subsystem only decides the config.
 """
 
-from .experiment import STRENGTH_SOLVERS, SteeringExperiment
+from .experiment import REFINEMENTS, SteeringExperiment
 from .extract import run_extraction
 from .search import candidate_grid, filter_and_pick, grid_select_source
 from .solvers import (
@@ -20,7 +20,7 @@ from .solvers import (
 )
 
 __all__ = [
-    "STRENGTH_SOLVERS",
+    "REFINEMENTS",
     "SteeringExperiment",
     "_parse_source",
     "broadcast",

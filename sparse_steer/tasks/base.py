@@ -52,13 +52,13 @@ class TaskSpec(abc.ABC):
         config: DictConfig,
     ) -> dict[str, float]: ...
 
-    # ── Refinement strategies ─────────────────────────────────────────
+    # ── Refinements ───────────────────────────────────────────────────
 
-    def refinement_strategies(self) -> dict[str, Callable]:
-        """Task-specific refinement strategies contributed to the experiment's refine slot,
-        keyed by the ``refinement_method`` config value (merged with the experiment's built-ins).
-        Default: none. A strategy is ``fn(experiment, model, tokenizer, extraction_ds, train_ds,
-        output_dir) -> (model, artifacts, cache_info)``.
+    def extra_refinements(self) -> dict[str, Callable]:
+        """Task-contributed strength-field *refinements*, merged with the engine's built-in
+        ``REFINEMENTS`` and selected by the ``refinement_method`` config value. Default: none.
+        A refinement is ``fn(experiment, model, tokenizer, extraction_ds, train_ds, output_dir)
+        -> (model, artifacts, cache_info)``.
         """
         return {}
 

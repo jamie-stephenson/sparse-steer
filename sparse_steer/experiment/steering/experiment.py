@@ -1,9 +1,11 @@
-"""The steering Experiment engine — loads a SteeringModel and runs the strength solver.
+"""The steering Experiment engine — loads a SteeringModel and runs the chosen refinement.
 
-The strength solver (``config.refinement_method`` over ``STRENGTH_SOLVERS`` + task-contributed) owns
-solving the direction (it calls ``source_vectors``) and then setting strengths (fixed or trained).
-WHERE the direction comes from is the orthogonal ``direction_source`` axis, resolved inside
-``source_vectors``. Was the ``SteeringExperiment`` half of ``experiment/steering.py``.
+Naming (genus → species): a *solver* resolves one field of the per-site steering config. Its two
+species are the **source** (direction field: self / pin / grid_select, in ``solvers.source_vectors``)
+and the **refinement** (strength field: none / gate_training / iti_head_select, in ``REFINEMENTS``).
+This engine dispatches the refinement named by ``config.refinement_method``; the refinement itself
+calls ``source_vectors`` for the direction. Was the ``SteeringExperiment`` half of
+``experiment/steering.py``.
 """
 
 from pathlib import Path
@@ -15,12 +17,13 @@ from transformers import PreTrainedModel, PreTrainedTokenizerBase
 from sparse_steer.core.loading import load_steering_model
 
 from ..base import Experiment
-from .solvers import STRENGTH_SOLVERS
+from .solvers import REFINEMENTS
 
 
 class SteeringExperiment(Experiment):
-    """Steering methods (dense, sparse, …). The strength solver is selected by
-    ``config.refinement_method`` over the built-in + task-contributed strategies."""
+    """Steering methods (dense, sparse, …). The strength-field refinement is selected by
+    ``config.refinement_method`` over the built-in ``REFINEMENTS`` plus the task's
+    ``extra_refinements()``."""
 
     def _load_model(self) -> PreTrainedModel:
         return load_steering_model(self.config)
@@ -33,13 +36,13 @@ class SteeringExperiment(Experiment):
         train_ds: DatasetDict,
         output_dir: Path,
     ) -> tuple[PreTrainedModel, dict[str, str | None], dict[str, Any]]:
-        strategies = {**STRENGTH_SOLVERS, **self.task.refinement_strategies()}
+        refinements = {**REFINEMENTS, **self.task.extra_refinements()}
         method = self.config.get("refinement_method")
-        if method not in strategies:
+        if method not in refinements:
             raise ValueError(
-                f"Unknown refinement_method {method!r}. Available: {sorted(strategies)}"
+                f"Unknown refinement_method {method!r}. Available: {sorted(refinements)}"
             )
-        return strategies[method](self, model, tokenizer, extraction_ds, train_ds, output_dir)
+        return refinements[method](self, model, tokenizer, extraction_ds, train_ds, output_dir)
 
 
-__all__ = ["SteeringExperiment", "STRENGTH_SOLVERS"]
+__all__ = ["SteeringExperiment", "REFINEMENTS"]
