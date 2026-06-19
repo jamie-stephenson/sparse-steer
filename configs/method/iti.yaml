@@ -18,8 +18,12 @@ freeze_raw_scale: true
 init_raw_scale: 0.0            # overwritten per-head with inv_softplus(α·σ) by the solver
 
 # ITI knobs (sweepable)
-iti_num_heads: 48             # top-K heads by probe val-accuracy (ITI paper: K≈48)
-iti_alpha: 15.0               # ITI's α (paper: ~15); per-head strength = α·σ_head
+iti_topk: 48                  # top-K sites by probe val-accuracy (a site = an attention head OR a
+                              # residual/mlp layer — not necessarily heads; ITI paper K≈48)
+iti_scale: 15.0               # per-site strength = iti_scale · σ_site. This is ITI's α — a magnitude
+                              # multiplier; named "scale" (our magnitude term), NOT "alpha", to avoid
+                              # clashing with our log_alpha gate logit. Paper α≈15 (too strong for
+                              # Qwen-0.5B → degenerate; sweep down).
 
 # gates must exist so the probe mask can be written into log_alpha (±large → deterministic 1/0)
 gate_config:

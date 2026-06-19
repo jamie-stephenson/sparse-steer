@@ -225,7 +225,7 @@ def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_d
 
     # Per target: probe val-accuracy + σ per site, normalised to (L, H_c) with H_c=1 for single-gate
     # (residual/mlp) targets. Then a GLOBAL top-K across all sites of all targets.
-    alpha = float(config.get("iti_alpha", 15.0))
+    scale = float(config.get("iti_scale", 15.0))  # ITI's α: a magnitude multiplier (not our log_alpha)
     sigma_by_c: dict[str, Tensor] = {}
     sites: list[tuple[float, str, int, int]] = []  # (val_acc, component, layer, gate)
     for c in components:
@@ -244,7 +244,7 @@ def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_d
                 sites.append((float(acc_c[layer, gate]), c, layer, gate))
 
     sites.sort(key=lambda s: -s[0])
-    k = min(int(config.get("iti_num_heads", 48)), len(sites))
+    k = min(int(config.get("iti_topk", 48)), len(sites))
     selected = {(c, layer, gate) for _, c, layer, gate in sites[:k]}
     top_acc = sum(s[0] for s in sites[:k]) / k if k else 0.0
 
@@ -257,7 +257,7 @@ def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_d
                 continue
             hook = model.hooks[key]
             mask_l = torch.tensor([(c, layer, gate) in selected for gate in range(Hc)])
-            raw_l = _inv_softplus(alpha * sigma_c[layer])
+            raw_l = _inv_softplus(scale * sigma_c[layer])
             with torch.no_grad():
                 hook.log_alpha.data = torch.where(
                     mask_l.to(hook.log_alpha.device),
