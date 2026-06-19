@@ -58,12 +58,15 @@ def mc_term(
     fights steering. The L0 gates still learn the site; only the objective changes.
     """
     k = int(batch["mc_n_answers"])
-    sl = logits[rows][..., :-1, :].to(dtype)
+    sl = logits[rows][..., :-1, :]
     ll = batch["labels"][rows][..., 1:]
-    logp = F.log_softmax(sl, dim=-1)
-    tok = logp.gather(-1, ll.clamp_min(0).unsqueeze(-1)).squeeze(-1)
-    mask = (ll != -100).to(dtype)
-    seq_lp = (tok * mask).sum(-1).view(-1, k)  # (n_questions, K); correct = column 0
+    v = sl.size(-1)
+    # per-token NLL via fused cross_entropy (no full-vocab log_softmax tensor materialised →
+    # far cheaper on MPS than log_softmax+gather). ignore_index zeroes the masked prompt tokens.
+    nll = F.cross_entropy(
+        sl.reshape(-1, v).to(dtype), ll.reshape(-1), ignore_index=-100, reduction="none"
+    ).view(ll.shape)
+    seq_lp = -nll.sum(-1).view(-1, k)  # (n_questions, K) total answer log-prob; correct = column 0
     target = seq_lp.new_zeros(seq_lp.size(0)).long()
     return F.cross_entropy(seq_lp, target)
 
