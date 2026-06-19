@@ -3,6 +3,6 @@ task_name: truthfulqa
 model_name: Qwen/Qwen2.5-0.5B-Instruct
 dtype: float16
 extraction_mcq_mode: mc1
-gate_train_mcq_mode: mc1
+ce_term_mcq_mode: mc1
 generative_eval: false
 gen_max_new_tokens: 64

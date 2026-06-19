@@ -34,7 +34,7 @@ class TruthfulQATask(TaskSpec):
         return get_truthfulqa_datasets(
             tokenizer,
             extraction_mcq_mode=config.get("extraction_mcq_mode", "mc1"),
-            gate_train_mcq_mode=config.get("gate_train_mcq_mode", "mc1"),
+            ce_term_mcq_mode=config.get("ce_term_mcq_mode", "mc1"),
             extraction_fraction=config.extraction_fraction,
             seed=config.get("data_seed"),
             with_kl_rows=kl_used,
@@ -167,8 +167,8 @@ class TruthfulQATask(TaskSpec):
                 "extraction_mcq_mode": config.get(
                     "extraction_mcq_mode", "mc1"
                 ),
-                "gate_train_mcq_mode": config.get(
-                    "gate_train_mcq_mode", "mc1"
+                "ce_term_mcq_mode": config.get(
+                    "ce_term_mcq_mode", "mc1"
                 ),
                 # Objective identity. kl_weight > 0 adds the (Alpaca) preserve rows to the
                 # gate-train batches (changing the trained gates), so it keys the artifact;
@@ -200,8 +200,8 @@ class TruthfulQATask(TaskSpec):
             }
         if artifact_type == ArtifactType.PEFT_ADAPTER:
             return {
-                "gate_train_mcq_mode": config.get(
-                    "gate_train_mcq_mode", "mc1"
+                "ce_term_mcq_mode": config.get(
+                    "ce_term_mcq_mode", "mc1"
                 ),
             }
         return {}

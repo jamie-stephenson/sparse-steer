@@ -270,7 +270,7 @@ def get_truthfulqa_datasets(
     tokenizer: PreTrainedTokenizerBase,
     *,
     extraction_mcq_mode: Literal["mc0", "mc1", "mc2"] = "mc1",
-    gate_train_mcq_mode: Literal["mc0", "mc1", "mc2"] = "mc1",
+    ce_term_mcq_mode: Literal["mc0", "mc1", "mc2"] = "mc1",
     extraction_fraction: float = 0.5,
     seed: int | None = None,
     fold: int = 0,
@@ -325,10 +325,10 @@ def get_truthfulqa_datasets(
         )
     else:
         train_ce = format_train_dataset(
-            records_for(gate_train_qids), tokenizer, gate_train_mcq_mode
+            records_for(gate_train_qids), tokenizer, ce_term_mcq_mode
         )
         val_ce = format_train_dataset(
-            records_for(splits["val"]), tokenizer, gate_train_mcq_mode
+            records_for(splits["val"]), tokenizer, ce_term_mcq_mode
         )
 
     # Append held-out general (Alpaca) KL-preserve rows, matched 1:1 to each CE split size.
