@@ -339,12 +339,19 @@ def get_truthfulqa_datasets(
         alpaca = load_alpaca(n_kl_train + n_kl_val)
         kl_rng = np.random.RandomState(seed if seed is not None else 42)
         kl_rng.shuffle(alpaca)
-        train_ce = concatenate_datasets(
-            [train_ce, format_kl_dataset(alpaca[:n_kl_train], tokenizer)]
-        )
-        val_ce = concatenate_datasets(
-            [val_ce, format_kl_dataset(alpaca[n_kl_train : n_kl_train + n_kl_val], tokenizer)]
-        )
+        kl_train = format_kl_dataset(alpaca[:n_kl_train], tokenizer)
+        kl_val = format_kl_dataset(alpaca[n_kl_train : n_kl_train + n_kl_val], tokenizer)
+        if with_contrastive:
+            # Schema align: contrastive CE rows carry ``texts`` (list of K answers); KL rows carry
+            # a single ``text``. Give each the other's column (kl: a 1-elem ``texts``; contrastive:
+            # ``text`` = the correct answer) so ``concatenate_datasets`` sees identical features.
+            # The collate routes by ``loss_term`` (mc → use texts, kl → use text), not by column.
+            kl_train = kl_train.add_column("texts", [[t] for t in kl_train["text"]])
+            kl_val = kl_val.add_column("texts", [[t] for t in kl_val["text"]])
+            train_ce = train_ce.add_column("text", [ts[0] for ts in train_ce["texts"]])
+            val_ce = val_ce.add_column("text", [ts[0] for ts in val_ce["texts"]])
+        train_ce = concatenate_datasets([train_ce, kl_train])
+        val_ce = concatenate_datasets([val_ce, kl_val])
 
     gate_train_ds = DatasetDict({"train": train_ce, "val": val_ce})
     eval_ds = format_eval_dataset(records_for(splits["test"]))

@@ -130,25 +130,47 @@ class TruthfulQATask(TaskSpec):
         device: Any,
         config: DictConfig,
     ) -> dict[str, Tensor]:
-        """Expand per-question contrastive rows into K sequences each (correct at group index 0),
-        flattened in row order so ``mc_term`` can reshape to ``(n_questions, K)`` and rank."""
-        k = len(rows[0]["texts"])
-        flat_texts = [t for r in rows for t in r["texts"]]
-        plens = [r["prompt_len"] for r in rows for _ in range(k)]
+        """Expand per-question ``mc`` contrastive rows into K sequences each (correct at group
+        index 0) so ``mc_term`` can reshape to ``(n_questions, K)`` and rank. Any non-``mc`` rows
+        in the batch (``kl`` preserve rows, which carry a single ``text``) are appended AFTER all
+        mc sequences as one-sequence-each — so the mc block stays contiguous from index 0 and the
+        reshape is unaffected — and tagged for their own term. mc and kl share one padded batch."""
+        mc_rows = [r for r in rows if r.get("loss_term", "mc") == "mc"]
+        other_rows = [r for r in rows if r.get("loss_term", "mc") != "mc"]
+        k = len(mc_rows[0]["texts"]) if mc_rows else 0
+        mc_texts = [t for r in mc_rows for t in r["texts"]]
+        mc_plens = [r["prompt_len"] for r in mc_rows for _ in range(k)]
+        other_texts = [r["text"] for r in other_rows]
+        other_plens = [r["prompt_len"] for r in other_rows]
+        flat_texts = mc_texts + other_texts  # mc block first (contiguous) → reshape stays valid
+        plens = mc_plens + other_plens
         enc = tokenizer(flat_texts, return_tensors="pt", padding=True, padding_side="right")
         ids = enc["input_ids"]
         attn = enc["attention_mask"]
         labels = ids.masked_fill(attn == 0, -100)
         for i, pl in enumerate(plens):
             labels[i, :pl] = -100  # mask the shared question prefix → score answer tokens only
-        n = len(flat_texts)
-        return {
+        n, n_mc = len(flat_texts), len(mc_texts)
+        loss_term_rows: dict[str, Tensor] = {}
+        if n_mc:
+            mask = torch.zeros(n, dtype=torch.bool, device=device)
+            mask[:n_mc] = True
+            loss_term_rows["mc"] = mask
+        for t in sorted({r.get("loss_term", "kl") for r in other_rows}):
+            mask = torch.zeros(n, dtype=torch.bool, device=device)
+            for j, r in enumerate(other_rows):
+                if r.get("loss_term", "kl") == t:
+                    mask[n_mc + j] = True
+            loss_term_rows[t] = mask
+        out = {
             "input_ids": ids.to(device),
             "attention_mask": attn.to(device),
             "labels": labels.to(device),
-            "loss_term_rows": {"mc": torch.ones(n, dtype=torch.bool, device=device)},
-            "mc_n_answers": k,
+            "loss_term_rows": loss_term_rows,
         }
+        if n_mc:
+            out["mc_n_answers"] = k
+        return out
 
     def extra_cache_fields(
         self,
