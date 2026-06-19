@@ -30,7 +30,7 @@ import random
 import torch
 from datasets import Dataset, DatasetDict, load_dataset
 
-from sparse_steer.utils.corpora import load_alpaca
+from sparse_steer.utils.data import load_alpaca
 from transformers import PreTrainedTokenizerBase
 
 from sparse_steer.core.generate import generate_text

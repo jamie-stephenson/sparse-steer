@@ -6,7 +6,7 @@ import numpy as np
 from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset
 from transformers import PreTrainedTokenizerBase
 
-from sparse_steer.utils.corpora import load_alpaca
+from sparse_steer.utils.data import load_alpaca
 from sparse_steer.utils.tokenize import apply_template
 
 

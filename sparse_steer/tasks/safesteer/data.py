@@ -29,7 +29,7 @@ import random
 
 from datasets import Dataset, DatasetDict, load_dataset
 
-from sparse_steer.utils.corpora import load_alpaca
+from sparse_steer.utils.data import load_alpaca
 from sparse_steer.utils.refusal import detect_refusal
 from sparse_steer.utils.tokenize import apply_template
 
