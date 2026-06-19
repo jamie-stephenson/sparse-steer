@@ -21,7 +21,12 @@ import wandb
 
 from sparse_steer.core.steering import SteeringModel
 from sparse_steer.core.gate_tracker import GateTracker, render_gate_animation, render_gate_heatmap
-from sparse_steer.objectives import ce_term, composed_objective, kl_term
+from sparse_steer.objectives import (
+    ce_term,
+    composed_objective,
+    kl_term,
+    resolve_steering_dtype,
+)
 from sparse_steer.tasks.base import TaskSpec
 
 L0Schedule = Callable[[int, int], float]
@@ -282,19 +287,20 @@ def train_steering(
     val_split = dataset.get("val") if isinstance(dataset, DatasetDict) else None
     model.freeze_base_model(freeze_raw_scale=config.freeze_raw_scale)
 
-    # Historical-faithful option: train the steering params in float16, as the
-    # 0bd8bf9 code did (its gate params were fp16 from the fp16-loaded model). fp16
-    # params optimise unstably and the scale can run away — the exact regime that
-    # produced the old +0.176 (sparse gates + massive scales). Today's default is
-    # fp32 (stable), which keeps the scale small (≈+0.02). See PROGRESS.md.
-    if config.get("gate_param_fp16", False):
+    # Steering compute dtype (single configurable knob): cast the learnable steering params
+    # to `steering_dtype` so the WHOLE steering math runs in one dtype — the params here, the
+    # correction (SteeringHook._compute_dtype follows the param dtype), and the CE
+    # (composed_objective). float32 (default) = today's stable behaviour (≈+0.02); float16 =
+    # the old 0bd8bf9 numerics (unstable — the scale can run away → the +0.176 explosion regime).
+    steering_dtype = resolve_steering_dtype(config)
+    if steering_dtype != torch.float32:
         for _, _, hook in model.iter_hooks():
             if getattr(hook, "log_alpha", None) is not None:
-                hook.log_alpha.data = hook.log_alpha.data.half()
+                hook.log_alpha.data = hook.log_alpha.data.to(steering_dtype)
             if isinstance(getattr(hook, "raw_scale", None), torch.nn.Parameter):
-                hook.raw_scale.data = hook.raw_scale.data.half()
+                hook.raw_scale.data = hook.raw_scale.data.to(steering_dtype)
         if isinstance(getattr(model, "_shared_raw_scale", None), torch.nn.Parameter):
-            model._shared_raw_scale.data = model._shared_raw_scale.data.half()
+            model._shared_raw_scale.data = model._shared_raw_scale.data.to(steering_dtype)
 
     # Equalise gate-gradient scale across ablation sites of differing residual
     # norm so the L0 gates select on objective benefit, not activation norm

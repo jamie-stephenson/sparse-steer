@@ -21,10 +21,26 @@ from torch import Tensor
 
 from sparse_steer.utils.eval import kl_divergence
 
+# Steering compute dtype: one knob (`steering_dtype`) drives the params, the correction,
+# and the CE so the whole steering math runs in a single dtype (fp16 = old 0bd8bf9 numerics;
+# float32 = today's stable default).
+STEERING_DTYPES = {
+    "float16": torch.float16,
+    "float32": torch.float32,
+    "bfloat16": torch.bfloat16,
+}
 
-def ce_term(batch: dict[str, Tensor], logits: Tensor, rows: Tensor) -> Tensor:
-    """Teacher-forced next-token CE toward ``batch['labels']`` over the ``rows``-masked subset."""
-    sl = logits[rows][..., :-1, :].float()
+
+def resolve_steering_dtype(config: DictConfig) -> torch.dtype:
+    return STEERING_DTYPES.get(str(config.get("steering_dtype", "float32")), torch.float32)
+
+
+def ce_term(
+    batch: dict[str, Tensor], logits: Tensor, rows: Tensor, dtype: torch.dtype = torch.float32
+) -> Tensor:
+    """Teacher-forced next-token CE over the ``rows``-masked subset, computed in ``dtype``
+    (follows ``steering_dtype`` — fp16 for a fully-fp16 run, float32 for the stable default)."""
+    sl = logits[rows][..., :-1, :].to(dtype)
     ll = batch["labels"][rows][..., 1:]
     return F.cross_entropy(sl.reshape(-1, sl.size(-1)), ll.reshape(-1), ignore_index=-100)
 
@@ -78,11 +94,12 @@ def composed_objective(
     the training loop."""
     term_rows = batch["loss_term_rows"]
     loss = logits.new_zeros(())
+    dtype = resolve_steering_dtype(config)
 
     ce_w = float(config.get("ce_weight", 1.0))
     ce_rows = term_rows.get("ce")
     if ce_w and ce_rows is not None and bool(ce_rows.any()):
-        loss = loss + ce_w * ce_term(batch, logits, ce_rows)
+        loss = loss + ce_w * ce_term(batch, logits, ce_rows, dtype)
 
     kl_w = float(config.get("kl_weight", 0.0))
     kl_rows = term_rows.get("kl")

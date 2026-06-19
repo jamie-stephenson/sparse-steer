@@ -182,6 +182,16 @@ class SteeringHook(nn.Module):
             delta = delta * mask
         return activation + delta
 
+    @property
+    def _compute_dtype(self) -> torch.dtype:
+        """Dtype the steering correction (and its gradient) is computed in — follows the
+        steering params, so casting the params to fp16 makes the whole steering math fp16."""
+        rs = self.raw_scale
+        if rs is not None:
+            return rs.dtype
+        shared = self._shared_raw_scale
+        return shared.dtype if shared is not None else torch.float32
+
     def steer(self, activation: Tensor, hook=None) -> Tensor:
         """TransformerLens hook: additive steering — ``activation + scale·gate·v``.
 
@@ -190,7 +200,7 @@ class SteeringHook(nn.Module):
         """
         if not self.enabled:
             return activation
-        correction = self._correction(torch.float32, activation.device)
+        correction = self._correction(self._compute_dtype, activation.device)
         lead = activation.ndim - correction.ndim
         return self._add_delta(activation, correction.reshape((1,) * lead + correction.shape))
 
