@@ -9,7 +9,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizerBase
 from sparse_steer.tasks.base import TaskSpec
 from sparse_steer.utils.cache import ArtifactType
 from .data import get_truthfulqa_datasets
-from .eval import evaluate, evaluate_generative
+from .eval import _generate_answers, evaluate, evaluate_generative
 
 
 class TruthfulQATask(TaskSpec):
@@ -48,6 +48,23 @@ class TruthfulQATask(TaskSpec):
         metrics = evaluate(
             model, tokenizer, dataset, batch_size=config.eval_batch_size
         )
+        # Lightweight generation check (no judge model): generate N free-form answers with the
+        # current (steered) model and PRINT them so the loop can read for degeneration. Only runs
+        # on a fresh steered eval (cache miss). Does not affect the MC metrics.
+        n_sample = int(config.get("gen_sample_n", 0) or 0)
+        if n_sample > 0:
+            k = min(n_sample, len(dataset))
+            qs = [dataset[i]["question"] for i in range(k)]
+            bests = [dataset[i]["best_answer"] for i in range(k)]
+            gens = _generate_answers(
+                model, tokenizer, qs,
+                max_new_tokens=int(config.get("gen_max_new_tokens", 48)),
+            )
+            print(f"  [gen_sample] {k} free-form generations (read for degeneration):")
+            for q, b, a in zip(qs, bests, gens):
+                print(f"    Q:   {q}")
+                print(f"    ref: {b}")
+                print(f"    gen: {a}")
         if config.get("generative_eval", False):
             gen_metrics = evaluate_generative(
                 model,
