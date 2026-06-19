@@ -31,6 +31,7 @@ class TruthfulQATask(TaskSpec):
             or float(mls.get("kl_vs_base", 0) or 0) > 0
         )
         contrastive_used = float(config.get("contrastive_weight", 0.0)) > 0
+        mxn = config.get("contrastive_max_n_neg", None)
         return get_truthfulqa_datasets(
             tokenizer,
             extraction_mcq_mode=config.get("extraction_mcq_mode", "mc1"),
@@ -39,7 +40,7 @@ class TruthfulQATask(TaskSpec):
             seed=config.get("data_seed"),
             with_kl_rows=kl_used,
             with_contrastive=contrastive_used,
-            n_neg=int(config.get("contrastive_n_neg", 3)),
+            max_n_neg=int(mxn) if mxn is not None else None,
         )
 
     def run_task_evaluation(
@@ -89,15 +90,16 @@ class TruthfulQATask(TaskSpec):
         """One term-driven collate for any mix of loss terms — no per-combination special-casing.
 
         Groups rows by their ``loss_term`` tag (default ``ce``); each group becomes a contiguous
-        block. A group is shaped by its row schema: a ``texts`` list → K sequences per row (a ranking
-        group, e.g. ``contrastive`` — the K answers stay consecutive so a ranking term can reshape to
-        ``(n_questions, K)``); a single ``text`` → one sequence (``ce`` / ``kl`` / …). The question
-        prefix is masked so the loss scores the completion only; ``ce`` honours ``ce_positions``
-        (``all`` keeps the prefix), while ranking and ``kl`` terms always mask it. Emits a per-term
-        row mask in ``loss_term_rows`` and a ``<term>_n_answers`` count for any K-grouped term. No
-        ``steer_mask`` is emitted, so steering applies at every position (matching eval). Adding a
+        block. A group is shaped by its row schema: a ``texts`` list → that question's answers laid
+        out consecutively (a ranking group, e.g. ``contrastive`` — K may VARY per question, so a
+        ranking term segments by the per-question sizes rather than reshaping to a fixed width); a
+        single ``text`` → one sequence (``ce`` / ``kl`` / …). The question prefix is masked so the
+        loss scores the completion only; ``ce`` honours ``ce_positions`` (``all`` keeps the prefix),
+        while ranking and ``kl`` terms always mask it. Emits a per-term row mask in ``loss_term_rows``
+        and a ``<term>_group_sizes`` list (the K per question, correct-first) for any ranking term.
+        No ``steer_mask`` is emitted, so steering applies at every position (matching eval). Adding a
         loss term needs no new collate — just format its rows with the tag (and a ``texts`` list if
-        it ranks K candidates).
+        it ranks candidates).
         """
         by_term: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for r in rows:
@@ -108,18 +110,20 @@ class TruthfulQATask(TaskSpec):
         plens: list[int] = []
         mask_prefix: list[bool] = []
         seq_term: list[str] = []
-        n_answers: dict[str, int] = {}
+        group_sizes: dict[str, list[int]] = {}
         for term in sorted(by_term):  # each term a contiguous block
             group = by_term[term]
             prefix = ce_masks_prefix if term == "ce" else True  # ranking/kl always score completion
-            if "texts" in group[0]:  # ranking group: K sequences per row, kept consecutive
-                k = len(group[0]["texts"])
-                n_answers[term] = k
+            if "texts" in group[0]:  # ranking group: one question's answers, correct-first (K varies)
+                sizes: list[int] = []
                 for r in group:
+                    kr = len(r["texts"])
+                    sizes.append(kr)
                     texts += r["texts"]
-                    plens += [r["prompt_len"]] * k
-                    mask_prefix += [prefix] * k
-                    seq_term += [term] * k
+                    plens += [r["prompt_len"]] * kr
+                    mask_prefix += [prefix] * kr
+                    seq_term += [term] * kr
+                group_sizes[term] = sizes
             else:  # one sequence per row
                 for r in group:
                     texts.append(r["text"])
@@ -144,8 +148,8 @@ class TruthfulQATask(TaskSpec):
             "labels": labels.to(device),
             "loss_term_rows": loss_term_rows,
         }
-        for term, k in n_answers.items():
-            out[f"{term}_n_answers"] = k
+        for term, sizes in group_sizes.items():
+            out[f"{term}_group_sizes"] = sizes
         return out
 
     def extra_cache_fields(
@@ -153,8 +157,12 @@ class TruthfulQATask(TaskSpec):
         artifact_type: ArtifactType,
         config: DictConfig,
     ) -> dict[str, Any]:
+        # model_dtype changes the extraction activations and eval logits, so it keys every
+        # model-coupled artifact (matching jailbreak/safesteer/tinysleepers).
+        base = {"model_dtype": config.get("model_dtype", "float16")}
         if artifact_type == ArtifactType.STEERING_VECTORS:
             return {
+                **base,
                 "extraction_mcq_mode": config.get(
                     "extraction_mcq_mode", "mc1"
                 ),
@@ -164,6 +172,7 @@ class TruthfulQATask(TaskSpec):
             ArtifactType.STEERED_EVAL,
         ):
             fields = {
+                **base,
                 "extraction_mcq_mode": config.get(
                     "extraction_mcq_mode", "mc1"
                 ),
@@ -178,7 +187,16 @@ class TruthfulQATask(TaskSpec):
                 "kl_weight": config.get("kl_weight", 0.0),
                 "contrastive_weight": config.get("contrastive_weight", 0.0),
                 **(
-                    {"contrastive_n_neg": int(config.get("contrastive_n_neg", 3))}
+                    {
+                        "contrastive_max_n_neg": (
+                            int(config.get("contrastive_max_n_neg"))
+                            if config.get("contrastive_max_n_neg", None) is not None
+                            else None
+                        ),
+                        "contrastive_normalise": bool(
+                            config.get("n_ans_normalise_contrastive_term", False)
+                        ),
+                    }
                     if float(config.get("contrastive_weight", 0.0)) > 0
                     else {}
                 ),
@@ -196,10 +214,12 @@ class TruthfulQATask(TaskSpec):
             return fields
         if artifact_type == ArtifactType.UNSTEERED_EVAL:
             return {
+                **base,
                 "generative_eval": config.get("generative_eval", False),
             }
         if artifact_type == ArtifactType.PEFT_ADAPTER:
             return {
+                **base,
                 "ce_term_mcq_mode": config.get(
                     "ce_term_mcq_mode", "mc1"
                 ),
@@ -212,8 +232,9 @@ class TruthfulQATask(TaskSpec):
             ArtifactType.SPARSE_STEERING,
             ArtifactType.STEERED_EVAL,
         ):
-            # the training objective (loss) lives here
+            # the collate (data routing) lives here; the loss terms live in objectives.py
             files.append("sparse_steer/tasks/truthfulqa/task.py")
+            files.append("sparse_steer/objectives.py")
         if artifact_type in (
             ArtifactType.UNSTEERED_EVAL,
             ArtifactType.STEERED_EVAL,

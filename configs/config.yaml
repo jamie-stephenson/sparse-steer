@@ -12,7 +12,7 @@ defaults:
 # `dense`-style steering preset → experiment: steering).
 method: ${hydra:runtime.choices.method}
 
-# model_name and dtype are task-owned (set in configs/task/*.yaml): the defaults
+# model_name and model_dtype are task-owned (set in configs/task/*.yaml): the defaults
 # list ends with _self_, so anything here would override a task's value.
 seed: 42
 data_seed: null

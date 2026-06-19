@@ -1,7 +1,7 @@
 # @package _global_
 task_name: truthfulqa
 model_name: Qwen/Qwen2.5-0.5B-Instruct
-dtype: float16
+model_dtype: float16
 extraction_mcq_mode: mc1
 ce_term_mcq_mode: mc1
 generative_eval: false

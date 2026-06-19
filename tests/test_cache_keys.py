@@ -11,7 +11,7 @@ TASK = RefusalTask()
 
 def _cfg(**overrides):
     base = dict(
-        dtype="float16", lora_adapter=None,
+        model_dtype="float16", lora_adapter=None,
         harmful_dataset="advbench", harmless_dataset="alpaca",
         data_origin="arditi_exact", data_mix=None,
         n_extraction=256, extraction_subset="category",

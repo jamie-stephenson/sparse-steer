@@ -70,12 +70,12 @@ class TinySleepersTask(TaskSpec):
         artifact_type: ArtifactType,
         config: DictConfig,
     ) -> dict[str, Any]:
-        # lora_adapter selects the sleeper model and dtype changes the computed
+        # lora_adapter selects the sleeper model and model_dtype changes the computed
         # activations/logits; neither is in the global cache key, so include both
         # for every artifact.
         fields: dict[str, Any] = {
             "lora_adapter": config.get("lora_adapter"),
-            "dtype": config.get("dtype", "float16"),
+            "model_dtype": config.get("model_dtype", "float16"),
             # induce flips the extraction sign, the gate-train target, and the eval's steered
             # prompt — suppress and induce share this task_name, so this flag is what keeps their
             # cached artifacts (and their output runs) distinct.

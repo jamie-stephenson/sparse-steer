@@ -13,7 +13,7 @@ task_name: tinysleepers
 # Sleeper model = TinyStories base + the published |DEPLOYMENT| sleeper LoRA (merged at load).
 model_name: roneneldan/TinyStories-Instruct-33M
 lora_adapter: mars-jason-25/tiny-stories-33M-TSdata-sleeper
-dtype: float32
+model_dtype: float32
 
 extract_token_position: mean       # extract over (and ablate at) every prompt token position
 

@@ -160,14 +160,18 @@ def format_train_dataset(
 def format_contrastive_train_dataset(
     records: list[tuple[int, dict[str, Any]]],
     tokenizer: PreTrainedTokenizerBase,
-    n_neg: int = 3,
+    max_n_neg: int | None = None,
 ) -> Dataset:
     """One row per question for the contrastive-ranking (contrastive) loss.
 
-    Each row's ``texts`` = ``[correct, neg_1, …, neg_n_neg]`` (correct always at index 0), each the
-    templated Q+answer; ``prompt_len`` marks where the answer begins (shared across the answers).
-    Uses the mc1 targets (one correct + several incorrect). Padded to ``n_neg`` negatives by repeating
-    the last (rare: fewer than n_neg incorrect). loss_term="contrastive". Built from the GATE-TRAIN split only.
+    Each row's ``texts`` = ``[correct, neg_1, …]`` (correct always at index 0), each the templated
+    Q+answer; ``prompt_len`` marks where the answer begins (shared across the answers). Uses the mc1
+    targets (one correct + several incorrect). The group is RAGGED: each question contributes ALL of
+    its incorrect answers as negatives, so K varies per question — matching the mc1 metric, which
+    scores the correct answer against every incorrect choice. ``max_n_neg`` (optional) caps the
+    negatives to the first ``max_n_neg`` for questions that have more (to bound memory); it NEVER
+    duplicates/pads questions that have fewer. Raises only if a question has no correct or no
+    incorrect answer. loss_term="contrastive". Built from the GATE-TRAIN split only.
     """
     rows: list[dict[str, Any]] = []
     for question_id, record in records:
@@ -176,12 +180,13 @@ def format_contrastive_train_dataset(
         choices, labels = mc1["choices"], mc1["labels"]
         positives = [c.strip() for c, l in zip(choices, labels) if l]
         negatives = [c.strip() for c, l in zip(choices, labels) if not l]
-        if not positives or not negatives:
-            continue
-        negs = negatives[:n_neg]
-        while len(negs) < n_neg:
-            negs.append(negatives[-1])
-        answers = [positives[0]] + negs
+        if len(positives) < 1 or len(negatives) < 1:
+            raise ValueError(
+                f"TruthfulQA question {question_id}: {len(positives)} correct / "
+                f"{len(negatives)} incorrect answers; contrastive needs at least 1 of each."
+            )
+        used_negs = negatives if max_n_neg is None else negatives[:max_n_neg]
+        answers = [positives[0]] + used_negs
         prompt_len = len(tokenizer(apply_template(tokenizer, question))["input_ids"])
         rows.append(
             {
@@ -278,7 +283,7 @@ def get_truthfulqa_datasets(
     val_ratio: float = 0.2,
     with_kl_rows: bool = False,
     with_contrastive: bool = False,
-    n_neg: int = 3,
+    max_n_neg: int | None = None,
 ) -> tuple[Dataset, DatasetDict, Dataset]:
     """Load TruthfulQA, apply LoFiT splits, and return three datasets:
     - extraction_ds: subset of train for steering vector extraction
@@ -318,10 +323,10 @@ def get_truthfulqa_datasets(
     if with_contrastive:
         # contrastive-ranking objective: gate-train rows are per-question contrastive groups (correct + negs).
         train_ce = format_contrastive_train_dataset(
-            records_for(gate_train_qids), tokenizer, n_neg=n_neg
+            records_for(gate_train_qids), tokenizer, max_n_neg=max_n_neg
         )
         val_ce = format_contrastive_train_dataset(
-            records_for(splits["val"]), tokenizer, n_neg=n_neg
+            records_for(splits["val"]), tokenizer, max_n_neg=max_n_neg
         )
     else:
         train_ce = format_train_dataset(

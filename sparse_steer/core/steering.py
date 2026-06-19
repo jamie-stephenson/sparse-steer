@@ -64,6 +64,7 @@ class SteeringHook(nn.Module):
         learn_scale: bool = False,
         init_raw_scale: float = 0.0,
         shared_raw_scale: nn.Parameter | None = None,
+        steering_dtype: torch.dtype = torch.float32,
     ) -> None:
         super().__init__()
         self.enabled = True
@@ -71,25 +72,29 @@ class SteeringHook(nn.Module):
         # added (set per-forward via ``SteeringModel.steer_positions``); ``None``
         # steers every position (the default).
         self.pos_mask: Tensor | None = None
-        self.register_buffer("steering_vectors", torch.zeros(vector_shape))
+        # Every steering tensor (the vector v, gate log_alpha, scale raw_scale, ablation
+        # normaliser) lives in ``steering_dtype`` — the single knob for the whole steering
+        # math. float32 (default) = stable; float16 = the old coupled-precision regime. The
+        # correction is cast to the base activation dtype at apply time, so steering_dtype is
+        # independent of the base ``model_dtype``. (``float(...)`` also guards integer config
+        # overrides like ``init_raw_scale=10`` from creating a long tensor softplus can't handle.)
+        self.steering_dtype = steering_dtype
+        self.register_buffer("steering_vectors", torch.zeros(vector_shape, dtype=steering_dtype))
         num_gates = vector_shape[0] if len(vector_shape) > 1 else 1
         # Per-site ablation normaliser (mean |activation·v̂| over the steered
         # positions). Dividing the ablation strength by it equalises the gate
         # gradient scale across sites whose residual norm grows with depth, so
         # the learned gates select on CE-benefit rather than activation norm.
         # Default 1.0 leaves behaviour unchanged; ``set_proj_act_norms`` fills it in.
-        self.register_buffer("proj_act_norm", torch.ones(num_gates))
+        self.register_buffer("proj_act_norm", torch.ones(num_gates, dtype=steering_dtype))
         # Hold the shared scale in a tuple so nn.Module does not re-register it
         # as a parameter of every hook (it is owned once by the SteeringModel).
         self._shared_holder = (shared_raw_scale,)
 
-        # Steering params/buffers are kept in float32 (see ``steer``); force the
-        # dtype so integer config overrides like ``init_raw_scale=10`` don't
-        # create a long tensor that softplus can't handle.
         self.gate_config = gate_config
         if gate_config is not None:
             self.log_alpha = nn.Parameter(
-                torch.full((num_gates,), float(gate_config.init_log_alpha))
+                torch.full((num_gates,), float(gate_config.init_log_alpha), dtype=steering_dtype)
             )
         else:
             self.register_parameter("log_alpha", None)
@@ -97,10 +102,12 @@ class SteeringHook(nn.Module):
         if shared_raw_scale is not None:
             self.register_parameter("raw_scale", None)
         elif learn_scale:
-            self.raw_scale = nn.Parameter(torch.full((num_gates,), float(init_raw_scale)))
+            self.raw_scale = nn.Parameter(
+                torch.full((num_gates,), float(init_raw_scale), dtype=steering_dtype)
+            )
         else:
             self.register_buffer(
-                "raw_scale", torch.full((num_gates,), float(init_raw_scale))
+                "raw_scale", torch.full((num_gates,), float(init_raw_scale), dtype=steering_dtype)
             )
 
         self._gates_frozen = False
@@ -184,13 +191,9 @@ class SteeringHook(nn.Module):
 
     @property
     def _compute_dtype(self) -> torch.dtype:
-        """Dtype the steering correction (and its gradient) is computed in — follows the
-        steering params, so casting the params to fp16 makes the whole steering math fp16."""
-        rs = self.raw_scale
-        if rs is not None:
-            return rs.dtype
-        shared = self._shared_raw_scale
-        return shared.dtype if shared is not None else torch.float32
+        """Dtype the steering correction (and its gradient) is computed in — the single
+        ``steering_dtype`` knob (the vector, gate, and scale params all share it)."""
+        return self.steering_dtype
 
     def steer(self, activation: Tensor, hook=None) -> Tensor:
         """TransformerLens hook: additive steering — ``activation + scale·gate·v``.
@@ -221,10 +224,10 @@ class SteeringHook(nn.Module):
         """
         if not self.enabled:
             return activation
-        v_hat = self.steering_vectors.to(device=activation.device, dtype=torch.float32)
+        v_hat = self.steering_vectors.to(device=activation.device, dtype=self.steering_dtype)
         lead = activation.ndim - v_hat.ndim
         v_hat = v_hat.reshape((1,) * lead + v_hat.shape)
-        coef = (activation.to(torch.float32) * v_hat).sum(dim=-1, keepdim=True)  # activation·v̂
+        coef = (activation.to(self.steering_dtype) * v_hat).sum(dim=-1, keepdim=True)  # activation·v̂
         weight = self._gate_weights() * self._scale_weights() / self.proj_act_norm
         if isinstance(weight, Tensor):
             # (num_gates,) → (num_gates, 1): broadcasts over coef's per-head axis
@@ -354,6 +357,7 @@ class SteeringModel(nn.Module):
         shared_scale: bool = False,
         init_raw_scale: float = 0.0,
         intervention: str = "steer",
+        steering_dtype: torch.dtype = torch.float32,
     ) -> None:
         super().__init__()
         if intervention not in ("steer", "ablate"):
@@ -364,15 +368,16 @@ class SteeringModel(nn.Module):
         self.shared_scale = shared_scale
         self.init_raw_scale = init_raw_scale
         self.intervention = intervention
+        self.steering_dtype = steering_dtype
         self.steering_layer_ids = list(steering_layer_ids)
         self.steering_components = list(steering_components)
 
         ref = next(tl.parameters())
-        # Steering parameters are kept in float32 for stable optimisation, even
-        # when the base model is fp16 (the correction is cast at apply time).
+        # Steering params live in ``steering_dtype`` (float32 default = stable, even on an fp16
+        # base model; the correction is cast to the activation dtype at apply time).
         if shared_scale:
             self._shared_raw_scale = nn.Parameter(
-                torch.full((1,), init_raw_scale, device=ref.device, dtype=torch.float32)
+                torch.full((1,), init_raw_scale, device=ref.device, dtype=steering_dtype)
             )
         else:
             self._shared_raw_scale = None
@@ -389,6 +394,7 @@ class SteeringModel(nn.Module):
         *,
         device: str = "cpu",
         dtype: torch.dtype = torch.float32,
+        steering_dtype: torch.dtype = torch.float32,
         lora_adapter: str | None = None,
         steering_layer_ids: list[int] | None = None,
         steering_components: Sequence[Component] = ("attention",),
@@ -399,6 +405,7 @@ class SteeringModel(nn.Module):
         intervention: str = "steer",
         process_weights: bool = True,
     ) -> "SteeringModel":
+        # ``dtype`` is the base model (``model_dtype``); ``steering_dtype`` is the steering math.
         tl = load_hooked_transformer(
             model_name, lora_adapter=lora_adapter, device=device, dtype=dtype,
             process_weights=process_weights,
@@ -414,6 +421,7 @@ class SteeringModel(nn.Module):
             shared_scale=shared_scale,
             init_raw_scale=init_raw_scale,
             intervention=intervention,
+            steering_dtype=steering_dtype,
         )
 
     def _vector_shape(self, component: Component) -> tuple[int, ...]:
@@ -438,8 +446,9 @@ class SteeringModel(nn.Module):
                     learn_scale=self.learn_scale,
                     init_raw_scale=self.init_raw_scale,
                     shared_raw_scale=self._shared_raw_scale,
+                    steering_dtype=self.steering_dtype,
                 )
-                # Move to the model's device but keep float32 params/buffers.
+                # Move to the model's device (params/buffers stay in steering_dtype).
                 hook.to(device=ref.device)
                 self.hooks[f"{component}_{i}"] = hook
                 name = COMPONENT_HOOK[component].format(i=i)

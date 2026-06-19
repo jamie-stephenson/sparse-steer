@@ -11,7 +11,7 @@ induce: true
 
 model_name: roneneldan/TinyStories-Instruct-33M
 lora_adapter: mars-jason-25/tiny-stories-33M-TSdata-sleeper
-dtype: float32
+model_dtype: float32
 
 intervention: steer
 direction_source: self

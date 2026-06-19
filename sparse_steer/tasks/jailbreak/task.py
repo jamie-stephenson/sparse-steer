@@ -121,7 +121,10 @@ class RefusalTask(TaskSpec):
     def extra_cache_fields(
         self, artifact_type: ArtifactType, config: DictConfig
     ) -> dict[str, Any]:
-        fields: dict[str, Any] = {"dtype": config.dtype, "lora_adapter": config.lora_adapter}
+        fields: dict[str, Any] = {
+            "model_dtype": config.get("model_dtype", "float16"),
+            "lora_adapter": config.lora_adapter,
+        }
         # Identity of the cached refuse/accept buckets — the *input* to extraction. It
         # deliberately excludes the judge and the eval datasets so those can be swapped
         # without rebuilding the buckets or the steering vector.

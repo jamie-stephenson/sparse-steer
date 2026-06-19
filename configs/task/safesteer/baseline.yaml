@@ -9,7 +9,7 @@ task_name: safesteer
 
 # Steered model = Llama-2-7B BASE (high naive %unsafe). dtype float16. (Paper's models; gated on HF.)
 model_name: meta-llama/Llama-2-7b-hf
-dtype: float16
+model_dtype: float16
 lora_adapter: null
 
 # Cross-model transfer (SafeSteer §3.4 — best results): extract ω from the CHAT model, steer the

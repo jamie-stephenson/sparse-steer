@@ -7,7 +7,7 @@
 task_name: safesteer
 
 model_name: meta-llama/Llama-2-7b-hf
-dtype: float16
+model_dtype: float16
 lora_adapter: null
 extraction_model_name: meta-llama/Llama-2-7b-chat-hf
 

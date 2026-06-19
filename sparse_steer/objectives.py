@@ -14,25 +14,19 @@ The L0 sparsity penalty is model-intrinsic (a function of the gates) and is adde
 the training loop — not here.
 """
 
+import math
+
 import torch
 import torch.nn.functional as F
 from omegaconf import DictConfig
 from torch import Tensor
 
+from sparse_steer.core.loading import resolve_steering_dtype
 from sparse_steer.utils.eval import kl_divergence
 
-# Steering compute dtype: one knob (`steering_dtype`) drives the params, the correction,
-# and the CE so the whole steering math runs in a single dtype (fp16 = old 0bd8bf9 numerics;
-# float32 = today's stable default).
-STEERING_DTYPES = {
-    "float16": torch.float16,
-    "float32": torch.float32,
-    "bfloat16": torch.bfloat16,
-}
-
-
-def resolve_steering_dtype(config: DictConfig) -> torch.dtype:
-    return STEERING_DTYPES.get(str(config.get("steering_dtype", "float32")), torch.float32)
+# `steering_dtype` (resolved in core.loading) drives the steering params, the correction, AND
+# the CE/contrastive loss compute here, so the whole steering math runs in one dtype (float32 =
+# today's stable default; fp16 = the old 0bd8bf9 coupled-precision numerics).
 
 
 def ce_term(
@@ -46,18 +40,28 @@ def ce_term(
 
 
 def contrastive_term(
-    batch: dict[str, Tensor], logits: Tensor, rows: Tensor, dtype: torch.dtype = torch.float32
+    batch: dict[str, Tensor],
+    logits: Tensor,
+    rows: Tensor,
+    config: DictConfig,
+    dtype: torch.dtype = torch.float32,
 ) -> Tensor:
     """mc1-style RANKING loss on contrastive gate-train rows (NO test leakage — gate-train split).
 
-    Each question contributes K sequences laid out contiguously: its CORRECT answer at index 0 of
-    the group, then K-1 incorrect answers. The score per sequence is the total answer-token log-prob
-    (sum over the completion tokens, matching the mc1 metric's `answer_log_probs`); we softmax over
-    the K scores per question and apply cross-entropy toward the correct one (index 0). This REWARDS
-    steering that makes the truthful answer more likely than the false ones — unlike plain CE, which
-    fights steering. The L0 gates still learn the site; only the objective changes.
+    Each question contributes its answers laid out contiguously: the CORRECT answer at index 0 of the
+    group, then its incorrect answers. The group is RAGGED — K (= 1 + #negatives) varies per question
+    (``batch["contrastive_group_sizes"]`` gives the K's, in order), mirroring the mc1 metric which
+    scores the correct answer against *every* incorrect choice. The score per sequence is the total
+    answer-token log-prob (sum over completion tokens, matching the mc1 metric's `answer_log_probs`);
+    per question we apply softmax cross-entropy toward the correct one (index 0). This REWARDS steering
+    that makes the truthful answer more likely than the false ones — unlike plain CE, which fights
+    steering. The L0 gates still learn the site; only the objective changes.
+
+    ``n_ans_normalise_contrastive_term`` (default off): divide each question's loss by ``log(K)`` (its
+    chance-level floor) so questions with more negatives — a larger softmax, hence a larger natural
+    loss — don't dominate the gradient over questions with few negatives.
     """
-    k = int(batch["contrastive_n_answers"])
+    sizes = [int(s) for s in batch["contrastive_group_sizes"]]  # K per question, correct-first
     sl = logits[rows][..., :-1, :]
     ll = batch["labels"][rows][..., 1:]
     v = sl.size(-1)
@@ -66,9 +70,15 @@ def contrastive_term(
     nll = F.cross_entropy(
         sl.reshape(-1, v).to(dtype), ll.reshape(-1), ignore_index=-100, reduction="none"
     ).view(ll.shape)
-    seq_lp = -nll.sum(-1).view(-1, k)  # (n_questions, K) total answer log-prob; correct = column 0
-    target = seq_lp.new_zeros(seq_lp.size(0)).long()
-    return F.cross_entropy(seq_lp, target)
+    seq_lp = -nll.sum(-1)  # (n_sequences,) total answer log-prob; correct = first of each group
+    normalise = bool(config.get("n_ans_normalise_contrastive_term", False))
+    losses = []
+    for g in torch.split(seq_lp, sizes):  # one (K_q,) score vector per question
+        loss_q = torch.logsumexp(g, dim=0) - g[0]  # softmax-CE toward the correct answer (index 0)
+        if normalise:
+            loss_q = loss_q / math.log(g.numel())  # /log(K) → equalise across ragged group sizes
+        losses.append(loss_q)
+    return torch.stack(losses).mean()
 
 
 def kl_term(
@@ -130,7 +140,9 @@ def composed_objective(
     contrastive_w = float(config.get("contrastive_weight", 0.0))
     contrastive_rows = term_rows.get("contrastive")
     if contrastive_w and contrastive_rows is not None and bool(contrastive_rows.any()):
-        loss = loss + contrastive_w * contrastive_term(batch, logits, contrastive_rows, dtype)
+        loss = loss + contrastive_w * contrastive_term(
+            batch, logits, contrastive_rows, config, dtype
+        )
 
     kl_w = float(config.get("kl_weight", 0.0))
     kl_rows = term_rows.get("kl")

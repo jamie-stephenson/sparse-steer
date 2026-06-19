@@ -5,7 +5,7 @@ task_name: refusal
 
 # Drop-in: a model that DOES refuse harmful prompts (set on the CLI / here).
 model_name: ???
-dtype: float16
+model_dtype: float16
 lora_adapter: null
 
 # Jailbreak = ablate the refusal direction (override the method's intervention=steer).

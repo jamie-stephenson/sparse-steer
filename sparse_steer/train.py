@@ -22,10 +22,8 @@ import wandb
 from sparse_steer.core.steering import SteeringModel
 from sparse_steer.core.gate_tracker import GateTracker, render_gate_animation, render_gate_heatmap
 from sparse_steer.objectives import (
-    ce_term,
     composed_objective,
     kl_term,
-    resolve_steering_dtype,
 )
 from sparse_steer.tasks.base import TaskSpec
 
@@ -201,24 +199,6 @@ def _train_loop(
             scheduler.step()
             step += 1
 
-            # [diagnostic probe] one-shot: does steering HELP or HURT the CE at init?
-            # If it hurts, gradient descent will weaken steering (the today-code symptom).
-            if step == 1:
-                _ce_rows = batch["loss_term_rows"].get("ce")
-                if _ce_rows is not None and bool(_ce_rows.any()):
-                    with torch.no_grad():
-                        _ce_s = ce_term(batch, logits, _ce_rows).item()
-                        with model.steering_disabled():
-                            _bl = model(
-                                input_ids=batch["input_ids"],
-                                attention_mask=batch["attention_mask"],
-                            ).logits
-                        _ce_u = ce_term(batch, _bl, _ce_rows).item()
-                    print(
-                        f"  [probe] init CE steered={_ce_s:.4f} unsteered={_ce_u:.4f} "
-                        f"-> steering {'HELPS' if _ce_s < _ce_u else 'HURTS'} CE"
-                    )
-
             # Snapshot the gates on the global cadence (drives the heatmap/animation).
             if tracker is not None and step % config.logging_steps == 0:
                 tracker.snapshot(step)
@@ -286,21 +266,6 @@ def train_steering(
     train_split = dataset["train"] if isinstance(dataset, DatasetDict) else dataset
     val_split = dataset.get("val") if isinstance(dataset, DatasetDict) else None
     model.freeze_base_model(freeze_raw_scale=config.freeze_raw_scale)
-
-    # Steering compute dtype (single configurable knob): cast the learnable steering params
-    # to `steering_dtype` so the WHOLE steering math runs in one dtype — the params here, the
-    # correction (SteeringHook._compute_dtype follows the param dtype), and the CE
-    # (composed_objective). float32 (default) = today's stable behaviour (≈+0.02); float16 =
-    # the old 0bd8bf9 numerics (unstable — the scale can run away → the +0.176 explosion regime).
-    steering_dtype = resolve_steering_dtype(config)
-    if steering_dtype != torch.float32:
-        for _, _, hook in model.iter_hooks():
-            if getattr(hook, "log_alpha", None) is not None:
-                hook.log_alpha.data = hook.log_alpha.data.to(steering_dtype)
-            if isinstance(getattr(hook, "raw_scale", None), torch.nn.Parameter):
-                hook.raw_scale.data = hook.raw_scale.data.to(steering_dtype)
-        if isinstance(getattr(model, "_shared_raw_scale", None), torch.nn.Parameter):
-            model._shared_raw_scale.data = model._shared_raw_scale.data.to(steering_dtype)
 
     # Equalise gate-gradient scale across ablation sites of differing residual
     # norm so the L0 gates select on objective benefit, not activation norm

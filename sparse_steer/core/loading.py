@@ -36,7 +36,15 @@ _LLAMA2_BASE_TEMPLATE = (
 
 
 def resolve_dtype(config: DictConfig) -> torch.dtype:
-    return _DTYPES[config.get("dtype", "float16")]
+    """Base-model dtype — controls the weights/activations of the loaded HookedTransformer."""
+    return _DTYPES[config.get("model_dtype", "float16")]
+
+
+def resolve_steering_dtype(config: DictConfig) -> torch.dtype:
+    """Steering-math dtype — controls every steering vector/param (gate, scale, direction) and
+    the correction compute, in all methods. float32 (default) = stable; independent of the
+    base ``model_dtype`` (the correction is cast to the activation dtype at apply time)."""
+    return _DTYPES[config.get("steering_dtype", "float32")]
 
 
 def load_tokenizer(config: DictConfig) -> PreTrainedTokenizerBase:
@@ -115,6 +123,7 @@ def load_steering_model(config: DictConfig) -> SteeringModel:
         config.model_name,
         device=config.device,
         dtype=resolve_dtype(config),
+        steering_dtype=resolve_steering_dtype(config),
         lora_adapter=config.get("lora_adapter"),
         steering_layer_ids=layer_ids,
         steering_components=list(config.targets),
@@ -179,4 +188,5 @@ __all__ = [
     "load_steering_model",
     "load_tokenizer",
     "resolve_dtype",
+    "resolve_steering_dtype",
 ]

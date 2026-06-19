@@ -8,7 +8,7 @@ task_name: refusal
 
 # Reproduction target: Qwen/Qwen-7B-Chat (Arditi Table 5; original 1.8B-Chat was pulled from HF).
 model_name: Qwen/Qwen-7B-Chat
-dtype: float16
+model_dtype: float16
 lora_adapter: null
 
 # ── Data origin — flip this ONE line to switch between the two settings ────

@@ -79,7 +79,10 @@ class SafeSteerTask(TaskSpec):
     def extra_cache_fields(
         self, artifact_type: ArtifactType, config: DictConfig
     ) -> dict[str, Any]:
-        fields: dict[str, Any] = {"dtype": config.dtype, "lora_adapter": config.lora_adapter}
+        fields: dict[str, Any] = {
+            "model_dtype": config.get("model_dtype", "float16"),
+            "lora_adapter": config.lora_adapter,
+        }
 
         # Identity of the safe/unsafe contrast data — the input to extraction.
         data_identity = {
