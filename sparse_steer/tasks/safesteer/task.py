@@ -183,8 +183,8 @@ class SafeSteerTask(TaskSpec):
             ArtifactType.SPARSE_STEERING,
         ):
             files += [
-                "sparse_steer/experiment/sourcing.py",
-                "sparse_steer/experiment/_common.py",  # cross-model extraction split
+                "sparse_steer/experiment/steering/solvers.py",
+                "sparse_steer/experiment/steering/extract.py",  # cross-model extraction split
             ]
         # steering.py / train.py / objectives.py / collate.py / utils/eval.py are tracked by the
         # base _SOURCE_FILES; only task-specific files are listed here.

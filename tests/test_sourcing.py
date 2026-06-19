@@ -4,7 +4,7 @@ import pytest
 import torch
 from omegaconf import OmegaConf
 
-from sparse_steer.experiment.sourcing import (
+from sparse_steer.experiment.steering import (
     _parse_source,
     broadcast,
     extraction_targets,

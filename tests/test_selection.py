@@ -1,8 +1,8 @@
-"""Pure selection logic for grid_select direction picking (experiment.sourcing.filter_and_pick)."""
+"""Pure selection logic for grid_select direction picking (experiment.steering.search.filter_and_pick)."""
 
 import pytest
 
-from sparse_steer.experiment.sourcing import filter_and_pick
+from sparse_steer.experiment.steering import filter_and_pick
 
 CONSTRAINTS = [("kl", "<=", 0.1), ("induce", ">=", 0.0)]
 

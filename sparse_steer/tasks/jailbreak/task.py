@@ -103,7 +103,7 @@ class RefusalTask(TaskSpec):
     def selection_policy(self, model, tokenizer, refine_ds, config) -> SelectionPolicy:
         # Refusal-specific scoring for direction_source=grid_select (Arditi App. C): bypass /
         # induce / KL on the refinement set. The grid sweep + filter/pick are task-general
-        # (experiment.sourcing); this only supplies the score + constraints.
+        # (experiment.steering.search); this only supplies the score + constraints.
         return jailbreak_selection_policy(model, tokenizer, refine_ds, config)
 
     # ── Phase-2 sparse-ablation training objective (mirrors tinysleepers) ──
@@ -255,17 +255,19 @@ class RefusalTask(TaskSpec):
             ArtifactType.SELECTED_DIRECTION,
         ):
             files += [
-                "sparse_steer/experiment/sourcing.py",
+                "sparse_steer/experiment/steering/solvers.py",
+                "sparse_steer/experiment/steering/search.py",
                 "sparse_steer/tasks/jailbreak/refine.py",
             ]
-        # steering.py / train.py / objectives.py / collate.py are tracked by the base _SOURCE_FILES.
+        # core/steering.py / train.py / objectives.py / collate.py are tracked by the base _SOURCE_FILES.
         if artifact_type in (ArtifactType.UNSTEERED_EVAL, ArtifactType.STEERED_EVAL):
             files += [
                 "sparse_steer/tasks/jailbreak/eval.py",
                 "sparse_steer/core/generate.py",
                 "sparse_steer/core/inspect_provider.py",
                 "sparse_steer/utils/llama_guard.py",
-                "sparse_steer/experiment/sourcing.py",
+                "sparse_steer/experiment/steering/solvers.py",
+                "sparse_steer/experiment/steering/search.py",
                 "sparse_steer/tasks/jailbreak/refine.py",  # selection-mode eval depends on the chosen direction
             ]
         return files

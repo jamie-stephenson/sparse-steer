@@ -14,8 +14,8 @@ from sparse_steer.utils.cache import ArtifactType
 
 @dataclass
 class SelectionPolicy:
-    """A task's ``grid_select`` scoring (Arditi App. C), consumed by the generic sourcing
-    driver (``experiment.sourcing.grid_select_source``).
+    """A task's ``grid_select`` scoring (Arditi App. C), consumed by the generic score-search
+    direction solver (``experiment.steering.search.grid_select_source``).
 
     ``score(vector, source_layer)`` is called *after* the driver has broadcast ``vector`` onto
     every steering site, so it reads the model in its candidate-ablated state. It returns

@@ -11,7 +11,7 @@ direction broadcast onto every steering site, score it by
   behaviour).
 
 The generic grid construction, candidate sweep, and filter/pick live in
-``experiment.sourcing``; this module only supplies the refusal scoring + constraints. "Refusal"
+``experiment.steering.search``; this module only supplies the refusal scoring + constraints. "Refusal"
 is Arditi's logit metric (``utils.refusal.refusal_metric``).
 """
 
