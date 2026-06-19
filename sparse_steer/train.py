@@ -129,9 +129,6 @@ def _train_loop(
     rows = [r for r in rows if r.get("loss_term", "ce") in active_terms]
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(params, lr=lr, weight_decay=config.weight_decay)
-    # Optional numerical guard for fp16 steering params: bound the explosion finite
-    # (old's fp16 stack stayed ~7000; today's overflows). None = off.
-    fp16_clamp = config.get("gate_param_fp16_clamp", None)
     batch_size = config.train_batch_size
     max_steps = math.ceil(len(rows) / batch_size) * num_epochs
     scheduler = get_scheduler(
@@ -198,21 +195,6 @@ def _train_loop(
             optimizer.step()
             scheduler.step()
             step += 1
-
-            # Numerical guard: keep an fp16-param explosion finite (old's fp16 stack
-            # bounded it ~7000; today's overflows to inf/nan). Off unless configured.
-            if fp16_clamp is not None:
-                c = float(fp16_clamp)
-                with torch.no_grad():
-                    for _, _, _h in model.iter_hooks():
-                        if _h.log_alpha is not None:
-                            _h.log_alpha.data = _h.log_alpha.data.nan_to_num(
-                                nan=0.0, posinf=c, neginf=-c
-                            ).clamp_(-c, c)
-                        if isinstance(getattr(_h, "raw_scale", None), torch.nn.Parameter):
-                            _h.raw_scale.data = _h.raw_scale.data.nan_to_num(
-                                nan=c, posinf=c, neginf=0.0
-                            ).clamp_(0.0, c)
 
             # [diagnostic probe] one-shot: does steering HELP or HURT the CE at init?
             # If it hurts, gradient descent will weaken steering (the today-code symptom).
