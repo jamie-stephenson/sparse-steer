@@ -22,7 +22,7 @@ from .data import (
     label_and_bucket,
     load_splits,
 )
-from .eval import evaluate, evaluate_generative, evaluate_inspect
+from .eval import evaluate, evaluate_generative
 
 
 class RefusalTask(TaskSpec):
@@ -98,7 +98,6 @@ class RefusalTask(TaskSpec):
         metrics = evaluate(model, tokenizer, dataset, config)
         if config.generative_eval:
             metrics.update(evaluate_generative(model, tokenizer, dataset, config))
-        metrics.update(evaluate_inspect(model, tokenizer, config))  # self-contained Inspect evals
         return metrics
 
     def selection_policy(self, model, tokenizer, refine_ds, config) -> SelectionPolicy:

@@ -22,6 +22,14 @@ extraction_fraction: 0.5
 use_cache: true
 use_wandb: false
 
+# Inspect (UK AISI) capability/safety canaries, run after EVERY eval (steered & unsteered) as a
+# shared, task-agnostic add-on — see core/inspect_provider.run_requested_inspect_evals. Empty = off
+# (default): nothing runs and the eval cache key is unchanged until you opt in. Names resolve via
+# INSPECT_TASKS (gsm8k, ifeval, mmlu, arc_challenge, hellaswag, strong_reject). inspect_eval_limit
+# subsamples each eval (null = full). When non-empty, both key the eval artifact cache.
+inspect_evals: []
+inspect_eval_limit: null
+
 # NB the defaults list ends with _self_, so any key set HERE overrides the method/task group
 # configs. So method-owned knobs are deliberately NOT set here — they default in code (via
 # config.get) and are set in configs/method/*.yaml so a method can actually choose them:

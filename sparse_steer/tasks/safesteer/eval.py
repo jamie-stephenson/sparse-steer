@@ -14,18 +14,14 @@ The jailbreak metrics operate on an eval set split by ``category ∈ {harmful, h
 
 from sparse_steer.tasks.jailbreak.eval import (
     GEN_METRICS,
-    INSPECT_TASKS,
     NONGEN_METRICS,
     evaluate,
     evaluate_generative,
-    evaluate_inspect,
 )
 
 __all__ = [
     "evaluate",
     "evaluate_generative",
-    "evaluate_inspect",
     "GEN_METRICS",
     "NONGEN_METRICS",
-    "INSPECT_TASKS",
 ]

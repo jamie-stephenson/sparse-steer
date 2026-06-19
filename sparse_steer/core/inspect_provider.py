@@ -4,7 +4,8 @@ A single ``ModelAPI`` over the model-agnostic ``generate_text`` seam, so the SAM
 ``SteeringModel`` or an HF/LoRA model (the model-type fork lives inside ``generate_text``). Inspect
 owns each eval's dataset, generation orchestration, and judging; we only supply the model and
 harvest the metrics. This module imports ``inspect_ai`` at top level, so it is imported lazily (only
-when an Inspect-backed metric is actually selected) — see ``tasks/jailbreak/eval.evaluate_inspect``.
+when an Inspect-backed metric is actually selected) — see ``Experiment.run``, which calls
+``run_requested_inspect_evals`` for whatever the ``inspect_evals`` config list requests.
 """
 
 import anyio
@@ -77,4 +78,36 @@ def run_inspect_eval(model, tokenizer, task, *, model_name="fitted", limit=None)
     }
 
 
-__all__ = ["FitModelAPI", "run_inspect_eval"]
+# Shared name→inspect_evals-id registry. Task-agnostic: an id like inspect_evals/gsm8k is just as
+# valid a capability canary for truthfulqa as for refusal — WHICH ones run is chosen per task by the
+# `inspect_evals` config list, not by this module. strong_reject needs a grader model (via Inspect's
+# own model config); gsm8k / ifeval / mmlu / arc_challenge / hellaswag are grader-free (exact-match /
+# programmatic-constraint / multiple-choice).
+INSPECT_TASKS = {
+    "strong_reject": "inspect_evals/strong_reject",
+    "gsm8k": "inspect_evals/gsm8k",
+    "ifeval": "inspect_evals/ifeval",
+    "mmlu": "inspect_evals/mmlu_0_shot",
+    "arc_challenge": "inspect_evals/arc_challenge",
+    "hellaswag": "inspect_evals/hellaswag",
+}
+
+
+def run_requested_inspect_evals(
+    model, tokenizer, requested, *, limit=None, model_name="fitted"
+) -> dict[str, float]:
+    """Run each requested Inspect canary (resolved via ``INSPECT_TASKS``) and merge its metrics,
+    namespaced by the requested name (e.g. ``gsm8k/accuracy/mean``) so evals sharing a score name
+    don't collide. Unknown names are skipped; returns ``{}`` when nothing is requested, so callers
+    can invoke it unconditionally. This is the single shared entry point — no per-task copy."""
+    out: dict[str, float] = {}
+    for name in requested or []:
+        task_id = INSPECT_TASKS.get(name)
+        if task_id is None:
+            continue
+        res = run_inspect_eval(model, tokenizer, task_id, model_name=model_name, limit=limit)
+        out.update({f"{name}/{k}": v for k, v in res.items()})
+    return out
+
+
+__all__ = ["FitModelAPI", "run_inspect_eval", "INSPECT_TASKS", "run_requested_inspect_evals"]

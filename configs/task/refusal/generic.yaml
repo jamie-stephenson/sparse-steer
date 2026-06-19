@@ -62,4 +62,5 @@ gen_tokens: 64
 eval_seeds: [0]
 eval_temperature: 1.0
 steer_token_position: all               # ablate at every decode step (Arditi jailbreak)
-# capability canary: add `gsm8k` to `evals` (Inspect inspect_evals/gsm8k, grader-free, limited by n_eval).
+# Inspect-backed evals (strong_reject, gsm8k, …) now go in the shared top-level `inspect_evals` list
+# (config.yaml), not `evals` — e.g. `inspect_evals=[strong_reject,gsm8k] inspect_eval_limit=200`.

@@ -43,8 +43,18 @@ class Experiment(abc.ABC):
     # ── Cache helpers ─────────────────────────────────────────
 
     def _cache_kwargs(self, artifact_type: ArtifactType) -> dict[str, Any]:
+        extra_fields = dict(self.task.extra_cache_fields(artifact_type, self.config))
+        # Inspect capability/safety canaries are a cross-cutting eval add-on merged in run() (not
+        # owned by any task), so the eval artifacts must key on which were requested + the per-eval
+        # limit. Only add the keys when some are requested → eval caches with `inspect_evals` empty
+        # keep their existing key (the feature stays off-by-default without busting prior caches).
+        if artifact_type in (ArtifactType.STEERED_EVAL, ArtifactType.UNSTEERED_EVAL):
+            requested = self.config.get("inspect_evals") or []
+            if requested:
+                extra_fields["inspect_evals"] = sorted(requested)
+                extra_fields["inspect_eval_limit"] = self.config.get("inspect_eval_limit")
         return dict(
-            extra_fields=self.task.extra_cache_fields(artifact_type, self.config),
+            extra_fields=extra_fields,
             extra_sources=self.task.cache_source_files(artifact_type),
         )
 
@@ -227,6 +237,20 @@ class Experiment(abc.ABC):
             metrics = self.task.run_task_evaluation(
                 model, tokenizer, eval_ds, self.config
             )
+            # Shared, task-agnostic Inspect canaries (capability/safety), merged into the same
+            # cached eval dict. Runs against the model as-is, so steering experiments get steered
+            # numbers and the unsteered experiment gets the base reference — same line, both sides.
+            # Lazy-imported so `inspect_ai` is a dependency only when canaries are actually selected.
+            requested = self.config.get("inspect_evals") or []
+            if requested:
+                from sparse_steer.core.inspect_provider import run_requested_inspect_evals
+
+                metrics.update(
+                    run_requested_inspect_evals(
+                        model, tokenizer, requested,
+                        limit=self.config.get("inspect_eval_limit"),
+                    )
+                )
             self._cache_store_json(self._eval_artifact_type, metrics)
             cache_info[self._eval_artifact_type.value] = {"status": "miss"}
         for mode, score in metrics.items():

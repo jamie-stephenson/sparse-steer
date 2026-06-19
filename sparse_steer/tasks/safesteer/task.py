@@ -10,7 +10,7 @@ from sparse_steer.tasks.base import TaskSpec
 from sparse_steer.tasks.collate import prompt_completion_collate
 from sparse_steer.utils.cache import ArtifactType
 from .data import assemble_datasets, load_splits
-from .eval import evaluate, evaluate_generative, evaluate_inspect
+from .eval import evaluate, evaluate_generative
 
 
 class SafeSteerTask(TaskSpec):
@@ -53,7 +53,6 @@ class SafeSteerTask(TaskSpec):
         metrics = evaluate(model, tokenizer, dataset, config)
         if config.generative_eval:
             metrics.update(evaluate_generative(model, tokenizer, dataset, config))
-        metrics.update(evaluate_inspect(model, tokenizer, config))
         return metrics
 
     # ── Config-B (sparse gate-training) objective ─────────────────────────

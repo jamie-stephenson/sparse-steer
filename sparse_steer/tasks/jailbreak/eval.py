@@ -33,15 +33,9 @@ from sparse_steer.utils.refusal import detect_refusal
 # configs/task/refusal/**.yaml) — the single source of truth.
 NONGEN_METRICS = {"kl_harmless", "affirmative_logprob_harmful", "perplexity_capability"}
 GEN_METRICS = {"refusal_rate_harmful", "harmful_success", "harmless_acceptance", "safety_score"}
-# Inspect-backed metrics: each is a self-contained inspect_evals task that brings its OWN dataset,
-# runs our model via core.inspect_provider, and applies its OWN judge/scorer — we never route a judge.
-# strong_reject = harmfulness (needs a grader model); gsm8k = the capability "canary" (exact-match,
-# grader-free). HarmBench / Llama-Guard aren't single inspect_evals tasks; add them later as custom
-# Inspect Tasks over our prompts + the relevant scorer — still Inspect-owned.
-INSPECT_TASKS = {
-    "strong_reject": "inspect_evals/strong_reject",
-    "gsm8k": "inspect_evals/gsm8k",
-}
+# Inspect-backed metrics (strong_reject harmfulness, gsm8k capability canary, …) are now selected
+# via the shared `inspect_evals` config list and run centrally in Experiment.run() through
+# core.inspect_provider.run_requested_inspect_evals — task-agnostic, so there's no per-task copy here.
 
 
 # ── Local harmful_success judge (cheap regex proxy) ──────────────────────
@@ -150,23 +144,7 @@ def evaluate_generative(model, tokenizer, dataset, config) -> dict[str, float]:
     return out
 
 
-def evaluate_inspect(model, tokenizer, config) -> dict[str, float]:
-    """Run any Inspect-backed metrics selected in ``config.evals``. Each is a self-contained
-    inspect_evals task — Inspect owns its dataset, generation (via our provider) and judge; we
-    only harvest the metrics. ``inspect_ai`` is imported lazily, so it is a dependency only when
-    an Inspect metric is actually selected."""
-    selected = [m for m in config.evals if m in INSPECT_TASKS]
-    if not selected:
-        return {}
-    from sparse_steer.core.inspect_provider import run_inspect_eval
-
-    out: dict[str, float] = {}
-    for name in selected:
-        out.update(run_inspect_eval(model, tokenizer, INSPECT_TASKS[name], limit=int(config.n_eval)))
-    return out
-
-
 __all__ = [
-    "evaluate", "evaluate_generative", "evaluate_inspect", "JUDGES",
-    "NONGEN_METRICS", "GEN_METRICS", "INSPECT_TASKS",
+    "evaluate", "evaluate_generative", "JUDGES",
+    "NONGEN_METRICS", "GEN_METRICS",
 ]
