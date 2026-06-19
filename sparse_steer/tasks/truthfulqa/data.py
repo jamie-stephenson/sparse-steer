@@ -162,12 +162,12 @@ def format_contrastive_train_dataset(
     tokenizer: PreTrainedTokenizerBase,
     n_neg: int = 3,
 ) -> Dataset:
-    """One row per question for the mc-ranking (contrastive) loss.
+    """One row per question for the contrastive-ranking (contrastive) loss.
 
     Each row's ``texts`` = ``[correct, neg_1, …, neg_n_neg]`` (correct always at index 0), each the
     templated Q+answer; ``prompt_len`` marks where the answer begins (shared across the answers).
     Uses the mc1 targets (one correct + several incorrect). Padded to ``n_neg`` negatives by repeating
-    the last (rare: fewer than n_neg incorrect). loss_term="mc". Built from the GATE-TRAIN split only.
+    the last (rare: fewer than n_neg incorrect). loss_term="contrastive". Built from the GATE-TRAIN split only.
     """
     rows: list[dict[str, Any]] = []
     for question_id, record in records:
@@ -188,7 +188,7 @@ def format_contrastive_train_dataset(
                 "texts": [apply_template(tokenizer, question, a) for a in answers],
                 "prompt_len": prompt_len,
                 "question_id": question_id,
-                "loss_term": "mc",
+                "loss_term": "contrastive",
             }
         )
     if rows:
@@ -316,7 +316,7 @@ def get_truthfulqa_datasets(
         records_for(extraction_qids), tokenizer, extraction_mcq_mode
     )
     if with_contrastive:
-        # mc-ranking objective: gate-train rows are per-question contrastive groups (correct + negs).
+        # contrastive-ranking objective: gate-train rows are per-question contrastive groups (correct + negs).
         train_ce = format_contrastive_train_dataset(
             records_for(gate_train_qids), tokenizer, n_neg=n_neg
         )

@@ -45,7 +45,7 @@ def ce_term(
     return F.cross_entropy(sl.reshape(-1, sl.size(-1)), ll.reshape(-1), ignore_index=-100)
 
 
-def mc_term(
+def contrastive_term(
     batch: dict[str, Tensor], logits: Tensor, rows: Tensor, dtype: torch.dtype = torch.float32
 ) -> Tensor:
     """mc1-style RANKING loss on contrastive gate-train rows (NO test leakage — gate-train split).
@@ -57,7 +57,7 @@ def mc_term(
     steering that makes the truthful answer more likely than the false ones — unlike plain CE, which
     fights steering. The L0 gates still learn the site; only the objective changes.
     """
-    k = int(batch["mc_n_answers"])
+    k = int(batch["contrastive_n_answers"])
     sl = logits[rows][..., :-1, :]
     ll = batch["labels"][rows][..., 1:]
     v = sl.size(-1)
@@ -127,10 +127,10 @@ def composed_objective(
     if ce_w and ce_rows is not None and bool(ce_rows.any()):
         loss = loss + ce_w * ce_term(batch, logits, ce_rows, dtype)
 
-    mc_w = float(config.get("mc_weight", 0.0))
-    mc_rows = term_rows.get("mc")
-    if mc_w and mc_rows is not None and bool(mc_rows.any()):
-        loss = loss + mc_w * mc_term(batch, logits, mc_rows, dtype)
+    contrastive_w = float(config.get("contrastive_weight", 0.0))
+    contrastive_rows = term_rows.get("contrastive")
+    if contrastive_w and contrastive_rows is not None and bool(contrastive_rows.any()):
+        loss = loss + contrastive_w * contrastive_term(batch, logits, contrastive_rows, dtype)
 
     kl_w = float(config.get("kl_weight", 0.0))
     kl_rows = term_rows.get("kl")
@@ -140,4 +140,4 @@ def composed_objective(
     return loss
 
 
-__all__ = ["ce_term", "mc_term", "kl_term", "composed_objective", "resolve_steering_dtype"]
+__all__ = ["ce_term", "contrastive_term", "kl_term", "composed_objective", "resolve_steering_dtype"]

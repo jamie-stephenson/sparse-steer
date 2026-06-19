@@ -29,16 +29,16 @@ class TruthfulQATask(TaskSpec):
             float(config.get("kl_weight", 0.0)) > 0
             or float(mls.get("kl_vs_base", 0) or 0) > 0
         )
-        mc_used = float(config.get("mc_weight", 0.0)) > 0
+        contrastive_used = float(config.get("contrastive_weight", 0.0)) > 0
         return get_truthfulqa_datasets(
             tokenizer,
-            extraction_mcq_mode=config.get("extraction_mcq_mode", "mc1"),
-            gate_train_mcq_mode=config.get("gate_train_mcq_mode", "mc1"),
+            extraction_contrastiveq_mode=config.get("extraction_contrastiveq_mode", "mc1"),
+            gate_train_contrastiveq_mode=config.get("gate_train_contrastiveq_mode", "mc1"),
             extraction_fraction=config.extraction_fraction,
             seed=config.get("data_seed"),
             with_kl_rows=kl_used,
-            with_contrastive=mc_used,
-            n_neg=int(config.get("mc_n_neg", 3)),
+            with_contrastive=contrastive_used,
+            n_neg=int(config.get("contrastive_n_neg", 3)),
         )
 
     def run_task_evaluation(
@@ -93,7 +93,7 @@ class TruthfulQATask(TaskSpec):
         answer (the shared ``ce`` term scores it). No ``steer_mask`` is emitted, so
         steering still applies at every position, matching how it is applied at eval.
         """
-        if rows and "texts" in rows[0]:  # contrastive (mc-ranking) per-question groups
+        if rows and "texts" in rows[0]:  # contrastive (contrastive-ranking) per-question groups
             return self._collate_contrastive(rows, tokenizer, device, config)
         enc = tokenizer(
             [r["text"] for r in rows],
@@ -130,37 +130,37 @@ class TruthfulQATask(TaskSpec):
         device: Any,
         config: DictConfig,
     ) -> dict[str, Tensor]:
-        """Expand per-question ``mc`` contrastive rows into K sequences each (correct at group
-        index 0) so ``mc_term`` can reshape to ``(n_questions, K)`` and rank. Any non-``mc`` rows
+        """Expand per-question ``contrastive`` contrastive rows into K sequences each (correct at group
+        index 0) so ``contrastive_term`` can reshape to ``(n_questions, K)`` and rank. Any non-``contrastive`` rows
         in the batch (``kl`` preserve rows, which carry a single ``text``) are appended AFTER all
-        mc sequences as one-sequence-each — so the mc block stays contiguous from index 0 and the
-        reshape is unaffected — and tagged for their own term. mc and kl share one padded batch."""
-        mc_rows = [r for r in rows if r.get("loss_term", "mc") == "mc"]
-        other_rows = [r for r in rows if r.get("loss_term", "mc") != "mc"]
-        k = len(mc_rows[0]["texts"]) if mc_rows else 0
-        mc_texts = [t for r in mc_rows for t in r["texts"]]
-        mc_plens = [r["prompt_len"] for r in mc_rows for _ in range(k)]
+        contrastive sequences as one-sequence-each — so the contrastive block stays contiguous from index 0 and the
+        reshape is unaffected — and tagged for their own term. contrastive and kl share one padded batch."""
+        contrastive_rows = [r for r in rows if r.get("loss_term", "contrastive") == "contrastive"]
+        other_rows = [r for r in rows if r.get("loss_term", "contrastive") != "contrastive"]
+        k = len(contrastive_rows[0]["texts"]) if contrastive_rows else 0
+        contrastive_texts = [t for r in contrastive_rows for t in r["texts"]]
+        contrastive_plens = [r["prompt_len"] for r in contrastive_rows for _ in range(k)]
         other_texts = [r["text"] for r in other_rows]
         other_plens = [r["prompt_len"] for r in other_rows]
-        flat_texts = mc_texts + other_texts  # mc block first (contiguous) → reshape stays valid
-        plens = mc_plens + other_plens
+        flat_texts = contrastive_texts + other_texts  # contrastive block first (contiguous) → reshape stays valid
+        plens = contrastive_plens + other_plens
         enc = tokenizer(flat_texts, return_tensors="pt", padding=True, padding_side="right")
         ids = enc["input_ids"]
         attn = enc["attention_mask"]
         labels = ids.masked_fill(attn == 0, -100)
         for i, pl in enumerate(plens):
             labels[i, :pl] = -100  # mask the shared question prefix → score answer tokens only
-        n, n_mc = len(flat_texts), len(mc_texts)
+        n, n_contrastive = len(flat_texts), len(contrastive_texts)
         loss_term_rows: dict[str, Tensor] = {}
-        if n_mc:
+        if n_contrastive:
             mask = torch.zeros(n, dtype=torch.bool, device=device)
-            mask[:n_mc] = True
-            loss_term_rows["mc"] = mask
+            mask[:n_contrastive] = True
+            loss_term_rows["contrastive"] = mask
         for t in sorted({r.get("loss_term", "kl") for r in other_rows}):
             mask = torch.zeros(n, dtype=torch.bool, device=device)
             for j, r in enumerate(other_rows):
                 if r.get("loss_term", "kl") == t:
-                    mask[n_mc + j] = True
+                    mask[n_contrastive + j] = True
             loss_term_rows[t] = mask
         out = {
             "input_ids": ids.to(device),
@@ -168,8 +168,8 @@ class TruthfulQATask(TaskSpec):
             "labels": labels.to(device),
             "loss_term_rows": loss_term_rows,
         }
-        if n_mc:
-            out["mc_n_answers"] = k
+        if n_contrastive:
+            out["contrastive_n_answers"] = k
         return out
 
     def extra_cache_fields(
@@ -179,8 +179,8 @@ class TruthfulQATask(TaskSpec):
     ) -> dict[str, Any]:
         if artifact_type == ArtifactType.STEERING_VECTORS:
             return {
-                "extraction_mcq_mode": config.get(
-                    "extraction_mcq_mode", "mc1"
+                "extraction_contrastiveq_mode": config.get(
+                    "extraction_contrastiveq_mode", "mc1"
                 ),
             }
         if artifact_type in (
@@ -188,11 +188,11 @@ class TruthfulQATask(TaskSpec):
             ArtifactType.STEERED_EVAL,
         ):
             fields = {
-                "extraction_mcq_mode": config.get(
-                    "extraction_mcq_mode", "mc1"
+                "extraction_contrastiveq_mode": config.get(
+                    "extraction_contrastiveq_mode", "mc1"
                 ),
-                "gate_train_mcq_mode": config.get(
-                    "gate_train_mcq_mode", "mc1"
+                "gate_train_contrastiveq_mode": config.get(
+                    "gate_train_contrastiveq_mode", "mc1"
                 ),
                 # Objective identity. kl_weight > 0 adds the (Alpaca) preserve rows to the
                 # gate-train batches (changing the trained gates), so it keys the artifact;
@@ -200,10 +200,10 @@ class TruthfulQATask(TaskSpec):
                 # never the trained gates), so it needs no key.
                 "ce_weight": config.get("ce_weight", 1.0),
                 "kl_weight": config.get("kl_weight", 0.0),
-                "mc_weight": config.get("mc_weight", 0.0),
+                "contrastive_weight": config.get("contrastive_weight", 0.0),
                 **(
-                    {"mc_n_neg": int(config.get("mc_n_neg", 3))}
-                    if float(config.get("mc_weight", 0.0)) > 0
+                    {"contrastive_n_neg": int(config.get("contrastive_n_neg", 3))}
+                    if float(config.get("contrastive_weight", 0.0)) > 0
                     else {}
                 ),
                 **(
@@ -224,8 +224,8 @@ class TruthfulQATask(TaskSpec):
             }
         if artifact_type == ArtifactType.PEFT_ADAPTER:
             return {
-                "gate_train_mcq_mode": config.get(
-                    "gate_train_mcq_mode", "mc1"
+                "gate_train_contrastiveq_mode": config.get(
+                    "gate_train_contrastiveq_mode", "mc1"
                 ),
             }
         return {}
