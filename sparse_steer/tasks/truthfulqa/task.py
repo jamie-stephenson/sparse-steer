@@ -41,6 +41,7 @@ class TruthfulQATask(TaskSpec):
             with_kl_rows=kl_used,
             with_contrastive=contrastive_used,
             max_n_neg=int(mxn) if mxn is not None else None,
+            uniform_duplicate=bool(config.get("n_neg_uniform_duplicate", True)),
         )
 
     def run_task_evaluation(
@@ -195,6 +196,9 @@ class TruthfulQATask(TaskSpec):
                         ),
                         "contrastive_normalise": bool(
                             config.get("n_ans_normalise_contrastive_term", False)
+                        ),
+                        "contrastive_uniform_duplicate": bool(
+                            config.get("n_neg_uniform_duplicate", True)
                         ),
                     }
                     if float(config.get("contrastive_weight", 0.0)) > 0

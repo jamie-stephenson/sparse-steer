@@ -157,21 +157,30 @@ def format_train_dataset(
     )
 
 
+_DEFAULT_UNIFORM_N_NEG = 3  # historical n_neg, used when uniform_duplicate has no explicit max_n_neg
+
+
 def format_contrastive_train_dataset(
     records: list[tuple[int, dict[str, Any]]],
     tokenizer: PreTrainedTokenizerBase,
     max_n_neg: int | None = None,
+    uniform_duplicate: bool = False,
 ) -> Dataset:
     """One row per question for the contrastive-ranking (contrastive) loss.
 
     Each row's ``texts`` = ``[correct, neg_1, …]`` (correct always at index 0), each the templated
     Q+answer; ``prompt_len`` marks where the answer begins (shared across the answers). Uses the mc1
-    targets (one correct + several incorrect). The group is RAGGED: each question contributes ALL of
-    its incorrect answers as negatives, so K varies per question — matching the mc1 metric, which
-    scores the correct answer against every incorrect choice. ``max_n_neg`` (optional) caps the
-    negatives to the first ``max_n_neg`` for questions that have more (to bound memory); it NEVER
-    duplicates/pads questions that have fewer. Raises only if a question has no correct or no
-    incorrect answer. loss_term="contrastive". Built from the GATE-TRAIN split only.
+    targets (one correct + several incorrect). Two regimes:
+
+    - ``uniform_duplicate=True`` (the historical behaviour): every question gets EXACTLY
+      ``max_n_neg`` negatives (default 3 if unset) — short questions are PADDED by repeating their
+      last incorrect answer, giving a uniform K = 1 + max_n_neg.
+    - ``uniform_duplicate=False`` (ragged): each question contributes ALL its incorrect answers as
+      negatives, so K varies — matching the mc1 metric (correct vs every incorrect). ``max_n_neg``
+      (optional) caps questions that have more (to bound memory); it NEVER pads short ones.
+
+    Raises only if a question has no correct or no incorrect answer. loss_term="contrastive". Built
+    from the GATE-TRAIN split only.
     """
     rows: list[dict[str, Any]] = []
     for question_id, record in records:
@@ -185,7 +194,14 @@ def format_contrastive_train_dataset(
                 f"TruthfulQA question {question_id}: {len(positives)} correct / "
                 f"{len(negatives)} incorrect answers; contrastive needs at least 1 of each."
             )
-        used_negs = negatives if max_n_neg is None else negatives[:max_n_neg]
+        if uniform_duplicate:
+            # Uniform K: exactly `target` negatives, padding short questions by repeating the last.
+            target = max_n_neg if max_n_neg is not None else _DEFAULT_UNIFORM_N_NEG
+            used_negs = negatives[:target]
+            while len(used_negs) < target:
+                used_negs.append(negatives[-1])
+        else:
+            used_negs = negatives if max_n_neg is None else negatives[:max_n_neg]
         answers = [positives[0]] + used_negs
         prompt_len = len(tokenizer(apply_template(tokenizer, question))["input_ids"])
         rows.append(
@@ -284,6 +300,7 @@ def get_truthfulqa_datasets(
     with_kl_rows: bool = False,
     with_contrastive: bool = False,
     max_n_neg: int | None = None,
+    uniform_duplicate: bool = False,
 ) -> tuple[Dataset, DatasetDict, Dataset]:
     """Load TruthfulQA, apply LoFiT splits, and return three datasets:
     - extraction_ds: subset of train for steering vector extraction
@@ -323,10 +340,12 @@ def get_truthfulqa_datasets(
     if with_contrastive:
         # contrastive-ranking objective: gate-train rows are per-question contrastive groups (correct + negs).
         train_ce = format_contrastive_train_dataset(
-            records_for(gate_train_qids), tokenizer, max_n_neg=max_n_neg
+            records_for(gate_train_qids), tokenizer,
+            max_n_neg=max_n_neg, uniform_duplicate=uniform_duplicate,
         )
         val_ce = format_contrastive_train_dataset(
-            records_for(splits["val"]), tokenizer, max_n_neg=max_n_neg
+            records_for(splits["val"]), tokenizer,
+            max_n_neg=max_n_neg, uniform_duplicate=uniform_duplicate,
         )
     else:
         train_ce = format_train_dataset(
