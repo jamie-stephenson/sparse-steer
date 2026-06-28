@@ -162,6 +162,8 @@ _SOURCE_FILES: dict[ArtifactType, list[str]] = {
     ArtifactType.SPARSE_STEERING: [
         "sparse_steer/core/extract.py",
         "sparse_steer/core/steering.py",
+        "sparse_steer/experiment/steering/solvers.py",
+        "sparse_steer/experiment/steering/probe.py",
         "sparse_steer/train.py",
         # shared gate-training objective (composed CE/KL terms + collate + KL primitive)
         "sparse_steer/objectives.py",
@@ -184,6 +186,8 @@ _SOURCE_FILES: dict[ArtifactType, list[str]] = {
     ArtifactType.STEERED_EVAL: [
         "sparse_steer/core/extract.py",
         "sparse_steer/core/steering.py",
+        "sparse_steer/experiment/steering/solvers.py",
+        "sparse_steer/experiment/steering/probe.py",
         "sparse_steer/train.py",
         "sparse_steer/utils/eval.py",
         # shared gate-training objective (the trained gates depend on it)

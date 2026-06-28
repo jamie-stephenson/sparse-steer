@@ -1,0 +1,22 @@
+# @package _global_
+# TruthfulQA ITI reproduction preset for a 7B Llama-family chat model on CUDA.
+# The original ITI paper reports TruthfulQA results on Alpaca (LLaMA-7B SFT). We use the closest
+# maintained HF checkpoint already exercised elsewhere in this repo: Llama-2-7b-chat-hf.
+task_name: truthfulqa
+model_name: meta-llama/Llama-2-7b-chat-hf
+model_dtype: float16
+
+# 7B TL loads are much safer on a 46GB A40 without TransformerLens weight processing.
+weight_processing: false
+
+# TruthfulQA eval modes
+extraction_mcq_mode: mc1
+ce_term_mcq_mode: mc1
+generative_eval: true
+gen_max_new_tokens: 64
+
+# Conservative batch sizes for a 7B steered model plus 7B judge passes on one A40.
+eval_batch_size: 8
+extract_batch_size: 2
+gen_batch_size: 4
+judge_batch_size: 4

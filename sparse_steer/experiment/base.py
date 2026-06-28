@@ -44,6 +44,13 @@ class Experiment(abc.ABC):
 
     def _cache_kwargs(self, artifact_type: ArtifactType) -> dict[str, Any]:
         extra_fields = dict(self.task.extra_cache_fields(artifact_type, self.config))
+        if (
+            artifact_type == ArtifactType.STEERED_EVAL
+            and self.config.get("refinement_method") == "iti_head_select"
+        ):
+            extra_fields["refinement_method"] = "iti_head_select"
+            extra_fields["iti_topk"] = int(self.config.get("iti_topk", 48))
+            extra_fields["iti_scale"] = float(self.config.get("iti_scale", 15.0))
         # Inspect capability/safety canaries are a cross-cutting eval add-on merged in run() (not
         # owned by any task), so the eval artifacts must key on which were requested + the per-eval
         # limit. Only add the keys when some are requested → eval caches with `inspect_evals` empty

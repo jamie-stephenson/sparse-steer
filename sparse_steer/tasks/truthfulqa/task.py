@@ -81,6 +81,8 @@ class TruthfulQATask(TaskSpec):
                 tokenizer,
                 dataset,
                 max_new_tokens=config.get("gen_max_new_tokens", 64),
+                gen_batch_size=int(config.get("gen_batch_size", 8)),
+                judge_batch_size=int(config.get("judge_batch_size", 8)),
                 steer_token_position=steer_token_position,
             )
             metrics.update(gen_metrics)
@@ -221,12 +223,21 @@ class TruthfulQATask(TaskSpec):
             if artifact_type == ArtifactType.STEERED_EVAL:
                 fields["generative_eval"] = config.get("generative_eval", False)
                 fields["steer_token_position"] = config.get("steer_token_position", "all")
+                if config.get("generative_eval", False):
+                    fields["gen_max_new_tokens"] = int(config.get("gen_max_new_tokens", 64))
+                    fields["gen_batch_size"] = int(config.get("gen_batch_size", 8))
+                    fields["judge_batch_size"] = int(config.get("judge_batch_size", 8))
             return fields
         if artifact_type == ArtifactType.UNSTEERED_EVAL:
-            return {
+            fields = {
                 **base,
                 "generative_eval": config.get("generative_eval", False),
             }
+            if config.get("generative_eval", False):
+                fields["gen_max_new_tokens"] = int(config.get("gen_max_new_tokens", 64))
+                fields["gen_batch_size"] = int(config.get("gen_batch_size", 8))
+                fields["judge_batch_size"] = int(config.get("judge_batch_size", 8))
+            return fields
         if artifact_type == ArtifactType.PEFT_ADAPTER:
             return {
                 **base,
