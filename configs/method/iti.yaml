@@ -10,7 +10,8 @@ refinement_method: iti_head_select
 intervention: steer
 steering_layer_ids: null      # all layers; the probe selects which heads
 extract_batch_size: 8
-extract_token_position: last
+extract_token_position: last       # ITI extracts each head's activation at the final token
+steer_token_position: last_onwards # steer prompt-final plus generated/teacher-forced completion tokens
 targets: [attention]
 normalize_steering_vectors: true  # unit per-head directions θ; magnitude = α·σ via raw_scale
 learn_scale: false

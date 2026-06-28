@@ -51,8 +51,11 @@ class TruthfulQATask(TaskSpec):
         dataset: Dataset,
         config: DictConfig,
     ) -> dict[str, float]:
+        steer_token_position = config.get("steer_token_position", "all")
         metrics = evaluate(
-            model, tokenizer, dataset, batch_size=config.eval_batch_size
+            model, tokenizer, dataset,
+            batch_size=config.eval_batch_size,
+            steer_token_position=steer_token_position,
         )
         # Lightweight generation check (no judge model): generate N free-form answers with the
         # current (steered) model and PRINT them so the loop can read for degeneration. Only runs
@@ -65,6 +68,7 @@ class TruthfulQATask(TaskSpec):
             gens = _generate_answers(
                 model, tokenizer, qs,
                 max_new_tokens=int(config.get("gen_max_new_tokens", 48)),
+                steer_token_position=steer_token_position,
             )
             print(f"  [gen_sample] {k} free-form generations (read for degeneration):")
             for q, b, a in zip(qs, bests, gens):
@@ -77,6 +81,7 @@ class TruthfulQATask(TaskSpec):
                 tokenizer,
                 dataset,
                 max_new_tokens=config.get("gen_max_new_tokens", 64),
+                steer_token_position=steer_token_position,
             )
             metrics.update(gen_metrics)
         return metrics
@@ -215,6 +220,7 @@ class TruthfulQATask(TaskSpec):
             }
             if artifact_type == ArtifactType.STEERED_EVAL:
                 fields["generative_eval"] = config.get("generative_eval", False)
+                fields["steer_token_position"] = config.get("steer_token_position", "all")
             return fields
         if artifact_type == ArtifactType.UNSTEERED_EVAL:
             return {

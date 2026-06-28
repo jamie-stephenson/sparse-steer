@@ -1,13 +1,19 @@
 """Shared autoregressive generation for steering models.
 
 A single ``generate`` used by every task's generative eval. It decodes with the
-model's permanent steering hooks and exposes three steering modes plus optional
-per-step log-softmax capture, so a task that needs only text and a task that needs
-the sampling distributions share one code path.
+model's permanent steering hooks and exposes named steering position modes plus
+optional per-step log-softmax capture, so a task that needs only text and a task
+that needs the sampling distributions share one code path.
 
 Steering modes:
 
 - ``"all"``  — steer every forward at every position (the default; e.g. truthfulqa).
+- ``"last_input"`` — steer only the final prompt/input token. With KV-cached
+  generation this fires on the prompt forward only; decode steps run unsteered.
+- ``"last_onwards"`` — steer the prompt's last token and all generated-token
+  positions. With KV caching this edits the prompt's last token at step 0, then
+  the current generated token at each later step; without KV caching it masks the
+  prompt-final/generated suffix on every full forward.
 - ``"prompt"`` — steer only the step-0 prompt forward, confined to ``steer_prompt_mask``;
   decode steps run with steering disabled. With KV caching the prompt-only steer
   therefore fires on exactly one forward — the steered prompt key/values are cached
@@ -87,6 +93,11 @@ def generate(
     """
     if sampler is None:
         sampler = make_greedy_sampler()
+    valid_steer_modes = {"all", "last_input", "last_onwards", "prompt", "off"}
+    if steer not in valid_steer_modes:
+        raise ValueError(
+            f"Unknown steer mode {steer!r}; use one of {sorted(valid_steer_modes)}."
+        )
     eos = (
         torch.tensor(sorted(eos_token_ids), device=model.device)
         if eos_token_ids
@@ -103,14 +114,46 @@ def generate(
     kv_cache = None
     if use_kv_cache:
         kv_cache = TransformerLensKeyValueCache.init_cache(tl.cfg, device, seq.shape[0])
+    if attn is not None:
+        initial_last = model.last_token_mask(attn).long().argmax(dim=1)
+    else:
+        initial_last = torch.full(
+            (seq.shape[0],), seq.shape[1] - 1, dtype=torch.long, device=device
+        )
 
-    def _step_ctx(step: int):
+    def _step_ctx(step: int, inp: Tensor, inp_attention_mask: Tensor | None):
         if steer == "off":
             return model.steering_disabled()
         if steer == "prompt":
             if step == 0:
                 return model.steer_positions(steer_prompt_mask.to(device))
             return model.steering_disabled()
+        if steer == "last_input":
+            mask = (
+                inp_attention_mask.bool()
+                if inp_attention_mask is not None
+                else torch.ones(inp.shape, dtype=torch.bool, device=device)
+            )
+            if use_kv_cache:
+                return (
+                    model.steer_last_token(mask)
+                    if step == 0
+                    else model.steering_disabled()
+                )
+            return model.steer_token_positions(mask, initial_last)
+        if steer == "last_onwards":
+            mask = (
+                inp_attention_mask.bool()
+                if inp_attention_mask is not None
+                else torch.ones(inp.shape, dtype=torch.bool, device=device)
+            )
+            if use_kv_cache:
+                return (
+                    model.steer_last_token(mask)
+                    if step == 0
+                    else model.steer_positions(mask)
+                )
+            return model.steer_token_onwards(mask, initial_last)
         return contextlib.nullcontext()  # "all"
 
     new_tokens: list[Tensor] = []
@@ -134,7 +177,7 @@ def generate(
             if attn is not None:
                 extra["attention_mask"] = attn
 
-        with _step_ctx(step):
+        with _step_ctx(step, inp, extra.get("attention_mask")):
             logits = tl(inp, **extra)
         last = logits[:, -1, :]
         if capture_log_softmax:

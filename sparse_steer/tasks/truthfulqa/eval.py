@@ -51,6 +51,7 @@ def evaluate(
     tokenizer: PreTrainedTokenizerBase,
     dataset: Dataset,
     batch_size: int = 1,
+    steer_token_position: str = "all",
 ) -> dict[str, float]:
     """Compute MC0, MC1, and MC2, batching across questions."""
     model.eval()
@@ -102,7 +103,10 @@ def evaluate(
             answers.extend(rec["all_answers"])
             slices.append(n)
 
-        all_log_probs = answer_log_probs(model, tokenizer, questions, answers)
+        all_log_probs = answer_log_probs(
+            model, tokenizer, questions, answers,
+            steer_token_position=steer_token_position,
+        )
 
         # Slice results back by question and score
         offset = 0
@@ -143,6 +147,7 @@ def _generate_answers(
     *,
     max_new_tokens: int = 64,
     batch_size: int = 8,
+    steer_token_position: str = "all",
 ) -> list[str]:
     """Generate free-form answers for each question using the (steered) model."""
     model.eval()
@@ -154,9 +159,8 @@ def _generate_answers(
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    # SteeringModel goes through the shared KV-cached generator (steer="all", i.e.
-    # steering applied at every position/step — truthfulqa's behaviour); a
-    # peft-wrapped HF model (the lora method) keeps the HuggingFace generate path.
+    # SteeringModel goes through the shared KV-cached generator; a peft-wrapped HF
+    # model (the lora method) keeps the HuggingFace generate path.
     is_steering = isinstance(model, SteeringModel)
     try:
         for i in tqdm(range(0, len(questions), batch_size), desc="Generate", unit="batch"):
@@ -174,7 +178,7 @@ def _generate_answers(
                         inputs["attention_mask"],
                         max_new_tokens,
                         sampler=None,  # greedy
-                        steer="all",
+                        steer=steer_token_position,
                     )
                     for row in gen_ids:  # already prompt-stripped
                         answers.append(
@@ -264,6 +268,7 @@ def evaluate_generative(
     max_new_tokens: int = 64,
     gen_batch_size: int = 8,
     judge_batch_size: int = 8,
+    steer_token_position: str = "all",
 ) -> dict[str, float]:
     """Generate answers and score with TruthfulQA judge models.
 
@@ -286,6 +291,7 @@ def evaluate_generative(
         model, tokenizer, questions,
         max_new_tokens=max_new_tokens,
         batch_size=gen_batch_size,
+        steer_token_position=steer_token_position,
     )
 
     # score with truth judge, then info judge (sequential to limit memory)

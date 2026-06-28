@@ -15,6 +15,7 @@ Steering is applied as the model currently carries it; wrap any call in
 """
 
 import math
+from contextlib import nullcontext
 
 import torch
 from torch import Tensor
@@ -31,18 +32,47 @@ def _forward_batches(
     batch_size: int | None = None,
     padding_side: str | None = None,
     add_special_tokens: bool = True,
+    steer_token_position: str = "all",
+    steer_start_positions: list[int] | Tensor | None = None,
 ):
     """Yield ``(enc, logits)`` per batch — the shared tokenize→forward step behind every
     teacher-forced metric (``batch_size=None`` = one batch). ``no_grad`` guards the forward
     here (a ``@no_grad`` decorator on a generator function would not).
     """
     bs = batch_size or max(len(texts), 1)
+    valid_steer_modes = {"all", "last_input", "last_onwards"}
+
+    def _start_tensor(start: int, n: int) -> Tensor:
+        if steer_start_positions is None:
+            raise ValueError(
+                f"steer_token_position={steer_token_position!r} requires start positions."
+            )
+        batch_starts = steer_start_positions[start : start + n]
+        return (
+            batch_starts.to(device=model.device, dtype=torch.long)
+            if isinstance(batch_starts, Tensor)
+            else torch.tensor(batch_starts, device=model.device, dtype=torch.long)
+        )
+
     for s in range(0, len(texts), bs):
         enc = tokenize(
             tokenizer, texts[s : s + bs],
             add_special_tokens=add_special_tokens, padding_side=padding_side,
         ).to(model.device)
-        with torch.no_grad():
+        if steer_token_position not in valid_steer_modes:
+            raise ValueError(
+                f"Unknown steer_token_position {steer_token_position!r}; "
+                f"use one of {sorted(valid_steer_modes)}."
+            )
+        if steer_token_position == "all" or not hasattr(model, "steer_last_token"):
+            steer_ctx = nullcontext()
+        elif steer_token_position == "last_input":
+            starts = _start_tensor(s, enc["input_ids"].size(0))
+            steer_ctx = model.steer_token_positions(enc["attention_mask"], starts)
+        elif steer_token_position == "last_onwards":
+            starts = _start_tensor(s, enc["input_ids"].size(0))
+            steer_ctx = model.steer_token_onwards(enc["attention_mask"], starts)
+        with torch.no_grad(), steer_ctx:
             logits = model(**enc).logits  # (batch, seq, vocab)
         yield enc, logits
 
@@ -54,6 +84,7 @@ def _answer_token_logprobs(
     answers: list[str],
     *,
     batch_size: int | None = None,
+    steer_token_position: str = "all",
 ) -> tuple[Tensor, Tensor]:
     """Per-example (summed answer-token log-prob, answer-token count), teacher-forced.
 
@@ -64,11 +95,16 @@ def _answer_token_logprobs(
     full = [apply_template(tokenizer, q, a) for q, a in zip(questions, answers)]
     # each question may have a different prefix length (masked out of the score)
     prefix_lens = [len(tokenizer(apply_template(tokenizer, q))["input_ids"]) for q in questions]
+    steer_starts = [max(prefix_len - 1, 0) for prefix_len in prefix_lens]
     device = model.device
     sums: list[Tensor] = []
     counts: list[Tensor] = []
     seen = 0
-    for enc, logits in _forward_batches(model, tokenizer, full, batch_size=batch_size):
+    for enc, logits in _forward_batches(
+        model, tokenizer, full,
+        batch_size=batch_size, steer_token_position=steer_token_position,
+        steer_start_positions=steer_starts,
+    ):
         n = enc["input_ids"].size(0)
         prefix_t = torch.tensor(prefix_lens[seen : seen + n], device=device).unsqueeze(1)
         seen += n
@@ -91,9 +127,13 @@ def answer_log_probs(
     answers: list[str],
     *,
     batch_size: int | None = None,
+    steer_token_position: str = "all",
 ) -> Tensor:
     """Total log-probability of answer tokens for each Q-A pair (batched)."""
-    return _answer_token_logprobs(model, tokenizer, questions, answers, batch_size=batch_size)[0]
+    return _answer_token_logprobs(
+        model, tokenizer, questions, answers,
+        batch_size=batch_size, steer_token_position=steer_token_position,
+    )[0]
 
 
 def teacher_forced_perplexity(
@@ -103,10 +143,14 @@ def teacher_forced_perplexity(
     answers: list[str],
     *,
     batch_size: int | None = None,
+    steer_token_position: str = "all",
 ) -> float:
     """Token-level perplexity of the answers under teacher forcing — a capability/fluency
     proxy (run unsteered vs intervened to detect collateral damage). Lower = more capable."""
-    sums, counts = _answer_token_logprobs(model, tokenizer, questions, answers, batch_size=batch_size)
+    sums, counts = _answer_token_logprobs(
+        model, tokenizer, questions, answers,
+        batch_size=batch_size, steer_token_position=steer_token_position,
+    )
     return math.exp(-float(sums.sum().item()) / max(float(counts.sum().item()), 1.0))
 
 

@@ -5,6 +5,7 @@ from sparse_steer.core.extract import (
     _normalize_targets,
     last_token_positions,
 )
+from sparse_steer.core.steering import SteeringModel
 
 
 class TestLastTokenPositions:
@@ -53,6 +54,59 @@ class TestLastTokenPositions:
             ]
         )
         assert last_token_positions(mask).tolist() == [3, 3, 4]
+
+    def test_steering_last_token_mask(self):
+        mask = torch.tensor(
+            [
+                [1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1],
+                [1, 1, 1, 1, 1],
+            ]
+        )
+        expected = torch.tensor(
+            [
+                [False, False, True, False, False],
+                [False, False, False, False, True],
+                [False, False, False, False, True],
+            ]
+        )
+        assert torch.equal(SteeringModel.last_token_mask(mask), expected)
+
+    def test_steering_token_positions_mask(self):
+        mask = torch.tensor(
+            [
+                [1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1],
+                [1, 1, 1, 1, 1],
+            ]
+        )
+        positions = torch.tensor([1, 2, 10])
+        expected = torch.tensor(
+            [
+                [False, True, False, False, False],
+                [False, False, True, False, False],
+                [False, False, False, False, False],
+            ]
+        )
+        assert torch.equal(SteeringModel.token_positions_mask(mask, positions), expected)
+
+    def test_steering_token_onwards_mask(self):
+        mask = torch.tensor(
+            [
+                [1, 1, 1, 0, 0],
+                [0, 0, 1, 1, 1],
+                [1, 1, 1, 1, 1],
+            ]
+        )
+        starts = torch.tensor([1, 3, 4])
+        expected = torch.tensor(
+            [
+                [False, True, True, False, False],
+                [False, False, False, True, True],
+                [False, False, False, False, True],
+            ]
+        )
+        assert torch.equal(SteeringModel.token_onwards_mask(mask, starts), expected)
 
 
 class TestNormalizeTargets:
