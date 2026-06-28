@@ -1,5 +1,8 @@
 # @package _global_
 # TruthfulQA ITI reproduction preset for a 7B Llama-family chat model on CUDA.
+# Pair with `method=iti`. This keeps one dedicated ITI task preset instead of a separate
+# TruthfulQA-named variant.
+#
 # The original ITI paper reports TruthfulQA results on Alpaca (LLaMA-7B SFT). We use the closest
 # maintained HF checkpoint already exercised elsewhere in this repo: Llama-2-7b-chat-hf.
 task_name: truthfulqa
