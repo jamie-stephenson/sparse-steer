@@ -313,7 +313,7 @@ def get_truthfulqa_datasets(
     distribution from the QA (where CE wants change); on them the steering should change nothing.
     The caller decides this from whether KL is actually used (in the loss or the logged metrics).
     """
-    raw = load_dataset("truthful_qa", "multiple_choice", split="validation")
+    raw = load_dataset("truthfulqa/truthful_qa", "multiple_choice", split="validation")
     splits = _compute_lofit_question_splits(
         len(raw),
         seed=seed,
