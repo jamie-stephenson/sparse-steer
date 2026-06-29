@@ -297,6 +297,7 @@ def get_truthfulqa_datasets(
     fold: int = 0,
     num_folds: int = 2,
     val_ratio: float = 0.2,
+    eval_full_set: bool = False,
     with_kl_rows: bool = False,
     with_contrastive: bool = False,
     max_n_neg: int | None = None,
@@ -378,6 +379,9 @@ def get_truthfulqa_datasets(
         val_ce = concatenate_datasets([val_ce, kl_val])
 
     gate_train_ds = DatasetDict({"train": train_ce, "val": val_ce})
-    eval_ds = format_eval_dataset(records_for(splits["test"]))
+    # eval_full_set: score ALL 817 questions (match honest_llama's full-set eval; for the
+    # unsteered/ITI baseline only — sparse must keep the held-out test fold to avoid leakage).
+    eval_qids = set(range(len(raw))) if eval_full_set else splits["test"]
+    eval_ds = format_eval_dataset(records_for(eval_qids))
 
     return extraction_ds, gate_train_ds, eval_ds

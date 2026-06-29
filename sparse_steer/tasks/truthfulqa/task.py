@@ -42,6 +42,7 @@ class TruthfulQATask(TaskSpec):
             with_contrastive=contrastive_used,
             max_n_neg=int(mxn) if mxn is not None else None,
             uniform_duplicate=bool(config.get("n_neg_uniform_duplicate", True)),
+            eval_full_set=bool(config.get("eval_full_set", False)),
         )
 
     def run_task_evaluation(
