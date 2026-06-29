@@ -45,19 +45,18 @@ def apply_template(
     """
     if template == "qa_plain":
         # honest_llama EXTRACTION format (utils.format_truthfulqa): "Q: {q} A: {choice}" — no primer,
-        # no instruction. Directions AND σ are extracted on these SHORT prompts, then applied under
-        # the primer at eval (exactly honest_llama). Extracting on the long primer instead changes
-        # the activations → inflates σ, and since the shift is α·σ that over-steers. BOS prepended
-        # for the add_special_tokens=False extraction path (single BOS, matching their tokenizer).
-        bos = tokenizer.bos_token or ""
-        return f"{bos}Q: {question} A:" if answer is None else f"{bos}Q: {question} A: {answer}"
+        # no instruction, and crucially NO literal "<s>": the tokenizer adds exactly one BOS via
+        # add_special_tokens=True (matching their tokenizer, incl. the leading token id). A literal
+        # "<s>" here gets DOUBLED in the add_special_tokens=True extraction/MC paths ([1, 1, ...]).
+        return f"Q: {question} A:" if answer is None else f"Q: {question} A: {answer}"
     if template == "iti_qa":
         # Mirrors TruthfulQA format_prompt / format_prompt_with_answer_strings (preset='qa',
         # truthfulqa/utilities.py): the prompt ends at "Q: {question}" (the model generates the
-        # "A:"); the with-answer form appends "\nA: {answer}". Instruction prefix + BOS are
-        # honest_llama's (llama_utils.py default). "answer" left unstripped to match the source.
-        bos = tokenizer.bos_token or ""
-        base = f"{bos}{_ITI_QA_INSTRUCTION}\n\n{_ITI_QA_PRIMER}\n\nQ: {question}"
+        # "A:"); the with-answer form appends "\nA: {answer}". Instruction prefix is honest_llama's
+        # (llama_utils.py default). NO literal "<s>": the tokenizer adds one BOS via
+        # add_special_tokens=True (a literal "<s>" doubles the BOS in extraction/MC). Answer
+        # left unstripped to match the source.
+        base = f"{_ITI_QA_INSTRUCTION}\n\n{_ITI_QA_PRIMER}\n\nQ: {question}"
         return base if answer is None else f"{base}\nA: {answer}"
     if template != "chat":
         raise ValueError(f"unknown template {template!r}; use 'chat', 'iti_qa', or 'qa_plain'")

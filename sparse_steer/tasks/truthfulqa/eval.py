@@ -205,10 +205,14 @@ def _generate_answers(
         for i in tqdm(range(0, len(questions), batch_size), desc="Generate", unit="batch"):
             batch_questions = questions[i : i + batch_size]
             prompts = [apply_template(tokenizer, q, template=template) for q in batch_questions]
-            # iti_qa/chat template strings already carry BOS ("<s>"); add_special_tokens=False
-            # avoids a double-BOS (honest_llama tokenizes its plain prompt with a single BOS).
+            # iti_qa/qa_plain templates carry NO literal "<s>" → add_special_tokens=True adds the one
+            # BOS, matching honest_llama AND the extraction/MC paths, so generation runs on the same
+            # activation distribution the steering directions were extracted from (a BOS mismatch
+            # between extraction and generation caused over-steering/gibberish). chat templates carry
+            # their own "<s>", so they take add_special_tokens=False to avoid doubling it.
             inputs = tokenizer(
-                prompts, return_tensors="pt", padding=True, add_special_tokens=False
+                prompts, return_tensors="pt", padding=True,
+                add_special_tokens=(template != "chat"),
             ).to(model.device)
 
             with torch.no_grad():
