@@ -245,10 +245,15 @@ def _judge_answers(
         with torch.no_grad():
             logits = judge_model(**inputs).logits
 
-        # extract logits at last non-padding position for each item
+        # extract logits at the last REAL token (its next-token distribution is the
+        # judge's yes/no). The judge tokenizer LEFT-pads, so the last real token is the
+        # final column (-1); handle right-padding too for safety. (Previously assumed
+        # right-padding via attention_mask.sum()-1, which indexed a PAD position under
+        # left-padding → near-random yes/no, collapsing every True/Info score to ~0.5.)
+        left_padded = judge_tokenizer.padding_side == "left"
         for j in range(len(batch_q)):
-            seq_len = inputs["attention_mask"][j].sum() - 1  # last real token
-            token_logits = logits[j, seq_len]
+            idx = -1 if left_padded else int(inputs["attention_mask"][j].sum()) - 1
+            token_logits = logits[j, idx]
             results.append(token_logits[yes_id].item() > token_logits[no_id].item())
 
     # free judge memory
