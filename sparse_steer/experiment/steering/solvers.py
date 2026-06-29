@@ -157,6 +157,43 @@ def _refine_gate_training(experiment, model, tokenizer, extraction_ds, train_ds,
             steering_vectors, normalize=experiment.config.normalize_steering_vectors
         )
 
+    # Opt-in honest_llama-style σ-init (OFF by default; ITI uses it intrinsically). When a sparse
+    # run sets scale_from_extraction_std=true, each site's scale STARTS at iti_scale·σ (the per-site
+    # ITI magnitude) instead of the flat init_raw_scale, and the gates train from there. Default
+    # false → sparse steering is unchanged.
+    if steering_vectors is not None and bool(
+        experiment.config.get("scale_from_extraction_std", False)
+    ):
+        from sparse_steer.core.extract import collect_activations  # local: only this path needs it
+        from .probe import head_sigma
+
+        cfg = experiment.config
+        components = list(cfg.targets)
+        scale = float(cfg.get("iti_scale", 15.0))
+        with model.steering_disabled():
+            ds_acts, _ = collect_activations(
+                extraction_ds, model, tokenizer, targets=components,
+                batch_size=int(cfg.get("extract_batch_size", 8)),
+                token_position=cfg.get("extract_token_position", "last"),
+            )
+        for c in components:
+            acts_c = torch.tensor(ds_acts[c]).float()
+            if acts_c.dim() == 3:
+                acts_c = acts_c.unsqueeze(2)
+            dir_c = steering_vectors[c].float()
+            if dir_c.dim() == 2:
+                dir_c = dir_c.unsqueeze(1)
+            sigma_c = head_sigma(acts_c, F.normalize(dir_c, dim=-1))
+            for layer in range(sigma_c.shape[0]):
+                key = f"{c}_{layer}"
+                if key in model.hooks:
+                    hook = model.hooks[key]
+                    with torch.no_grad():
+                        hook.raw_scale.data = _inv_softplus(scale * sigma_c[layer]).to(
+                            hook.raw_scale.device, hook.raw_scale.dtype
+                        )
+        print(f"  σ-init: per-site scale set to {scale}·σ (scale_from_extraction_std=true)")
+
     print("Training steering parameters...")
     train_steering(
         model, tokenizer, train_ds, experiment.config, output_dir=output_dir, task=experiment.task
@@ -248,6 +285,10 @@ def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_d
     selected = {(c, layer, gate) for _, c, layer, gate in sites[:k]}
     top_acc = sum(s[0] for s in sites[:k]) / k if k else 0.0
 
+    # σ-scaling (per-site magnitude = α·σ) is ITI's mechanism — ON by default here, controlled by
+    # scale_from_extraction_std (iti.yaml sets it true). A run may set it false to use the flat
+    # init_raw_scale instead. Sparse steering leaves this off by default (see _refine_gate_training).
+    sigma_scale = bool(config.get("scale_from_extraction_std", True))
     for c in components:
         sigma_c = sigma_by_c[c]
         Lc, Hc = sigma_c.shape
@@ -257,14 +298,15 @@ def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_d
                 continue
             hook = model.hooks[key]
             mask_l = torch.tensor([(c, layer, gate) in selected for gate in range(Hc)])
-            raw_l = _inv_softplus(scale * sigma_c[layer])
             with torch.no_grad():
                 hook.log_alpha.data = torch.where(
                     mask_l.to(hook.log_alpha.device),
                     torch.full_like(hook.log_alpha.data, _ITI_MASK_LOGIT),
                     torch.full_like(hook.log_alpha.data, -_ITI_MASK_LOGIT),
                 )
-                hook.raw_scale.data = raw_l.to(hook.raw_scale.device, hook.raw_scale.dtype)
+                if sigma_scale:
+                    raw_l = _inv_softplus(scale * sigma_c[layer])
+                    hook.raw_scale.data = raw_l.to(hook.raw_scale.device, hook.raw_scale.dtype)
             hook.log_alpha.requires_grad_(False)
             if isinstance(getattr(hook, "raw_scale", None), torch.nn.Parameter):
                 hook.raw_scale.requires_grad_(False)

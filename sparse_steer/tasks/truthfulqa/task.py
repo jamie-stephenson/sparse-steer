@@ -202,6 +202,16 @@ class TruthfulQATask(TaskSpec):
                 "extraction_template": config.get(
                     "extraction_template", config.get("prompt_template", "chat")
                 ),
+                # σ-scaling identity: whether the per-site scale comes from α·σ, and the α — both
+                # change the steered model, so they key the artifact (else an α sweep hits stale
+                # caches). iti_scale only matters when σ-scaling is on, so key it only then.
+                "scale_from_extraction_std": bool(config.get("scale_from_extraction_std", False)),
+                **(
+                    {"iti_scale": float(config.get("iti_scale", 15.0))}
+                    if bool(config.get("scale_from_extraction_std", False))
+                    or config.get("refinement_method") == "iti_head_select"
+                    else {}
+                ),
                 "ce_term_mcq_mode": config.get(
                     "ce_term_mcq_mode", "mc1"
                 ),

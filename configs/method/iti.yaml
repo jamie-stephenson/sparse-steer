@@ -34,6 +34,12 @@ iti_scale: 15.0               # per-site strength = iti_scale · σ_site. This i
                               # clashing with our log_alpha gate logit. Paper α≈15 (too strong for
                               # Qwen-0.5B → degenerate; sweep down).
 
+# ITI's magnitude is α·σ — the per-head std (proj_val_std) scaling. This flag turns it on. ON here
+# (it IS the ITI mechanism); OFF by default everywhere else, so sparse steering keeps its flat
+# init_raw_scale unless a sparse run explicitly sets scale_from_extraction_std=true to σ-initialise
+# its gate scales.
+scale_from_extraction_std: true
+
 # gates must exist so the probe mask can be written into log_alpha (±large → deterministic 1/0)
 gate_config:
   temperature: 0.33
