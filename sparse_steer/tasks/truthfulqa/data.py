@@ -60,6 +60,7 @@ def format_extraction_dataset(
     records: list[tuple[int, dict[str, Any]]],
     tokenizer: PreTrainedTokenizerBase,
     mcq_mode: Literal["mc0", "mc1", "mc2"],
+    template: str = "chat",
 ) -> Dataset:
     """Format raw HF records as contrastive pairs for steering vector extraction.
 
@@ -81,7 +82,7 @@ def format_extraction_dataset(
 
         def row(answer: str, positive: bool) -> dict[str, Any]:
             return {
-                "text": apply_template(tokenizer, question, answer),
+                "text": apply_template(tokenizer, question, answer, template=template),
                 "positive": positive,
                 "question_id": question_id,
             }
@@ -165,6 +166,7 @@ def format_contrastive_train_dataset(
     tokenizer: PreTrainedTokenizerBase,
     max_n_neg: int | None = None,
     uniform_duplicate: bool = False,
+    template: str = "chat",
 ) -> Dataset:
     """One row per question for the contrastive-ranking (contrastive) loss.
 
@@ -203,10 +205,10 @@ def format_contrastive_train_dataset(
         else:
             used_negs = negatives if max_n_neg is None else negatives[:max_n_neg]
         answers = [positives[0]] + used_negs
-        prompt_len = len(tokenizer(apply_template(tokenizer, question))["input_ids"])
+        prompt_len = len(tokenizer(apply_template(tokenizer, question, template=template))["input_ids"])
         rows.append(
             {
-                "texts": [apply_template(tokenizer, question, a) for a in answers],
+                "texts": [apply_template(tokenizer, question, a, template=template) for a in answers],
                 "prompt_len": prompt_len,
                 "question_id": question_id,
                 "loss_term": "contrastive",
@@ -302,6 +304,7 @@ def get_truthfulqa_datasets(
     with_contrastive: bool = False,
     max_n_neg: int | None = None,
     uniform_duplicate: bool = False,
+    template: str = "chat",
 ) -> tuple[Dataset, DatasetDict, Dataset]:
     """Load TruthfulQA, apply LoFiT splits, and return three datasets:
     - extraction_ds: subset of train for steering vector extraction
@@ -336,17 +339,17 @@ def get_truthfulqa_datasets(
     gate_train_qids = splits["train"] - extraction_qids
 
     extraction_ds = format_extraction_dataset(
-        records_for(extraction_qids), tokenizer, extraction_mcq_mode
+        records_for(extraction_qids), tokenizer, extraction_mcq_mode, template=template
     )
     if with_contrastive:
         # contrastive-ranking objective: gate-train rows are per-question contrastive groups (correct + negs).
         train_ce = format_contrastive_train_dataset(
             records_for(gate_train_qids), tokenizer,
-            max_n_neg=max_n_neg, uniform_duplicate=uniform_duplicate,
+            max_n_neg=max_n_neg, uniform_duplicate=uniform_duplicate, template=template,
         )
         val_ce = format_contrastive_train_dataset(
             records_for(splits["val"]), tokenizer,
-            max_n_neg=max_n_neg, uniform_duplicate=uniform_duplicate,
+            max_n_neg=max_n_neg, uniform_duplicate=uniform_duplicate, template=template,
         )
     else:
         train_ce = format_train_dataset(

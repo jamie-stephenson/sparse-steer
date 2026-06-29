@@ -43,6 +43,7 @@ class TruthfulQATask(TaskSpec):
             max_n_neg=int(mxn) if mxn is not None else None,
             uniform_duplicate=bool(config.get("n_neg_uniform_duplicate", True)),
             eval_full_set=bool(config.get("eval_full_set", False)),
+            template=config.get("prompt_template", "chat"),
         )
 
     def run_task_evaluation(
@@ -172,7 +173,12 @@ class TruthfulQATask(TaskSpec):
     ) -> dict[str, Any]:
         # model_dtype changes the extraction activations and eval logits, so it keys every
         # model-coupled artifact (matching jailbreak/safesteer/tinysleepers).
-        base = {"model_dtype": config.get("model_dtype", "float16")}
+        # prompt_template changes the extraction/gate-train/eval prompts (chat vs iti_qa primer),
+        # so it keys every model-coupled artifact (else chat->iti_qa would hit stale caches).
+        base = {
+            "model_dtype": config.get("model_dtype", "float16"),
+            "prompt_template": config.get("prompt_template", "chat"),
+        }
         if artifact_type == ArtifactType.STEERING_VECTORS:
             return {
                 **base,
