@@ -43,6 +43,14 @@ def apply_template(
         ``apply_template(q)`` stays an exact token-prefix of ``apply_template(q, a)`` (prefix
         masking still works).
     """
+    if template == "qa_plain":
+        # honest_llama EXTRACTION format (utils.format_truthfulqa): "Q: {q} A: {choice}" — no primer,
+        # no instruction. Directions AND σ are extracted on these SHORT prompts, then applied under
+        # the primer at eval (exactly honest_llama). Extracting on the long primer instead changes
+        # the activations → inflates σ, and since the shift is α·σ that over-steers. BOS prepended
+        # for the add_special_tokens=False extraction path (single BOS, matching their tokenizer).
+        bos = tokenizer.bos_token or ""
+        return f"{bos}Q: {question} A:" if answer is None else f"{bos}Q: {question} A: {answer}"
     if template == "iti_qa":
         # Mirrors TruthfulQA format_prompt / format_prompt_with_answer_strings (preset='qa',
         # truthfulqa/utilities.py): the prompt ends at "Q: {question}" (the model generates the
@@ -52,7 +60,7 @@ def apply_template(
         base = f"{bos}{_ITI_QA_INSTRUCTION}\n\n{_ITI_QA_PRIMER}\n\nQ: {question}"
         return base if answer is None else f"{base}\nA: {answer}"
     if template != "chat":
-        raise ValueError(f"unknown template {template!r}; use 'chat' or 'iti_qa'")
+        raise ValueError(f"unknown template {template!r}; use 'chat', 'iti_qa', or 'qa_plain'")
     if answer is None:
         messages = [{"role": "user", "content": question}]
         return tokenizer.apply_chat_template(

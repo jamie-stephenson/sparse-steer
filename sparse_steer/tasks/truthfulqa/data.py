@@ -305,6 +305,7 @@ def get_truthfulqa_datasets(
     max_n_neg: int | None = None,
     uniform_duplicate: bool = False,
     template: str = "chat",
+    extraction_template: str | None = None,
 ) -> tuple[Dataset, DatasetDict, Dataset]:
     """Load TruthfulQA, apply LoFiT splits, and return three datasets:
     - extraction_ds: subset of train for steering vector extraction
@@ -339,7 +340,8 @@ def get_truthfulqa_datasets(
     gate_train_qids = splits["train"] - extraction_qids
 
     extraction_ds = format_extraction_dataset(
-        records_for(extraction_qids), tokenizer, extraction_mcq_mode, template=template
+        records_for(extraction_qids), tokenizer, extraction_mcq_mode,
+        template=extraction_template or template,
     )
     if with_contrastive:
         # contrastive-ranking objective: gate-train rows are per-question contrastive groups (correct + negs).

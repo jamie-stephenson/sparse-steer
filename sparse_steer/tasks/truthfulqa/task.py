@@ -44,6 +44,7 @@ class TruthfulQATask(TaskSpec):
             uniform_duplicate=bool(config.get("n_neg_uniform_duplicate", True)),
             eval_full_set=bool(config.get("eval_full_set", False)),
             template=config.get("prompt_template", "chat"),
+            extraction_template=config.get("extraction_template", None),
         )
 
     def run_task_evaluation(
@@ -185,6 +186,9 @@ class TruthfulQATask(TaskSpec):
                 "extraction_mcq_mode": config.get(
                     "extraction_mcq_mode", "mc1"
                 ),
+                "extraction_template": config.get(
+                    "extraction_template", config.get("prompt_template", "chat")
+                ),
             }
         if artifact_type in (
             ArtifactType.SPARSE_STEERING,
@@ -194,6 +198,9 @@ class TruthfulQATask(TaskSpec):
                 **base,
                 "extraction_mcq_mode": config.get(
                     "extraction_mcq_mode", "mc1"
+                ),
+                "extraction_template": config.get(
+                    "extraction_template", config.get("prompt_template", "chat")
                 ),
                 "ce_term_mcq_mode": config.get(
                     "ce_term_mcq_mode", "mc1"

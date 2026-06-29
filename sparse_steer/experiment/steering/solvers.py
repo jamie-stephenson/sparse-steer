@@ -269,7 +269,13 @@ def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_d
             if isinstance(getattr(hook, "raw_scale", None), torch.nn.Parameter):
                 hook.raw_scale.requires_grad_(False)
 
-    print(f"  ITI: {k} sites selected across {components} (mean top-K probe val-acc {top_acc:.3f}); α·σ set.")
+    mags = [scale * float(sigma_by_c[c][layer, gate]) for _, c, layer, gate in sites[:k]]
+    mag_mean = sum(mags) / len(mags) if mags else 0.0
+    mag_max = max(mags) if mags else 0.0
+    print(
+        f"  ITI: {k} sites selected across {components} (mean top-K probe val-acc {top_acc:.3f}); "
+        f"α·σ magnitude mean={mag_mean:.2f} max={mag_max:.2f} (α={scale})"
+    )
     cache_info["iti"] = {"status": "miss", "n_sites": k, "top_val_acc": top_acc, "components": components}
     return model, {}, cache_info
 

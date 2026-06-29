@@ -20,6 +20,10 @@ generative_eval: true
 # Prompt format used everywhere (extraction, MC, gate-train, generation). "iti_qa" = standard
 # TruthfulQA QA-primer (matches honest_llama); unset/"chat" = the model's native chat template.
 prompt_template: iti_qa
+# Extraction uses honest_llama's plain "Q: {q} A: {choice}" (utils.format_truthfulqa): directions
+# and σ are extracted on SHORT prompts, then applied under the primer at eval. Extracting on the
+# long primer instead inflates σ, and since the ITI shift is α·σ that over-steers (gibberish).
+extraction_template: qa_plain
 gen_max_new_tokens: 64
 
 # Conservative batch sizes for a 7B steered model plus 7B judge passes on one A40.
