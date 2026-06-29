@@ -18,6 +18,14 @@ learn_scale: false
 freeze_raw_scale: true
 init_raw_scale: 0.0            # overwritten per-head with inv_softplus(α·σ) by the solver
 
+# Match honest_llama extraction (validate_2fold uses tqa_mc2 over the full train fold): directions
+# and σ come from mc2 targets across ALL of train, giving a STABLE σ. A small mc1 subset (163 qs)
+# gave a noisy σ with an outlier head (α·σ≈73) that over-steered generation into gibberish. The
+# intervention math + positions already match honest_llama (lt_modulated_vector_add: head_out[:,
+# pos, head] += α·σ·dir on answer/gen tokens); this is the last non-judge discrepancy.
+extraction_mcq_mode: mc2
+extraction_fraction: 1.0
+
 # ITI knobs (sweepable)
 iti_topk: 48                  # top-K sites by probe val-accuracy (a site = an attention head OR a
                               # residual/mlp layer — not necessarily heads; ITI paper K≈48)
