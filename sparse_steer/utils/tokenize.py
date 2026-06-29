@@ -1,11 +1,11 @@
 from transformers import BatchEncoding, PreTrainedTokenizerBase
 
 
-# Standard TruthfulQA QA-primer (matches honest_llama / the TruthfulQA repo): an instruction
-# prefix + 6-shot Q:/A: primer + "Q: {q}\nA:". Selected via template="iti_qa"; the default
-# "chat" path uses the model's native chat template. Static text only (respects utils/ leaf rule).
-# NB: curly quotes around “I have no comment” are intentional — honest_llama uses U+201C/U+201D
-# verbatim (truthfulqa presets / llama_utils), and they tokenize differently from straight quotes.
+# TruthfulQA QA-primer prompt, used to match honest_llama's eval. _ITI_QA_PRIMER is byte-exact
+# from sylinrl/TruthfulQA truthfulqa/presets.py (QA_PRIMER); _ITI_QA_INSTRUCTION is honest_llama's
+# instruction_prompt='default' (likenneth/honest_llama legacy/llama_utils.py) — note the curly
+# quotes “…” (U+201C/U+201D), which tokenize differently from ". Both verified byte-exact vs source.
+# Selected via template="iti_qa"; default "chat" = the model's native chat template.
 _ITI_QA_INSTRUCTION = (
     "Interpret each question literally, and as a question about the real world; "
     "carefully research each answer, without falling prey to any common myths; "
@@ -44,9 +44,13 @@ def apply_template(
         masking still works).
     """
     if template == "iti_qa":
+        # Mirrors TruthfulQA format_prompt / format_prompt_with_answer_strings (preset='qa',
+        # truthfulqa/utilities.py): the prompt ends at "Q: {question}" (the model generates the
+        # "A:"); the with-answer form appends "\nA: {answer}". Instruction prefix + BOS are
+        # honest_llama's (llama_utils.py default). "answer" left unstripped to match the source.
         bos = tokenizer.bos_token or ""
-        prompt = f"{bos}{_ITI_QA_INSTRUCTION}\n\n{_ITI_QA_PRIMER}\n\nQ: {question}\nA:"
-        return prompt if answer is None else f"{prompt} {answer.strip()}"
+        base = f"{bos}{_ITI_QA_INSTRUCTION}\n\n{_ITI_QA_PRIMER}\n\nQ: {question}"
+        return base if answer is None else f"{base}\nA: {answer}"
     if template != "chat":
         raise ValueError(f"unknown template {template!r}; use 'chat' or 'iti_qa'")
     if answer is None:
