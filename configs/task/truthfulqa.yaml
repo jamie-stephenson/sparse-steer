@@ -17,6 +17,9 @@ weight_processing: false
 extraction_mcq_mode: mc1
 ce_term_mcq_mode: mc1
 generative_eval: true
+# Prompt format used everywhere (extraction, MC, gate-train, generation). "iti_qa" = standard
+# TruthfulQA QA-primer (matches honest_llama); unset/"chat" = the model's native chat template.
+prompt_template: iti_qa
 gen_max_new_tokens: 64
 
 # Conservative batch sizes for a 7B steered model plus 7B judge passes on one A40.

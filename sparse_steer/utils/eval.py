@@ -85,6 +85,7 @@ def _answer_token_logprobs(
     *,
     batch_size: int | None = None,
     steer_token_position: str = "all",
+    template: str = "chat",
 ) -> tuple[Tensor, Tensor]:
     """Per-example (summed answer-token log-prob, answer-token count), teacher-forced.
 
@@ -92,9 +93,12 @@ def _answer_token_logprobs(
     answer is contiguous after its per-row prefix). Shared primitive behind
     :func:`answer_log_probs` and :func:`teacher_forced_perplexity`.
     """
-    full = [apply_template(tokenizer, q, a) for q, a in zip(questions, answers)]
+    full = [apply_template(tokenizer, q, a, template=template) for q, a in zip(questions, answers)]
     # each question may have a different prefix length (masked out of the score)
-    prefix_lens = [len(tokenizer(apply_template(tokenizer, q))["input_ids"]) for q in questions]
+    prefix_lens = [
+        len(tokenizer(apply_template(tokenizer, q, template=template))["input_ids"])
+        for q in questions
+    ]
     steer_starts = [max(prefix_len - 1, 0) for prefix_len in prefix_lens]
     device = model.device
     sums: list[Tensor] = []
@@ -128,11 +132,13 @@ def answer_log_probs(
     *,
     batch_size: int | None = None,
     steer_token_position: str = "all",
+    template: str = "chat",
 ) -> Tensor:
     """Total log-probability of answer tokens for each Q-A pair (batched)."""
     return _answer_token_logprobs(
         model, tokenizer, questions, answers,
         batch_size=batch_size, steer_token_position=steer_token_position,
+        template=template,
     )[0]
 
 

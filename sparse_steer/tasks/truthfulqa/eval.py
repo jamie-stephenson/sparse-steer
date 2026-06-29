@@ -52,6 +52,7 @@ def evaluate(
     dataset: Dataset,
     batch_size: int = 1,
     steer_token_position: str = "all",
+    template: str = "chat",
 ) -> dict[str, float]:
     """Compute MC0, MC1, and MC2, batching across questions."""
     model.eval()
@@ -106,6 +107,7 @@ def evaluate(
         all_log_probs = answer_log_probs(
             model, tokenizer, questions, answers,
             steer_token_position=steer_token_position,
+            template=template,
         )
 
         # Slice results back by question and score
@@ -184,6 +186,7 @@ def _generate_answers(
     max_new_tokens: int = 64,
     batch_size: int = 8,
     steer_token_position: str = "all",
+    template: str = "chat",
 ) -> list[str]:
     """Generate free-form answers for each question using the (steered) model."""
     model.eval()
@@ -201,7 +204,7 @@ def _generate_answers(
     try:
         for i in tqdm(range(0, len(questions), batch_size), desc="Generate", unit="batch"):
             batch_questions = questions[i : i + batch_size]
-            prompts = [_tqa_gen_prompt(q) for q in batch_questions]
+            prompts = [apply_template(tokenizer, q, template=template) for q in batch_questions]
             inputs = tokenizer(
                 prompts, return_tensors="pt", padding=True
             ).to(model.device)
@@ -312,6 +315,7 @@ def evaluate_generative(
     gen_batch_size: int = 8,
     judge_batch_size: int = 8,
     steer_token_position: str = "all",
+    template: str = "chat",
 ) -> dict[str, float]:
     """Generate answers and score with TruthfulQA judge models.
 
@@ -335,6 +339,7 @@ def evaluate_generative(
         max_new_tokens=max_new_tokens,
         batch_size=gen_batch_size,
         steer_token_position=steer_token_position,
+        template=template,
     )
 
     # score with truth judge, then info judge (sequential to limit memory)

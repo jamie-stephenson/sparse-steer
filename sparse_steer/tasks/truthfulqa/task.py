@@ -53,10 +53,12 @@ class TruthfulQATask(TaskSpec):
         config: DictConfig,
     ) -> dict[str, float]:
         steer_token_position = config.get("steer_token_position", "all")
+        template = config.get("prompt_template", "chat")
         metrics = evaluate(
             model, tokenizer, dataset,
             batch_size=config.eval_batch_size,
             steer_token_position=steer_token_position,
+            template=template,
         )
         # Lightweight generation check (no judge model): generate N free-form answers with the
         # current (steered) model and PRINT them so the loop can read for degeneration. Only runs
@@ -70,6 +72,7 @@ class TruthfulQATask(TaskSpec):
                 model, tokenizer, qs,
                 max_new_tokens=int(config.get("gen_max_new_tokens", 48)),
                 steer_token_position=steer_token_position,
+                template=template,
             )
             print(f"  [gen_sample] {k} free-form generations (read for degeneration):")
             for q, b, a in zip(qs, bests, gens):
@@ -85,6 +88,7 @@ class TruthfulQATask(TaskSpec):
                 gen_batch_size=int(config.get("gen_batch_size", 8)),
                 judge_batch_size=int(config.get("judge_batch_size", 8)),
                 steer_token_position=steer_token_position,
+                template=template,
             )
             metrics.update(gen_metrics)
         return metrics
