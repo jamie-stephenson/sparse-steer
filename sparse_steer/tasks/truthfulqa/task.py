@@ -55,11 +55,18 @@ class TruthfulQATask(TaskSpec):
         config: DictConfig,
     ) -> dict[str, float]:
         steer_token_position = config.get("steer_token_position", "all")
+        # MC steering position: defaults to the generation steer position, but can be set
+        # independently. honest_llama's ITI steers only b[0,-1] per forward → flat MC; setting
+        # mc_steer_token_position="last" reproduces that (the answer-span log-probs are untouched),
+        # while generation still steers each new token. Default None → same as generation.
+        mc_steer_token_position = (
+            config.get("mc_steer_token_position") or steer_token_position
+        )
         template = config.get("prompt_template", "chat")
         metrics = evaluate(
             model, tokenizer, dataset,
             batch_size=config.eval_batch_size,
-            steer_token_position=steer_token_position,
+            steer_token_position=mc_steer_token_position,
             template=template,
         )
         # Lightweight generation check (no judge model): generate N free-form answers with the
@@ -207,7 +214,12 @@ class TruthfulQATask(TaskSpec):
                 # caches). iti_scale only matters when σ-scaling is on, so key it only then.
                 "scale_from_extraction_std": bool(config.get("scale_from_extraction_std", False)),
                 **(
-                    {"iti_scale": float(config.get("iti_scale", 15.0))}
+                    {
+                        "iti_scale": float(config.get("iti_scale", 15.0)),
+                        # σ population for the α·σ magnitude (answer-token vs question-end) changes
+                        # the steered model, so it keys the artifact.
+                        "iti_sigma_position": str(config.get("iti_sigma_position", "answer")),
+                    }
                     if bool(config.get("scale_from_extraction_std", False))
                     or config.get("refinement_method") == "iti_head_select"
                     else {}
@@ -251,6 +263,12 @@ class TruthfulQATask(TaskSpec):
             if artifact_type == ArtifactType.STEERED_EVAL:
                 fields["generative_eval"] = config.get("generative_eval", False)
                 fields["steer_token_position"] = config.get("steer_token_position", "all")
+                # MC steering position (None → same as steer_token_position); keys the steered eval
+                # because it changes whether the steered MC log-probs move.
+                fields["mc_steer_token_position"] = (
+                    config.get("mc_steer_token_position")
+                    or config.get("steer_token_position", "all")
+                )
                 if config.get("generative_eval", False):
                     fields["gen_max_new_tokens"] = int(config.get("gen_max_new_tokens", 64))
                     fields["gen_batch_size"] = int(config.get("gen_batch_size", 8))

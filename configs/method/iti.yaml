@@ -19,12 +19,26 @@ freeze_raw_scale: true
 init_raw_scale: 0.0            # overwritten per-head with inv_softplus(α·σ) by the solver
 
 # Match honest_llama extraction (validate_2fold uses tqa_mc2 over the full train fold): directions
-# and σ come from mc2 targets across ALL of train, giving a STABLE σ. A small mc1 subset (163 qs)
-# gave a noisy σ with an outlier head (α·σ≈73) that over-steered generation into gibberish. The
-# intervention math + positions already match honest_llama (lt_modulated_vector_add: head_out[:,
-# pos, head] += α·σ·dir on answer/gen tokens); this is the last non-judge discrepancy.
+# come from mc2 targets across ALL of train. NB these two keys are also set in task/truthfulqa.yaml
+# (mc1) and config.yaml (0.5), which sit AFTER method in the defaults list and so OVERRIDE the values
+# here — pass them on the CLI to actually use mc2/full:
+#     method=iti task=truthfulqa extraction_mcq_mode=mc2 extraction_fraction=1.0
 extraction_mcq_mode: mc2
 extraction_fraction: 1.0
+
+# σ population for the α·σ magnitude. honest_llama measures proj_val_std on its tqa_gen_end_q bank (a
+# question-end residual), NOT the answer-token activation. The answer-token activation varies wildly
+# with the answer text → std (and α·σ) several× too large → over-steers generation into gibberish
+# (α·σ max ≈22 on mc2 / ≈70 on the mc1 subset). "question_end" measures σ at the question-end position
+# instead → α·σ mean≈2 / max≈6, matching honest_llama and keeping generation coherent. This key is NOT
+# set elsewhere, so it is NOT overridden. Default (in code) is "answer" = current sparse_steer.
+iti_sigma_position: question_end
+
+# MC steering position. honest_llama's ITI_Intervener steers only b[0,-1] per forward, so its
+# teacher-forced MC log-probs are untouched → MC is flat (baseline == ITI). Our default last_onwards
+# steers every answer token → MC drifts. "last" reproduces their flat MC; generation still steers each
+# new token (steer_token_position=last_onwards). Default (in code) None → same as steer_token_position.
+mc_steer_token_position: last
 
 # ITI knobs (sweepable)
 iti_topk: 48                  # top-K sites by probe val-accuracy (a site = an attention head OR a

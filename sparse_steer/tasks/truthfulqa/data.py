@@ -85,6 +85,9 @@ def format_extraction_dataset(
                 "text": apply_template(tokenizer, question, answer, template=template),
                 "positive": positive,
                 "question_id": question_id,
+                # raw question, so the ITI refinement can (optionally) build the question-end
+                # σ population (iti_sigma_position="question_end"); ignored otherwise.
+                "question": question,
             }
 
         if mcq_mode == "mc0":
@@ -99,7 +102,9 @@ def format_extraction_dataset(
 
     if rows:
         return Dataset.from_list(rows)
-    return Dataset.from_dict({"text": [], "positive": [], "question_id": []})
+    return Dataset.from_dict(
+        {"text": [], "positive": [], "question_id": [], "question": []}
+    )
 
 
 def format_train_dataset(

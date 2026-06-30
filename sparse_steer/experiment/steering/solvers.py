@@ -176,6 +176,11 @@ def _refine_gate_training(experiment, model, tokenizer, extraction_ds, train_ds,
                 batch_size=int(cfg.get("extract_batch_size", 8)),
                 token_position=cfg.get("extract_token_position", "last"),
             )
+        sigma_position = str(cfg.get("iti_sigma_position", "answer"))
+        qend_acts = (
+            _question_end_sigma_acts(extraction_ds, model, tokenizer, cfg, components)
+            if sigma_position == "question_end" else None
+        )
         for c in components:
             acts_c = torch.tensor(ds_acts[c]).float()
             if acts_c.dim() == 3:
@@ -183,7 +188,8 @@ def _refine_gate_training(experiment, model, tokenizer, extraction_ds, train_ds,
             dir_c = steering_vectors[c].float()
             if dir_c.dim() == 2:
                 dir_c = dir_c.unsqueeze(1)
-            sigma_c = head_sigma(acts_c, F.normalize(dir_c, dim=-1))
+            sigma_src = qend_acts[c] if qend_acts is not None else acts_c
+            sigma_c = head_sigma(sigma_src, F.normalize(dir_c, dim=-1))
             for layer in range(sigma_c.shape[0]):
                 key = f"{c}_{layer}"
                 if key in model.hooks:
@@ -219,6 +225,43 @@ _ITI_MASK_LOGIT = 10.0
 def _inv_softplus(y: Tensor) -> Tensor:
     """softplus⁻¹: the raw_scale whose softplus equals the per-head magnitude ``y`` (= α·σ)."""
     return torch.log(torch.expm1(y.clamp_min(1e-6)))
+
+
+def _question_end_sigma_acts(extraction_ds, model, tokenizer, config, components):
+    """honest_llama-faithful σ population (``iti_sigma_position="question_end"``).
+
+    honest_llama measures ``proj_val_std`` on its ``tqa_gen_end_q`` activation bank — the residual at
+    a *question-end* position (``"Q: {q} A: {ans} Q: {rand_q}"`` last token), NOT the answer-token
+    activation. The answer-token activation our default extraction reads varies wildly with the answer
+    text, so its std (and thus α·σ) is several× larger and over-steers generation into gibberish; the
+    question-end activation is far more uniform, so α·σ stays modest (matches their ~mean 2.2 / max 6).
+    Here we approximate that bank with the last token of the question-only prompt (``apply_template(q,
+    None)`` = the actual generation/steer position), over the unique extraction questions.
+    """
+    from datasets import Dataset
+
+    from sparse_steer.core.extract import collect_activations
+    from sparse_steer.utils.tokenize import apply_template
+
+    template = config.get("extraction_template") or config.get("prompt_template", "chat")
+    seen: dict[int, str] = {}
+    for qid, q in zip(extraction_ds["question_id"], extraction_ds["question"]):
+        if qid not in seen:
+            seen[qid] = q
+    texts = [apply_template(tokenizer, q, None, template=template) for q in seen.values()]
+    qds = Dataset.from_dict({"text": texts})
+    with model.steering_disabled():
+        qacts, _ = collect_activations(
+            qds, model, tokenizer, targets=components,
+            batch_size=int(config.get("extract_batch_size", 8)), token_position="last",
+        )
+    out: dict[str, Tensor] = {}
+    for c in components:
+        a = torch.tensor(qacts[c]).float()
+        if a.dim() == 3:  # residual/mlp (n, L, D) → (n, L, 1, D)
+            a = a.unsqueeze(2)
+        out[c] = a
+    return out
 
 
 def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_ds, output_dir):
@@ -260,6 +303,17 @@ def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_d
     # Deploy the unit mass-mean directions; σ is measured along those same unit directions.
     model.set_all_vectors(steering_vectors, normalize=True)
 
+    # σ population (iti_sigma_position): "answer" (default = current sparse_steer) measures σ on the
+    # extraction answer-token activations; "question_end" measures it on the question-end activations
+    # (honest_llama's tqa_gen_end_q analogue) — see _question_end_sigma_acts. Head SELECTION always
+    # uses the discriminative answer activations (the truthful-vs-false probe signal); only the σ
+    # MAGNITUDE population changes.
+    sigma_position = str(config.get("iti_sigma_position", "answer"))
+    qend_acts = (
+        _question_end_sigma_acts(extraction_ds, model, tokenizer, config, components)
+        if sigma_position == "question_end" else None
+    )
+
     # Per target: probe val-accuracy + σ per site, normalised to (L, H_c) with H_c=1 for single-gate
     # (residual/mlp) targets. Then a GLOBAL top-K across all sites of all targets.
     scale = float(config.get("iti_scale", 15.0))  # ITI's α: a magnitude multiplier (not our log_alpha)
@@ -273,8 +327,9 @@ def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_d
         if dir_c.dim() == 2:                       # (L, D) → (L, 1, D)
             dir_c = dir_c.unsqueeze(1)
         dir_c = F.normalize(dir_c, dim=-1)
-        acc_c = fit_head_probes(acts_c, positive)  # (L, H_c)
-        sigma_by_c[c] = head_sigma(acts_c, dir_c)  # (L, H_c)
+        acc_c = fit_head_probes(acts_c, positive)  # (L, H_c) — selection on the answer activations
+        sigma_src = qend_acts[c] if qend_acts is not None else acts_c
+        sigma_by_c[c] = head_sigma(sigma_src, dir_c)  # (L, H_c)
         Lc, Hc = acc_c.shape
         for layer in range(Lc):
             for gate in range(Hc):
@@ -314,10 +369,12 @@ def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_d
     mags = [scale * float(sigma_by_c[c][layer, gate]) for _, c, layer, gate in sites[:k]]
     mag_mean = sum(mags) / len(mags) if mags else 0.0
     mag_max = max(mags) if mags else 0.0
+    sel_heads = sorted((c, layer, gate) for _, c, layer, gate in sites[:k])
     print(
         f"  ITI: {k} sites selected across {components} (mean top-K probe val-acc {top_acc:.3f}); "
-        f"α·σ magnitude mean={mag_mean:.2f} max={mag_max:.2f} (α={scale})"
+        f"σ_population={sigma_position}; α·σ magnitude mean={mag_mean:.2f} max={mag_max:.2f} (α={scale})"
     )
+    print(f"  ITI selected sites: {sel_heads}")
     cache_info["iti"] = {"status": "miss", "n_sites": k, "top_val_acc": top_acc, "components": components}
     return model, {}, cache_info
 
