@@ -5,29 +5,23 @@ model's permanent steering hooks and exposes named steering position modes plus
 optional per-step log-softmax capture, so a task that needs only text and a task
 that needs the sampling distributions share one code path.
 
-Steering modes:
+Steering modes (the shared token-position vocabulary; pf = final prompt token):
 
-- ``"all"``  — steer every forward at every position (the default; e.g. truthfulqa).
-- ``"last"`` — steer only the final prompt/input token (the boundary before generation
-  begins). Fires on the prompt forward only; decode steps run unsteered (the steered
-  prompt key/values are cached and attended to thereafter).
-- ``"last_onwards"`` — steer the prompt's last token and all generated-token
-  positions: edits the prompt's last token at step 0, then the current generated
-  token at each later step.
-- ``"prompt"`` — steer only the step-0 prompt forward, confined to ``steer_prompt_mask``;
-  decode steps run with steering disabled. The prompt-only steer therefore fires on
-  exactly one forward — the steered prompt key/values are cached and attended to by
-  later decode steps.
+- ``"prompt"``       — every input token ``0..pf``. KV-gen: steer the step-0 prompt forward only
+  (its steered K/V are cached and attended to by every later token); decode runs unsteered.
+- ``"prompt_final"`` — only ``pf`` (the last input token). KV-gen: step-0 forward, that one position.
+- ``"completion"``   — every generated token (``pos > pf``), excluding EOS. KV-gen: each decode step
+  steers its new token (skipping a generated EOS); the step-0 prompt is NOT steered.
+- ``"all"``          — every real non-EOS token (``= prompt ∪ completion``).
+- ``"off"``          — no steering (clean / reference rollouts).
 
 Generation always uses the TransformerLens KV cache (step 0 forwards the full prompt;
 each later step forwards only the new token and attends to the cache).
-- ``"off"`` — no steering (clean / reference rollouts).
 
 To get RNG-matched rollouts (same uniform draws per step so only the logits differ),
 build one sampler per call with the same seed; see :func:`make_sampling_sampler`.
 """
 
-import contextlib
 from collections.abc import Callable, Collection
 
 import torch
@@ -74,7 +68,6 @@ def generate(
     sampler: Sampler | None = None,
     capture_log_softmax: bool = False,
     steer: str = "all",
-    steer_prompt_mask: Tensor | None = None,
     eos_token_ids: Collection[int] | None = None,
 ) -> tuple[Tensor, Tensor] | tuple[Tensor, Tensor, Tensor]:
     """Decode ``max_new_tokens`` tokens, returning the newly generated ids ``(B, T)``
@@ -95,7 +88,7 @@ def generate(
     """
     if sampler is None:
         sampler = make_greedy_sampler()
-    valid_steer_modes = {"all", "last", "last_onwards", "prompt", "off"}
+    valid_steer_modes = {"all", "prompt", "prompt_final", "completion", "off"}
     if steer not in valid_steer_modes:
         raise ValueError(
             f"Unknown steer mode {steer!r}; use one of {sorted(valid_steer_modes)}."
@@ -105,9 +98,6 @@ def generate(
         if eos_token_ids
         else None
     )
-    if steer == "prompt" and steer_prompt_mask is None:
-        raise ValueError("steer='prompt' requires steer_prompt_mask")
-
     device = model.device
     tl = model.tl
     seq = input_ids.to(device)
@@ -118,24 +108,24 @@ def generate(
     def _step_ctx(step: int, inp: Tensor, inp_attention_mask: Tensor | None):
         if steer == "off":
             return model.steering_disabled()
-        if steer == "prompt":
-            # the steered prompt key/values are cached at step 0 and attended to thereafter
-            return (
-                model.steer_positions(steer_prompt_mask.to(device))
-                if step == 0
-                else model.steering_disabled()
-            )
-        if steer in ("last", "last_onwards"):
-            mask = (
-                inp_attention_mask.bool()
-                if inp_attention_mask is not None
-                else torch.ones(inp.shape, dtype=torch.bool, device=device)
-            )
-            if step == 0:
-                return model.steer_last_token(mask)  # steer the prompt's last token (cached)
-            # decode steps: "last" stops steering; "last_onwards" steers each generated token
-            return model.steering_disabled() if steer == "last" else model.steer_positions(mask)
-        return contextlib.nullcontext()  # "all"
+        mask = (
+            inp_attention_mask.bool()
+            if inp_attention_mask is not None
+            else torch.ones(inp.shape, dtype=torch.bool, device=device)
+        )
+        if step == 0:
+            # step 0 forwards the whole prompt (positions 0..pf); its steered K/V are cached.
+            if steer in ("prompt", "all"):
+                return model.steer_positions(mask)        # the whole prompt (0..pf)
+            if steer == "prompt_final":
+                return model.steer_last_token(mask)       # only the final prompt token (pf)
+            return model.steering_disabled()              # "completion": prompt is not steered
+        # decode steps each forward one generated token (position > pf)
+        if steer in ("completion", "all"):
+            if eos is not None:
+                mask = mask & ~(inp.unsqueeze(-1) == eos).any(-1)  # never steer a generated EOS
+            return model.steer_positions(mask)
+        return model.steering_disabled()                  # "prompt"/"prompt_final": decode unsteered
 
     new_tokens: list[Tensor] = []
     lsm_steps: list[Tensor] = []
@@ -229,7 +219,6 @@ def generate_text(
             new_toks, valid = generate(
                 model, enc["input_ids"], enc["attention_mask"], max_new_tokens,
                 sampler=sampler, steer=steer,
-                steer_prompt_mask=enc["attention_mask"].bool() if steer == "prompt" else None,
                 eos_token_ids=eos_ids or None,
             )
             # `valid` trims each row at its first end token; skip_special_tokens then drops

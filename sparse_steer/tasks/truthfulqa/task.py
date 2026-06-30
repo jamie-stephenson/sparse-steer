@@ -164,24 +164,26 @@ class TruthfulQATask(TaskSpec):
         ids = enc["input_ids"]
         attn = enc["attention_mask"]
         labels = ids.masked_fill(attn == 0, -100)  # ignore padding
-        for i, (pl, m) in enumerate(zip(plens, mask_prefix)):
-            if m:
-                labels[i, :pl] = -100  # mask the question prefix → score the completion only
-        # Steer the SAME positions during gate-training that eval steers (steer_token_position), so
-        # the gates are optimized for the intervention they are evaluated under. prompt_len-1 is the
-        # last prompt token (matches utils/eval.py steer_starts). "all" = every real token;
-        # "last_onwards" = last prompt token + completion (the answer span eval scores); "last" =
-        # just the last prompt token. Right-padded (padding_side="right"), so real tokens are [0:sum).
-        steer_pos = config.get("steer_token_position", "all")
-        steer_mask = attn == 1
-        if steer_pos in ("last", "last_onwards"):
-            steer_mask = torch.zeros_like(attn, dtype=torch.bool)
-            for i, pl in enumerate(plens):
-                start = max(pl - 1, 0)
-                if steer_pos == "last_onwards":
-                    steer_mask[i, start : int(attn[i].sum())] = True
-                else:
-                    steer_mask[i, start] = True
+        from sparse_steer.utils.positions import positions_mask
+
+        plens_t = torch.tensor(plens, dtype=torch.long)
+        eos_id = tokenizer.eos_token_id
+        # The loss scores only its position mask → everything else -100. Ranking terms always score
+        # the completion; ce honours ce_positions (default "completion"). Same vocabulary as extraction
+        # and steering (prompt / prompt_final / completion / all), so train/score/eval positions agree.
+        ce_pos = config.get("ce_positions", "completion")
+        for i, term in enumerate(seq_term):
+            keep = positions_mask(
+                ce_pos if term == "ce" else "completion",
+                attn[i : i + 1], plens_t[i : i + 1],
+                input_ids=ids[i : i + 1], eos_id=eos_id,
+            )[0]
+            labels[i, ~keep] = -100
+        # Steer the SAME positions during gate-training that eval steers — the shared mask vocabulary.
+        steer_mask = positions_mask(
+            config.get("steer_token_position", "all"),
+            attn, plens_t, input_ids=ids, eos_id=eos_id,
+        )
         loss_term_rows = {
             t: torch.tensor([s == t for s in seq_term], dtype=torch.bool, device=device)
             for t in by_term

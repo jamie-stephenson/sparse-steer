@@ -40,10 +40,12 @@ def _forward_batches(
     here (a ``@no_grad`` decorator on a generator function would not).
     """
     bs = batch_size or max(len(texts), 1)
-    # "last" = steer only the final prompt/input token (the boundary before the answer/generation);
-    # "last_onwards" = that token and all following — in a teacher-forced MC pass this covers the
-    # answer span, so the steered MC log-probs (hence MC1/MC2) DO move. No separate MC arg needed.
-    valid_steer_modes = {"all", "last", "last_onwards"}
+    from sparse_steer.utils.positions import POSITION_NAMES, positions_mask
+
+    if steer_token_position not in POSITION_NAMES:
+        raise ValueError(
+            f"Unknown steer_token_position {steer_token_position!r}; use one of {sorted(POSITION_NAMES)}."
+        )
 
     def _start_tensor(start: int, n: int) -> Tensor:
         if steer_start_positions is None:
@@ -62,19 +64,21 @@ def _forward_batches(
             tokenizer, texts[s : s + bs],
             add_special_tokens=add_special_tokens, padding_side=padding_side,
         ).to(model.device)
-        if steer_token_position not in valid_steer_modes:
-            raise ValueError(
-                f"Unknown steer_token_position {steer_token_position!r}; "
-                f"use one of {sorted(valid_steer_modes)}."
+        n = enc["input_ids"].size(0)
+        if not hasattr(model, "steer_positions"):
+            steer_ctx = nullcontext()  # base model — no steering
+        else:
+            # prompt_lens = pf + 1 (pf = steer start = prefix_len - 1); "all" ignores prompt_lens
+            plens = (
+                _start_tensor(s, n) + 1
+                if steer_start_positions is not None
+                else torch.zeros(n, dtype=torch.long, device=model.device)
             )
-        if steer_token_position == "all" or not hasattr(model, "steer_last_token"):
-            steer_ctx = nullcontext()
-        elif steer_token_position == "last":
-            starts = _start_tensor(s, enc["input_ids"].size(0))
-            steer_ctx = model.steer_token_positions(enc["attention_mask"], starts)
-        elif steer_token_position == "last_onwards":
-            starts = _start_tensor(s, enc["input_ids"].size(0))
-            steer_ctx = model.steer_token_onwards(enc["attention_mask"], starts)
+            mask = positions_mask(
+                steer_token_position, enc["attention_mask"], plens,
+                input_ids=enc["input_ids"], eos_id=tokenizer.eos_token_id,
+            )
+            steer_ctx = model.steer_positions(mask)
         with torch.no_grad(), steer_ctx:
             logits = model(**enc).logits  # (batch, seq, vocab)
         yield enc, logits
@@ -113,15 +117,19 @@ def _answer_token_logprobs(
         steer_start_positions=steer_starts,
     ):
         n = enc["input_ids"].size(0)
-        prefix_t = torch.tensor(prefix_lens[seen : seen + n], device=device).unsqueeze(1)
+        plens = torch.tensor(prefix_lens[seen : seen + n], device=device)
         seen += n
         log_probs = torch.log_softmax(logits[:, :-1], dim=-1)
         target_ids = enc["input_ids"][:, 1:]
         token_log_probs = log_probs.gather(2, target_ids.unsqueeze(-1)).squeeze(-1)
-        # answer tokens only (skip the per-row question prefix and padding)
-        answer_mask = enc["attention_mask"][:, 1:].clone()
-        seq_idx = torch.arange(answer_mask.size(1), device=device)
-        answer_mask = answer_mask * (seq_idx >= prefix_t - 1)
+        # score the COMPLETION only (answer span, EOS-excluded) via the shared position mask,
+        # shifted by one to align with the predicted (next) tokens.
+        from sparse_steer.utils.positions import positions_mask
+        comp = positions_mask(
+            "completion", enc["attention_mask"], plens,
+            input_ids=enc["input_ids"], eos_id=tokenizer.eos_token_id,
+        )
+        answer_mask = comp[:, 1:].to(token_log_probs.dtype)
         sums.append((token_log_probs * answer_mask).sum(dim=-1))
         counts.append(answer_mask.sum(dim=-1))
     return torch.cat(sums), torch.cat(counts)
