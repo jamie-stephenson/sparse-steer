@@ -80,9 +80,14 @@ def format_extraction_dataset(
         positives = [c.strip() for c, l in zip(choices, labels) if l]
         negatives = [c.strip() for c, l in zip(choices, labels) if not l]
 
+        # the templated question (generation prompt) is an exact token prefix of every templated
+        # Q+A here, so its length marks where the answer begins (pf = prompt_len - 1).
+        prompt_len = len(tokenizer(apply_template(tokenizer, question, template=template))["input_ids"])
+
         def row(answer: str, positive: bool) -> dict[str, Any]:
             return {
                 "text": apply_template(tokenizer, question, answer, template=template),
+                "prompt_len": prompt_len,
                 "positive": positive,
                 "question_id": question_id,
                 # raw question, so the ITI refinement can (optionally) build the question-end
@@ -103,7 +108,7 @@ def format_extraction_dataset(
     if rows:
         return Dataset.from_list(rows)
     return Dataset.from_dict(
-        {"text": [], "positive": [], "question_id": [], "question": []}
+        {"text": [], "prompt_len": [], "positive": [], "question_id": [], "question": []}
     )
 
 
