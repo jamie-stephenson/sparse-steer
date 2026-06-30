@@ -167,6 +167,8 @@ def _train_loop(
     if tracker is not None:
         tracker.snapshot(0)
 
+    if torch.cuda.is_available():
+        print(f"[MEMPROF] pre-train alloc={torch.cuda.memory_allocated()/1e9:.1f}G reserved={torch.cuda.memory_reserved()/1e9:.1f}G", flush=True)
     step = 0
     for _ in range(num_epochs):
         order = torch.randperm(len(rows), generator=generator).tolist()
@@ -187,6 +189,8 @@ def _train_loop(
                     input_ids=batch["input_ids"],
                     attention_mask=batch["attention_mask"],
                 ).logits
+            if step == 0 and torch.cuda.is_available():
+                print(f"[MEMPROF] after-FWD alloc={torch.cuda.memory_allocated()/1e9:.1f}G peak={torch.cuda.max_memory_allocated()/1e9:.1f}G logits={tuple(logits.shape)}", flush=True)
             loss = composed_objective(model, batch, logits, config)
             lam = l0_lambda * l0_schedule(step, max_steps)
             if lam > 0:
@@ -194,6 +198,8 @@ def _train_loop(
 
             optimizer.zero_grad()
             loss.backward()
+            if step == 0 and torch.cuda.is_available():
+                print(f"[MEMPROF] after-BWD peak={torch.cuda.max_memory_allocated()/1e9:.1f}G", flush=True)
             torch.nn.utils.clip_grad_norm_(params, 1.0)
             optimizer.step()
             scheduler.step()
