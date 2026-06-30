@@ -36,12 +36,6 @@ extraction_fraction: 1.0
 # Default (in code) is "answer" = current sparse_steer.
 iti_sigma_position: gen_end_q
 
-# MC steering position. honest_llama's ITI_Intervener steers only b[0,-1] per forward, so its
-# teacher-forced MC log-probs are untouched → MC is flat (baseline == ITI). Our default last_onwards
-# steers every answer token → MC drifts. "last" reproduces their flat MC; generation still steers each
-# new token (steer_token_position=last_onwards). Default (in code) None → same as steer_token_position.
-mc_steer_token_position: last
-
 # ITI knobs (sweepable)
 iti_topk: 48                  # top-K sites by probe val-accuracy (a site = an attention head OR a
                               # residual/mlp layer — not necessarily heads; ITI paper K≈48)

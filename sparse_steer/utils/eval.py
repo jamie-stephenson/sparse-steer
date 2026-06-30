@@ -40,11 +40,10 @@ def _forward_batches(
     here (a ``@no_grad`` decorator on a generator function would not).
     """
     bs = batch_size or max(len(texts), 1)
-    # "last" = steer only the last REAL token of each (right-padded) Q+A sequence — honest_llama's
-    # ITI_Intervener (b[0,-1] per forward). In a teacher-forced MC pass it touches only the unscored
-    # next-token prediction, so the answer-span log-probs (hence MC1/MC2) are UNCHANGED → flat MC,
-    # matching their reference. Needs no start positions.
-    valid_steer_modes = {"all", "last", "last_input", "last_onwards"}
+    # "last" = steer only the final prompt/input token (the boundary before the answer/generation);
+    # "last_onwards" = that token and all following — in a teacher-forced MC pass this covers the
+    # answer span, so the steered MC log-probs (hence MC1/MC2) DO move. No separate MC arg needed.
+    valid_steer_modes = {"all", "last", "last_onwards"}
 
     def _start_tensor(start: int, n: int) -> Tensor:
         if steer_start_positions is None:
@@ -71,8 +70,6 @@ def _forward_batches(
         if steer_token_position == "all" or not hasattr(model, "steer_last_token"):
             steer_ctx = nullcontext()
         elif steer_token_position == "last":
-            steer_ctx = model.steer_last_token(enc["attention_mask"])
-        elif steer_token_position == "last_input":
             starts = _start_tensor(s, enc["input_ids"].size(0))
             steer_ctx = model.steer_token_positions(enc["attention_mask"], starts)
         elif steer_token_position == "last_onwards":

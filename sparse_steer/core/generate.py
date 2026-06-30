@@ -8,8 +8,8 @@ that needs the sampling distributions share one code path.
 Steering modes:
 
 - ``"all"``  — steer every forward at every position (the default; e.g. truthfulqa).
-- ``"last_input"`` — steer only the final prompt/input token. With KV-cached
-  generation this fires on the prompt forward only; decode steps run unsteered.
+- ``"last"`` — steer only the final prompt/input token (the boundary before generation
+  begins). With KV-cached generation this fires on the prompt forward only; decode steps run unsteered.
 - ``"last_onwards"`` — steer the prompt's last token and all generated-token
   positions. With KV caching this edits the prompt's last token at step 0, then
   the current generated token at each later step; without KV caching it masks the
@@ -93,7 +93,7 @@ def generate(
     """
     if sampler is None:
         sampler = make_greedy_sampler()
-    valid_steer_modes = {"all", "last_input", "last_onwards", "prompt", "off"}
+    valid_steer_modes = {"all", "last", "last_onwards", "prompt", "off"}
     if steer not in valid_steer_modes:
         raise ValueError(
             f"Unknown steer mode {steer!r}; use one of {sorted(valid_steer_modes)}."
@@ -128,7 +128,7 @@ def generate(
             if step == 0:
                 return model.steer_positions(steer_prompt_mask.to(device))
             return model.steering_disabled()
-        if steer == "last_input":
+        if steer == "last":
             mask = (
                 inp_attention_mask.bool()
                 if inp_attention_mask is not None
