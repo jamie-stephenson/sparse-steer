@@ -25,6 +25,10 @@ init_raw_scale: 0.0            # overwritten per-head with inv_softplus(α·σ) 
 #     method=iti task=truthfulqa extraction_mcq_mode=mc2 extraction_fraction=1.0
 extraction_mcq_mode: mc2
 extraction_fraction: 1.0
+# honest_llama uses the FULL train fold for BOTH com directions and head-select (full overlap), so
+# disjoint=false (extraction_fraction then ignored). Like the keys above, config.yaml (true) sits AFTER
+# method in the defaults list and OVERRIDES this → pass on the CLI: disjoint_extract_refine_data=false
+disjoint_extract_refine_data: false
 
 # σ population for the α·σ magnitude. honest_llama measures proj_val_std on its tqa_gen_end_q bank
 # ("Q: {q} A: {ans} Q: {rand_q}", a random trailing question, last token), NOT the answer-token

@@ -300,6 +300,7 @@ def get_truthfulqa_datasets(
     extraction_mcq_mode: Literal["mc0", "mc1", "mc2"] = "mc1",
     ce_term_mcq_mode: Literal["mc0", "mc1", "mc2"] = "mc1",
     extraction_fraction: float = 0.5,
+    disjoint_extract_refine_data: bool = True,
     seed: int | None = None,
     fold: int = 0,
     num_folds: int = 2,
@@ -335,14 +336,21 @@ def get_truthfulqa_datasets(
     def records_for(qids: set[int]) -> list[tuple[int, dict[str, Any]]]:
         return [(qid, raw[qid]) for qid in sorted(qids)]
 
-    # Partition train question IDs into extraction and gate-train subsets.
+    # Partition the train half into extraction (directions) and refine (gate-train) subsets.
+    # disjoint_extract_refine_data=True (default): the two are DISJOINT, split by extraction_fraction.
+    # =False: the FULL train half feeds BOTH extraction AND refinement (full overlap — e.g. honest_llama
+    # ITI computes com directions + selects heads on the same questions; extraction_fraction is ignored).
     train_qids = list(splits["train"])
-    n_extraction = round(len(train_qids) * extraction_fraction)
-    ext_rng = np.random.RandomState(seed if seed is not None else 42)
-    extraction_qids = set(
-        ext_rng.choice(train_qids, size=n_extraction, replace=False).tolist()
-    )
-    gate_train_qids = splits["train"] - extraction_qids
+    if disjoint_extract_refine_data:
+        n_extraction = round(len(train_qids) * extraction_fraction)
+        ext_rng = np.random.RandomState(seed if seed is not None else 42)
+        extraction_qids = set(
+            ext_rng.choice(train_qids, size=n_extraction, replace=False).tolist()
+        )
+        gate_train_qids = splits["train"] - extraction_qids
+    else:
+        extraction_qids = set(splits["train"])
+        gate_train_qids = set(splits["train"])
 
     extraction_ds = format_extraction_dataset(
         records_for(extraction_qids), tokenizer, extraction_mcq_mode,

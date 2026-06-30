@@ -19,6 +19,11 @@ data_seed: null
 device: mps
 eval_batch_size: 32
 extraction_fraction: 0.5
+# Extraction/refinement data overlap on the LoFiT train half:
+#   true (default) = DISJOINT extraction (directions) + refine (gate-train) subsets, split by extraction_fraction
+#   false          = full OVERLAP: the whole train half feeds BOTH extraction and refinement (extraction_fraction
+#                    ignored; e.g. honest_llama ITI builds com directions + selects heads on the same questions)
+disjoint_extract_refine_data: true
 
 # TruthfulQA LoFiT cross-validation split (current behaviour = fold 0 of 2, val_ratio 0.2).
 # honest_llama averages num_folds=2; run fold=0 then fold=1 and average for its 2-fold reference.

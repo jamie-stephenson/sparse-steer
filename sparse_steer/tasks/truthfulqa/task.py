@@ -37,6 +37,7 @@ class TruthfulQATask(TaskSpec):
             extraction_mcq_mode=config.get("extraction_mcq_mode", "mc1"),
             ce_term_mcq_mode=config.get("ce_term_mcq_mode", "mc1"),
             extraction_fraction=config.extraction_fraction,
+            disjoint_extract_refine_data=bool(config.get("disjoint_extract_refine_data", True)),
             seed=config.get("data_seed"),
             # LoFiT cross-validation fold (default 0/2/0.2 = current behaviour). honest_llama
             # averages num_folds=2; run fold=0 then fold=1 and average to match its 2-fold reference.
@@ -196,6 +197,14 @@ class TruthfulQATask(TaskSpec):
                     "num_folds": int(config.get("num_folds", 2)),
                 }
                 if int(config.get("fold", 0)) != 0 or int(config.get("num_folds", 2)) != 2
+                else {}
+            ),
+            # extraction/refine data overlap: disjoint subsets (default) vs full overlap. Changes BOTH
+            # the extraction subset and the gate-train subset, so it keys every artifact. Keyed only when
+            # non-default (False) so existing disjoint-split caches stay valid.
+            **(
+                {"disjoint_extract_refine_data": False}
+                if not bool(config.get("disjoint_extract_refine_data", True))
                 else {}
             ),
         }
