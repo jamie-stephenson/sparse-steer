@@ -41,6 +41,11 @@ use_wandb: false
 inspect_evals: []
 inspect_eval_limit: null
 
+# Subsample the TruthfulQA eval set to N random questions (drawn from the test fold with a fixed
+# fold-keyed seed → the SAME N across runs) for fast hparam sweeps. null = full eval set. Keys the
+# eval artifact cache when set (subset evals never collide with full-set evals).
+eval_subset_size: null
+
 # NB the defaults list ends with _self_, so any key set HERE overrides the method/task group
 # configs. So method-owned knobs are deliberately NOT set here — they default in code (via
 # config.get) and are set in configs/method/*.yaml so a method can actually choose them:

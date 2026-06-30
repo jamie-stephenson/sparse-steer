@@ -306,6 +306,7 @@ def get_truthfulqa_datasets(
     num_folds: int = 2,
     val_ratio: float = 0.2,
     eval_full_set: bool = False,
+    eval_subset_size: int | None = None,
     with_kl_rows: bool = False,
     with_contrastive: bool = False,
     max_n_neg: int | None = None,
@@ -400,6 +401,13 @@ def get_truthfulqa_datasets(
     # eval_full_set: score ALL 817 questions (match honest_llama's full-set eval; for the
     # unsteered/ITI baseline only — sparse must keep the held-out test fold to avoid leakage).
     eval_qids = set(range(len(raw))) if eval_full_set else splits["test"]
+    # eval_subset_size: sample N from the eval set with a fixed (fold-keyed) seed — the SAME N for
+    # every config (fast hparam sweeps), drawn only from the chosen eval set (no extra leakage vs test).
+    if eval_subset_size is not None and eval_subset_size < len(eval_qids):
+        sub_rng = np.random.RandomState(20000 + int(fold))
+        eval_qids = set(
+            sub_rng.choice(sorted(eval_qids), size=int(eval_subset_size), replace=False).tolist()
+        )
     eval_ds = format_eval_dataset(records_for(eval_qids))
 
     return extraction_ds, gate_train_ds, eval_ds

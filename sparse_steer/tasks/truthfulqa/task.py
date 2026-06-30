@@ -49,6 +49,11 @@ class TruthfulQATask(TaskSpec):
             max_n_neg=int(mxn) if mxn is not None else None,
             uniform_duplicate=bool(config.get("n_neg_uniform_duplicate", True)),
             eval_full_set=bool(config.get("eval_full_set", False)),
+            eval_subset_size=(
+                int(config.get("eval_subset_size"))
+                if config.get("eval_subset_size", None) is not None
+                else None
+            ),
             template=config.get("prompt_template", "chat"),
             extraction_template=config.get("extraction_template", None),
         )
@@ -302,6 +307,8 @@ class TruthfulQATask(TaskSpec):
             }
             if artifact_type == ArtifactType.STEERED_EVAL:
                 fields["generative_eval"] = config.get("generative_eval", False)
+                if config.get("eval_subset_size", None) is not None:
+                    fields["eval_subset_size"] = int(config.get("eval_subset_size"))
                 if config.get("generative_eval", False):
                     fields["gen_max_new_tokens"] = int(config.get("gen_max_new_tokens", 64))
                     fields["gen_batch_size"] = int(config.get("gen_batch_size", 8))
@@ -311,6 +318,11 @@ class TruthfulQATask(TaskSpec):
             fields = {
                 **base,
                 "generative_eval": config.get("generative_eval", False),
+                **(
+                    {"eval_subset_size": int(config.get("eval_subset_size"))}
+                    if config.get("eval_subset_size", None) is not None
+                    else {}
+                ),
             }
             if config.get("generative_eval", False):
                 fields["gen_max_new_tokens"] = int(config.get("gen_max_new_tokens", 64))
