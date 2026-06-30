@@ -38,6 +38,11 @@ class TruthfulQATask(TaskSpec):
             ce_term_mcq_mode=config.get("ce_term_mcq_mode", "mc1"),
             extraction_fraction=config.extraction_fraction,
             seed=config.get("data_seed"),
+            # LoFiT cross-validation fold (default 0/2/0.2 = current behaviour). honest_llama
+            # averages num_folds=2; run fold=0 then fold=1 and average to match its 2-fold reference.
+            fold=int(config.get("fold", 0)),
+            num_folds=int(config.get("num_folds", 2)),
+            val_ratio=float(config.get("val_ratio", 0.2)),
             with_kl_rows=kl_used,
             with_contrastive=contrastive_used,
             max_n_neg=int(mxn) if mxn is not None else None,
@@ -186,6 +191,17 @@ class TruthfulQATask(TaskSpec):
         base = {
             "model_dtype": config.get("model_dtype", "float16"),
             "prompt_template": config.get("prompt_template", "chat"),
+            # the cross-validation fold changes both the extraction subset and the eval question set,
+            # so it keys every artifact (else fold 0 and fold 1 would collide in the cache). Keyed
+            # only when non-default so existing single-fold caches stay valid.
+            **(
+                {
+                    "fold": int(config.get("fold", 0)),
+                    "num_folds": int(config.get("num_folds", 2)),
+                }
+                if int(config.get("fold", 0)) != 0 or int(config.get("num_folds", 2)) != 2
+                else {}
+            ),
         }
         if artifact_type == ArtifactType.STEERING_VECTORS:
             return {
