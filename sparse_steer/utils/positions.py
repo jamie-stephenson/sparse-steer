@@ -1,0 +1,58 @@
+"""The single token-position vocabulary shared by extraction, steering, and the CE/contrastive
+objective. A position name maps to a boolean ``(batch, seq)`` mask; the SAME mask defines which
+positions a direction is averaged over (extraction), which positions are steered (steering), and
+which positions the loss is scored over (CE / contrastive).
+
+``pf = prompt_len - 1`` = the final prompt token — the last token the model sees before generating.
+
+- ``"prompt"``        positions ``0..pf``            — the whole input, incl. the final prompt token
+- ``"prompt_final"``  position ``pf``                — exactly the final prompt token
+- ``"completion"``    positions ``pf+1..`` (no EOS)  — strictly AFTER the prompt (disjoint from prompt)
+- ``"all"``           every real token (no EOS)      — ``= "prompt" ∪ "completion"``
+
+EOS is excluded from ``"completion"`` and ``"all"``: nothing is generated after EOS, so its
+activation is not a position the model steers at, reads a direction from, or is scored on.
+``"prompt"`` / ``"prompt_final"`` fall before any EOS, so the EOS filter is moot there.
+"""
+
+import torch
+from torch import Tensor
+
+POSITION_NAMES = ("prompt", "prompt_final", "completion", "all")
+
+
+def positions_mask(
+    name: str,
+    attention_mask: Tensor,
+    prompt_lens: Tensor,
+    *,
+    input_ids: Tensor | None = None,
+    eos_id: int | None = None,
+) -> Tensor:
+    """Boolean ``(batch, seq)`` mask for ``name`` — see the module docstring.
+
+    ``prompt_lens`` is ``(batch,)``: the number of prompt tokens per row (``pf = prompt_len - 1``).
+    ``input_ids`` + ``eos_id`` drop EOS from ``"completion"``/``"all"``; if either is None the EOS
+    filter is skipped (callers whose sequences carry no trailing EOS, e.g. qa_plain, may omit it).
+    Works for left- or right-padded batches (``real`` excludes padding regardless of side).
+    """
+    if name not in POSITION_NAMES:
+        raise ValueError(f"unknown token position {name!r}; use one of {POSITION_NAMES}")
+    real = attention_mask.bool()
+    b, s = real.shape
+    pos = torch.arange(s, device=real.device).unsqueeze(0).expand(b, s)
+    pf = (prompt_lens.to(real.device).long() - 1).clamp_min(0).unsqueeze(1)  # (b, 1)
+    if name == "prompt":
+        return real & (pos <= pf)
+    if name == "prompt_final":
+        return real & (pos == pf)
+    if input_ids is not None and eos_id is not None:
+        not_eos = input_ids.to(real.device) != eos_id
+    else:
+        not_eos = torch.ones_like(real)
+    if name == "completion":
+        return real & not_eos & (pos > pf)
+    return real & not_eos  # "all"
+
+
+__all__ = ["POSITION_NAMES", "positions_mask"]
