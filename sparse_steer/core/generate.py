@@ -9,15 +9,18 @@ Steering modes:
 
 - ``"all"``  — steer every forward at every position (the default; e.g. truthfulqa).
 - ``"last"`` — steer only the final prompt/input token (the boundary before generation
-  begins). With KV-cached generation this fires on the prompt forward only; decode steps run unsteered.
+  begins). Fires on the prompt forward only; decode steps run unsteered (the steered
+  prompt key/values are cached and attended to thereafter).
 - ``"last_onwards"`` — steer the prompt's last token and all generated-token
-  positions. With KV caching this edits the prompt's last token at step 0, then
-  the current generated token at each later step; without KV caching it masks the
-  prompt-final/generated suffix on every full forward.
+  positions: edits the prompt's last token at step 0, then the current generated
+  token at each later step.
 - ``"prompt"`` — steer only the step-0 prompt forward, confined to ``steer_prompt_mask``;
-  decode steps run with steering disabled. With KV caching the prompt-only steer
-  therefore fires on exactly one forward — the steered prompt key/values are cached
-  and attended to by later decode steps.
+  decode steps run with steering disabled. The prompt-only steer therefore fires on
+  exactly one forward — the steered prompt key/values are cached and attended to by
+  later decode steps.
+
+Generation always uses the TransformerLens KV cache (step 0 forwards the full prompt;
+each later step forwards only the new token and attends to the cache).
 - ``"off"`` — no steering (clean / reference rollouts).
 
 To get RNG-matched rollouts (same uniform draws per step so only the logits differ),
@@ -72,7 +75,6 @@ def generate(
     capture_log_softmax: bool = False,
     steer: str = "all",
     steer_prompt_mask: Tensor | None = None,
-    use_kv_cache: bool = True,
     eos_token_ids: Collection[int] | None = None,
 ) -> tuple[Tensor, Tensor] | tuple[Tensor, Tensor, Tensor]:
     """Decode ``max_new_tokens`` tokens, returning the newly generated ids ``(B, T)``
@@ -111,49 +113,28 @@ def generate(
     seq = input_ids.to(device)
     attn = attention_mask.to(device) if attention_mask is not None else None
 
-    kv_cache = None
-    if use_kv_cache:
-        kv_cache = TransformerLensKeyValueCache.init_cache(tl.cfg, device, seq.shape[0])
-    if attn is not None:
-        initial_last = model.last_token_mask(attn).long().argmax(dim=1)
-    else:
-        initial_last = torch.full(
-            (seq.shape[0],), seq.shape[1] - 1, dtype=torch.long, device=device
-        )
+    kv_cache = TransformerLensKeyValueCache.init_cache(tl.cfg, device, seq.shape[0])
 
     def _step_ctx(step: int, inp: Tensor, inp_attention_mask: Tensor | None):
         if steer == "off":
             return model.steering_disabled()
         if steer == "prompt":
+            # the steered prompt key/values are cached at step 0 and attended to thereafter
+            return (
+                model.steer_positions(steer_prompt_mask.to(device))
+                if step == 0
+                else model.steering_disabled()
+            )
+        if steer in ("last", "last_onwards"):
+            mask = (
+                inp_attention_mask.bool()
+                if inp_attention_mask is not None
+                else torch.ones(inp.shape, dtype=torch.bool, device=device)
+            )
             if step == 0:
-                return model.steer_positions(steer_prompt_mask.to(device))
-            return model.steering_disabled()
-        if steer == "last":
-            mask = (
-                inp_attention_mask.bool()
-                if inp_attention_mask is not None
-                else torch.ones(inp.shape, dtype=torch.bool, device=device)
-            )
-            if use_kv_cache:
-                return (
-                    model.steer_last_token(mask)
-                    if step == 0
-                    else model.steering_disabled()
-                )
-            return model.steer_token_positions(mask, initial_last)
-        if steer == "last_onwards":
-            mask = (
-                inp_attention_mask.bool()
-                if inp_attention_mask is not None
-                else torch.ones(inp.shape, dtype=torch.bool, device=device)
-            )
-            if use_kv_cache:
-                return (
-                    model.steer_last_token(mask)
-                    if step == 0
-                    else model.steer_positions(mask)
-                )
-            return model.steer_token_onwards(mask, initial_last)
+                return model.steer_last_token(mask)  # steer the prompt's last token (cached)
+            # decode steps: "last" stops steering; "last_onwards" steers each generated token
+            return model.steering_disabled() if steer == "last" else model.steer_positions(mask)
         return contextlib.nullcontext()  # "all"
 
     new_tokens: list[Tensor] = []
@@ -161,21 +142,15 @@ def generate(
     valid_steps: list[Tensor] = []
     finished = torch.zeros(seq.shape[0], dtype=torch.bool, device=device)
     for step in range(max_new_tokens):
-        extra: dict = {"return_type": "logits", "prepend_bos": False}
-        if use_kv_cache:
-            extra["past_kv_cache"] = kv_cache
-            if step == 0:
-                inp = seq
-                if attn is not None:
-                    extra["attention_mask"] = attn
-            else:
-                inp = seq[:, -1:]
-                if attn is not None:
-                    extra["attention_mask"] = attn.new_ones(attn.shape[0], 1)
-        else:
+        extra: dict = {"return_type": "logits", "prepend_bos": False, "past_kv_cache": kv_cache}
+        if step == 0:
             inp = seq
             if attn is not None:
                 extra["attention_mask"] = attn
+        else:
+            inp = seq[:, -1:]
+            if attn is not None:
+                extra["attention_mask"] = attn.new_ones(attn.shape[0], 1)
 
         with _step_ctx(step, inp, extra.get("attention_mask")):
             logits = tl(inp, **extra)
