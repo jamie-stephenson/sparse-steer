@@ -121,9 +121,9 @@ class TruthfulQATask(TaskSpec):
         loss scores the completion only; ``ce`` honours ``ce_positions`` (``all`` keeps the prefix),
         while ranking and ``kl`` terms always mask it. Emits a per-term row mask in ``loss_term_rows``
         and a ``<term>_group_sizes`` list (the K per question, correct-first) for any ranking term.
-        No ``steer_mask`` is emitted, so steering applies at every position (matching eval). Adding a
-        loss term needs no new collate — just format its rows with the tag (and a ``texts`` list if
-        it ranks candidates).
+        Emits a ``steer_mask`` from ``steer_token_position`` so gate-training steers the same
+        positions eval does (all / last_onwards / last). Adding a loss term needs no new collate —
+        just format its rows with the tag (and a ``texts`` list if it ranks candidates).
         """
         by_term: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for r in rows:
@@ -162,6 +162,21 @@ class TruthfulQATask(TaskSpec):
         for i, (pl, m) in enumerate(zip(plens, mask_prefix)):
             if m:
                 labels[i, :pl] = -100  # mask the question prefix → score the completion only
+        # Steer the SAME positions during gate-training that eval steers (steer_token_position), so
+        # the gates are optimized for the intervention they are evaluated under. prompt_len-1 is the
+        # last prompt token (matches utils/eval.py steer_starts). "all" = every real token;
+        # "last_onwards" = last prompt token + completion (the answer span eval scores); "last" =
+        # just the last prompt token. Right-padded (padding_side="right"), so real tokens are [0:sum).
+        steer_pos = config.get("steer_token_position", "all")
+        steer_mask = attn == 1
+        if steer_pos in ("last", "last_onwards"):
+            steer_mask = torch.zeros_like(attn, dtype=torch.bool)
+            for i, pl in enumerate(plens):
+                start = max(pl - 1, 0)
+                if steer_pos == "last_onwards":
+                    steer_mask[i, start : int(attn[i].sum())] = True
+                else:
+                    steer_mask[i, start] = True
         loss_term_rows = {
             t: torch.tensor([s == t for s in seq_term], dtype=torch.bool, device=device)
             for t in by_term
@@ -170,6 +185,7 @@ class TruthfulQATask(TaskSpec):
             "input_ids": ids.to(device),
             "attention_mask": attn.to(device),
             "labels": labels.to(device),
+            "steer_mask": steer_mask.to(device),
             "loss_term_rows": loss_term_rows,
         }
         for term, sizes in group_sizes.items():
@@ -230,6 +246,9 @@ class TruthfulQATask(TaskSpec):
                 "extraction_template": config.get(
                     "extraction_template", config.get("prompt_template", "chat")
                 ),
+                # gate-training now steers the positions named by steer_token_position (the collate's
+                # steer_mask), so it changes the trained gates and must key the artifact (was eval-only).
+                "steer_token_position": config.get("steer_token_position", "all"),
                 # σ-scaling identity: whether the per-site scale comes from α·σ, and the α — both
                 # change the steered model, so they key the artifact (else an α sweep hits stale
                 # caches). iti_scale only matters when σ-scaling is on, so key it only then.
@@ -283,7 +302,6 @@ class TruthfulQATask(TaskSpec):
             }
             if artifact_type == ArtifactType.STEERED_EVAL:
                 fields["generative_eval"] = config.get("generative_eval", False)
-                fields["steer_token_position"] = config.get("steer_token_position", "all")
                 if config.get("generative_eval", False):
                     fields["gen_max_new_tokens"] = int(config.get("gen_max_new_tokens", 64))
                     fields["gen_batch_size"] = int(config.get("gen_batch_size", 8))
