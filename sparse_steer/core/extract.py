@@ -57,10 +57,24 @@ def _make_gather_fn(
     batch_len: int,
     inputs: dict[str, Tensor],
     device: torch.device,
+    special_ids: "list[int] | None" = None,
 ) -> Callable[[Tensor], Tensor]:
     """Build a function reducing ``(batch, seq, *trailing)`` → ``(batch, *trailing)``."""
     if token_position == "last":
         indices = last_token_positions(mask)
+    elif token_position == "last_content":
+        # Last non-padding, non-special token — the answer's final CONTENT token rather than a
+        # trailing </s>. The chat template closes the assistant turn with EOS, so plain "last" reads
+        # the direction off the EOS position; "last_content" steps back past trailing special tokens.
+        # (For qa_plain/iti_qa, which have no trailing special, this is identical to "last".)
+        ids = inputs["input_ids"]
+        seq_len = ids.shape[-1]
+        content = mask.bool()
+        if special_ids:
+            sp = torch.tensor(sorted({int(s) for s in special_ids}), device=ids.device)
+            content = content & ~(ids.unsqueeze(-1) == sp).any(-1)
+        last_content = seq_len - 1 - content.long().flip(-1).argmax(-1)
+        indices = torch.where(content.any(-1), last_content, last_token_positions(mask))
     elif callable(token_position):
         indices = token_position(inputs)
     else:
@@ -125,7 +139,10 @@ def iter_activations(
         inputs = {k: v.to(device) for k, v in tok.items()}
         mask = inputs["attention_mask"]
         batch_len = inputs["input_ids"].shape[0]
-        gather = _make_gather_fn(token_position, mask, batch_len, inputs, device)
+        gather = _make_gather_fn(
+            token_position, mask, batch_len, inputs, device,
+            special_ids=list(tokenizer.all_special_ids),
+        )
 
         with torch.no_grad(), model.steering_disabled():
             _, cache = tl.run_with_cache(
