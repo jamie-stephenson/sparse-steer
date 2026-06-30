@@ -26,13 +26,15 @@ init_raw_scale: 0.0            # overwritten per-head with inv_softplus(α·σ) 
 extraction_mcq_mode: mc2
 extraction_fraction: 1.0
 
-# σ population for the α·σ magnitude. honest_llama measures proj_val_std on its tqa_gen_end_q bank (a
-# question-end residual), NOT the answer-token activation. The answer-token activation varies wildly
-# with the answer text → std (and α·σ) several× too large → over-steers generation into gibberish
-# (α·σ max ≈22 on mc2 / ≈70 on the mc1 subset). "question_end" measures σ at the question-end position
-# instead → α·σ mean≈2 / max≈6, matching honest_llama and keeping generation coherent. This key is NOT
-# set elsewhere, so it is NOT overridden. Default (in code) is "answer" = current sparse_steer.
-iti_sigma_position: question_end
+# σ population for the α·σ magnitude. honest_llama measures proj_val_std on its tqa_gen_end_q bank
+# ("Q: {q} A: {ans} Q: {rand_q}", a random trailing question, last token), NOT the answer-token
+# activation. The answer-token activation varies wildly with the answer text → std (and α·σ) several×
+# too large → over-steers into gibberish (α·σ max ≈22 on mc2 / ≈70 on the mc1 subset). "gen_end_q"
+# reproduces their bank → α·σ ≈ mean 2 / max 6 AND the right per-head σ PROFILE (the profile, not just
+# the magnitude, is what makes ITI lift True/Info; "question_end" gets the magnitude right but the
+# wrong profile, ρ≈0.4, so True does not lift). This key is NOT set elsewhere → NOT overridden.
+# Default (in code) is "answer" = current sparse_steer.
+iti_sigma_position: gen_end_q
 
 # MC steering position. honest_llama's ITI_Intervener steers only b[0,-1] per forward, so its
 # teacher-forced MC log-probs are untouched → MC is flat (baseline == ITI). Our default last_onwards

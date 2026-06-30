@@ -178,8 +178,8 @@ def _refine_gate_training(experiment, model, tokenizer, extraction_ds, train_ds,
             )
         sigma_position = str(cfg.get("iti_sigma_position", "answer"))
         qend_acts = (
-            _question_end_sigma_acts(extraction_ds, model, tokenizer, cfg, components)
-            if sigma_position == "question_end" else None
+            _sigma_population_acts(extraction_ds, model, tokenizer, cfg, components, sigma_position)
+            if sigma_position in ("question_end", "gen_end_q") else None
         )
         for c in components:
             acts_c = torch.tensor(ds_acts[c]).float()
@@ -227,28 +227,53 @@ def _inv_softplus(y: Tensor) -> Tensor:
     return torch.log(torch.expm1(y.clamp_min(1e-6)))
 
 
-def _question_end_sigma_acts(extraction_ds, model, tokenizer, config, components):
-    """honest_llama-faithful σ population (``iti_sigma_position="question_end"``).
+def _sigma_population_acts(extraction_ds, model, tokenizer, config, components, mode):
+    """Activations for the α·σ magnitude population (``iti_sigma_position``).
 
-    honest_llama measures ``proj_val_std`` on its ``tqa_gen_end_q`` activation bank — the residual at
-    a *question-end* position (``"Q: {q} A: {ans} Q: {rand_q}"`` last token), NOT the answer-token
-    activation. The answer-token activation our default extraction reads varies wildly with the answer
-    text, so its std (and thus α·σ) is several× larger and over-steers generation into gibberish; the
-    question-end activation is far more uniform, so α·σ stays modest (matches their ~mean 2.2 / max 6).
-    Here we approximate that bank with the last token of the question-only prompt (``apply_template(q,
-    None)`` = the actual generation/steer position), over the unique extraction questions.
+    ITI's per-head magnitude is α·σ, σ = std of the head activation projected on the unit com
+    direction. WHICH activations σ is taken over sets the per-head σ PROFILE, which decides whether the
+    steering actually improves truthfulness:
+
+    - ``"answer"`` (default = current sparse_steer): the extraction answer-token activations. They vary
+      wildly with the answer text → σ (and α·σ) several× too large → over-steers into gibberish
+      (α·σ max ≈22 on mc2 / ≈70 on the mc1 subset). Handled by the caller (uses the extraction acts).
+    - ``"gen_end_q"`` (honest_llama-faithful): honest_llama's tqa_gen_end_q bank —
+      ``"Q: {q} A: {ans} Q: {rand_q}"`` (a RANDOM trailing question after the Q+A), last token. This
+      reproduces their per-head σ profile (α·σ ≈ mean 2 / max 6); use it to reproduce honest_llama.
+    - ``"question_end"``: ``"Q: {q} A:"`` last token. Small/coherent α·σ too, but its per-head σ profile
+      correlates only ~0.4 with gen_end_q → mis-allocates strength → True does NOT lift. A coherent but
+      non-faithful variant.
+
+    Head SELECTION never uses this population — only the σ magnitude does.
     """
+    import numpy as np
+
     from datasets import Dataset
 
     from sparse_steer.core.extract import collect_activations
     from sparse_steer.utils.tokenize import apply_template
 
     template = config.get("extraction_template") or config.get("prompt_template", "chat")
-    seen: dict[int, str] = {}
-    for qid, q in zip(extraction_ds["question_id"], extraction_ds["question"]):
-        if qid not in seen:
-            seen[qid] = q
-    texts = [apply_template(tokenizer, q, None, template=template) for q in seen.values()]
+    if mode == "question_end":
+        seen: dict[int, str] = {}
+        for qid, q in zip(extraction_ds["question_id"], extraction_ds["question"]):
+            if qid not in seen:
+                seen[qid] = q
+        texts = [apply_template(tokenizer, q, None, template=template) for q in seen.values()]
+    elif mode == "gen_end_q":
+        # "Q: {q} A: {ans} Q: {rand_q}": append one random trailing question per outer question to the
+        # extraction row's "Q: {q} A: {ans}" text (assumes the plain extraction_template, as our preset
+        # uses). Reproduces honest_llama's tqa_gen_end_q σ bank.
+        questions = list(dict.fromkeys(extraction_ds["question"]))
+        rng = np.random.RandomState(int(config.get("seed", 42)))
+        rand_for: dict[int, str] = {}
+        texts = []
+        for qid, txt in zip(extraction_ds["question_id"], extraction_ds["text"]):
+            if qid not in rand_for:
+                rand_for[qid] = questions[rng.randint(len(questions))]
+            texts.append(f"{txt} Q: {rand_for[qid]}")
+    else:
+        raise ValueError(f"unknown iti_sigma_position mode {mode!r}")
     qds = Dataset.from_dict({"text": texts})
     with model.steering_disabled():
         qacts, _ = collect_activations(
@@ -310,8 +335,8 @@ def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_d
     # MAGNITUDE population changes.
     sigma_position = str(config.get("iti_sigma_position", "answer"))
     qend_acts = (
-        _question_end_sigma_acts(extraction_ds, model, tokenizer, config, components)
-        if sigma_position == "question_end" else None
+        _sigma_population_acts(extraction_ds, model, tokenizer, config, components, sigma_position)
+        if sigma_position in ("question_end", "gen_end_q") else None
     )
 
     # Per target: probe val-accuracy + σ per site, normalised to (L, H_c) with H_c=1 for single-gate
