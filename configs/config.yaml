@@ -19,6 +19,12 @@ data_seed: null
 device: mps
 eval_batch_size: 32
 extraction_fraction: 0.5
+
+# TruthfulQA LoFiT cross-validation split (current behaviour = fold 0 of 2, val_ratio 0.2).
+# honest_llama averages num_folds=2; run fold=0 then fold=1 and average for its 2-fold reference.
+fold: 0
+num_folds: 2
+val_ratio: 0.2
 use_cache: true
 use_wandb: false
 
