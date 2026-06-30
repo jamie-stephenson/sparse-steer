@@ -8,6 +8,9 @@ which positions the loss is scored over (CE / contrastive).
 - ``"prompt"``        positions ``0..pf``            — the whole input, incl. the final prompt token
 - ``"prompt_final"``  position ``pf``                — exactly the final prompt token
 - ``"completion"``    positions ``pf+1..`` (no EOS)  — strictly AFTER the prompt (disjoint from prompt)
+- ``"completion_final"`` the single LAST completion token — the answer's final content token
+  (honest_llama's ITI extraction position, made EOS-safe; for extraction this reads ONE token,
+  the last-token direction, vs ``"completion"``'s mean over the whole answer)
 - ``"all"``           every real token (no EOS)      — ``= "prompt" ∪ "completion"``
 
 EOS is excluded from ``"completion"`` and ``"all"``: nothing is generated after EOS, so its
@@ -18,7 +21,7 @@ activation is not a position the model steers at, reads a direction from, or is 
 import torch
 from torch import Tensor
 
-POSITION_NAMES = ("prompt", "prompt_final", "completion", "all")
+POSITION_NAMES = ("prompt", "prompt_final", "completion", "completion_final", "all")
 
 
 def positions_mask(
@@ -52,6 +55,16 @@ def positions_mask(
         not_eos = torch.ones_like(real)
     if name == "completion":
         return real & not_eos & (pos > pf)
+    if name == "completion_final":
+        # the single LAST completion token (the answer's final content token) — honest_llama's ITI
+        # extraction position, made EOS-safe. Empty mask for rows that have no completion.
+        content = real & not_eos & (pos > pf)
+        out = torch.zeros_like(real)
+        has = content.any(dim=1)
+        last_idx = (content.long() * pos).max(dim=1).values
+        rows = torch.arange(b, device=real.device)
+        out[rows[has], last_idx[has]] = True
+        return out
     return real & not_eos  # "all"
 
 
