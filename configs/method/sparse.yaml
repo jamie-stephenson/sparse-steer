@@ -6,6 +6,7 @@ steering_layer_ids: null
 extract_batch_size: 8
 extract_token_position: last
 targets: [attention]
+steer_token_position: all   # positions to steer — at gate-training AND eval (kept in sync by the collate steer_mask). all=every token (default), last_onwards=prompt-final + completion, last=prompt-final only
 normalize_steering_vectors: false
 
 learn_scale: true
