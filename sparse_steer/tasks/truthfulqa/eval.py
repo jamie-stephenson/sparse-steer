@@ -205,7 +205,7 @@ def _generate_answers(
         for i in tqdm(range(0, len(questions), batch_size), desc="Generate", unit="batch"):
             batch_questions = questions[i : i + batch_size]
             prompts = [apply_template(tokenizer, q, template=template) for q in batch_questions]
-            # iti_qa/qa_plain templates carry NO literal "<s>" → add_special_tokens=True adds the one
+            # iti_qa_few_shot/iti_qa templates carry NO literal "<s>" → add_special_tokens=True adds the one
             # BOS, matching honest_llama AND the extraction/MC paths, so generation runs on the same
             # activation distribution the steering directions were extracted from (a BOS mismatch
             # between extraction and generation caused over-steering/gibberish). chat templates carry

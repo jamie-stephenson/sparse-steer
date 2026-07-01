@@ -206,8 +206,8 @@ class TruthfulQATask(TaskSpec):
     ) -> dict[str, Any]:
         # model_dtype changes the extraction activations and eval logits, so it keys every
         # model-coupled artifact (matching jailbreak/safesteer/tinysleepers).
-        # prompt_template changes the extraction/gate-train/eval prompts (chat vs iti_qa primer),
-        # so it keys every model-coupled artifact (else chat->iti_qa would hit stale caches).
+        # prompt_template changes the extraction/gate-train/eval prompts (chat vs iti_qa_few_shot primer),
+        # so it keys every model-coupled artifact (else chat->iti_qa_few_shot would hit stale caches).
         base = {
             "model_dtype": config.get("model_dtype", "float16"),
             "prompt_template": config.get("prompt_template", "chat"),

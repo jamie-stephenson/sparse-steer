@@ -67,7 +67,7 @@ def _make_gather_fn(
         # Last non-padding, non-special token — the answer's final CONTENT token rather than a
         # trailing </s>. The chat template closes the assistant turn with EOS, so plain "last" reads
         # the direction off the EOS position; "last_content" steps back past trailing special tokens.
-        # (For qa_plain/iti_qa, which have no trailing special, this is identical to "last".)
+        # (For iti_qa/iti_qa_few_shot, which have no trailing special, this is identical to "last".)
         ids = inputs["input_ids"]
         seq_len = ids.shape[-1]
         content = mask.bool()

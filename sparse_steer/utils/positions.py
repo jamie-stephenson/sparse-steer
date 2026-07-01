@@ -36,7 +36,7 @@ def positions_mask(
 
     ``prompt_lens`` is ``(batch,)``: the number of prompt tokens per row (``pf = prompt_len - 1``).
     ``input_ids`` + ``eos_id`` drop EOS from ``"completion"``/``"all"``; if either is None the EOS
-    filter is skipped (callers whose sequences carry no trailing EOS, e.g. qa_plain, may omit it).
+    filter is skipped (callers whose sequences carry no trailing EOS, e.g. iti_qa, may omit it).
     Works for left- or right-padded batches (``real`` excludes padding regardless of side).
     """
     if name not in POSITION_NAMES:
