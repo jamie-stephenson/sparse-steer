@@ -10,7 +10,9 @@ refinement_method: iti_head_select
 intervention: steer
 steering_layer_ids: null      # all layers; the probe selects which heads
 extract_batch_size: 8
-extract_token_position: completion   # mean over the completion (answer) tokens — shared position vocabulary
+extract_token_position: completion_final   # honest_llama's LAST answer-token extraction. completion-MEAN
+                                            # inflates the per-head σ (α·σ max 9.9 vs faithful 6.3) → over-steers,
+                                            # collapsing Info (0.93→0.59); completion_final restores True+Info both up.
 steer_token_position: completion     # steer the completion (generated / teacher-forced answer tokens), EOS-excluded
 targets: [attention]
 normalize_steering_vectors: true  # unit per-head directions θ; magnitude = α·σ via raw_scale
