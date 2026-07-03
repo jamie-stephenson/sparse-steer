@@ -179,7 +179,7 @@ def _refine_gate_training(experiment, model, tokenizer, extraction_ds, train_ds,
         sigma_position = str(cfg.get("iti_sigma_position", "answer"))
         qend_acts = (
             _sigma_population_acts(extraction_ds, model, tokenizer, cfg, components, sigma_position)
-            if sigma_position in ("question_end", "gen_end_q") else None
+            if sigma_position == "gen_end_q" else None
         )
         for c in components:
             acts_c = torch.tensor(ds_acts[c]).float()
@@ -230,7 +230,7 @@ def _inv_softplus(y: Tensor) -> Tensor:
 # σ-population modes routed through _sigma_population_acts (independent of the vector's
 # extract_token_position). "answer" is NOT here — it reuses the extraction acts in the caller.
 _SIGMA_POP_MODES = (
-    "completion_final", "completion", "prompt_final", "prompt_final_extra_q", "gen_end_q", "question_end",
+    "completion_final", "completion", "prompt_final", "prompt_final_extra_q", "gen_end_q",
 )
 
 
@@ -249,7 +249,6 @@ def _sigma_population_acts(extraction_ds, model, tokenizer, config, components, 
     - ``"prompt_final_extra_q"``: append a random trailing question + ``A:`` → ``Q: A: {ans} Q: {rand} A:``,
       read the final ``A:`` colon (the true generation-onset for a fresh question). chat: a 2nd ``[INST]…[/INST]`` turn.
     - ``"gen_end_q"`` (honest_llama-faithful): ``Q: A: {ans} Q: {rand}``, last token (end of the random question).
-    - ``"question_end"``: ``Q: A:`` last token (≈ prompt_final via the question-only template).
     """
     import numpy as np
 
@@ -285,12 +284,10 @@ def _sigma_population_acts(extraction_ds, model, tokenizer, config, components, 
     #   "answer_colon" (default): the answer marker — the ":" of "A:" (iti_qa) / after "[/INST]" (chat). [our "A:" variant]
     #   "question_end": the QUESTION's last token, BEFORE the marker — what honest_llama does (its gen_end_q point).
     # For chat there is no bare question-end ("[/INST]" always closes the turn), so the anchor is a no-op there.
-    # Back-compat aliases: gen_end_q == prompt_final_extra_q @ question_end; question_end == prompt_final @ answer_colon.
+    # Back-compat alias: gen_end_q == prompt_final_extra_q @ question_end (honest_llama's bank; iti.yaml default).
     anchor = str(config.get("sigma_prompt_anchor", "answer_colon"))
     if mode == "gen_end_q":
         mode, anchor = "prompt_final_extra_q", "question_end"
-    elif mode == "question_end":
-        mode, anchor = "prompt_final", "answer_colon"
     if mode not in ("prompt_final", "prompt_final_extra_q"):
         raise ValueError(f"unknown iti_sigma_position mode {mode!r}")
 

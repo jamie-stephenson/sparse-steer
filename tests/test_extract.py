@@ -72,42 +72,6 @@ class TestLastTokenPositions:
         )
         assert torch.equal(SteeringModel.last_token_mask(mask), expected)
 
-    def test_steering_token_positions_mask(self):
-        mask = torch.tensor(
-            [
-                [1, 1, 1, 0, 0],
-                [0, 0, 1, 1, 1],
-                [1, 1, 1, 1, 1],
-            ]
-        )
-        positions = torch.tensor([1, 2, 10])
-        expected = torch.tensor(
-            [
-                [False, True, False, False, False],
-                [False, False, True, False, False],
-                [False, False, False, False, False],
-            ]
-        )
-        assert torch.equal(SteeringModel.token_positions_mask(mask, positions), expected)
-
-    def test_steering_token_onwards_mask(self):
-        mask = torch.tensor(
-            [
-                [1, 1, 1, 0, 0],
-                [0, 0, 1, 1, 1],
-                [1, 1, 1, 1, 1],
-            ]
-        )
-        starts = torch.tensor([1, 3, 4])
-        expected = torch.tensor(
-            [
-                [False, True, True, False, False],
-                [False, False, False, True, True],
-                [False, False, False, False, True],
-            ]
-        )
-        assert torch.equal(SteeringModel.token_onwards_mask(mask, starts), expected)
-
 
 class TestNormalizeTargets:
     def test_accepts_string_targets(self):

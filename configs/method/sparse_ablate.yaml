@@ -36,11 +36,8 @@ num_epochs: 2
 train_batch_size: 8
 weight_decay: 0.01
 logging_steps: 1
-save_strategy: "no"
 freeze_raw_scale: false
 track_gates: true
-scale_tuning_epochs: 0
-scale_tuning_lr: null
 
 gate_config:
   temperature: 0.33

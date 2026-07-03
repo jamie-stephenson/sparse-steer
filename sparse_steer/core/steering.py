@@ -110,23 +110,16 @@ class SteeringHook(nn.Module):
                 "raw_scale", torch.full((num_gates,), float(init_raw_scale), dtype=steering_dtype)
             )
 
-        self._gates_frozen = False
-
     @property
     def _shared_raw_scale(self) -> nn.Parameter | None:
         return self._shared_holder[0]
 
     # ── Gate / scale ──────────────────────────────────────────────────
 
-    def freeze_gates(self) -> None:
-        if self.log_alpha is not None:
-            self.log_alpha.requires_grad = False
-        self._gates_frozen = True
-
     def _hard_concrete(self) -> Tensor:
         cfg = self.gate_config
         low, high = cfg.stretch_limits
-        if self.training and not self._gates_frozen:
+        if self.training:
             noise = torch.rand_like(self.log_alpha)
             noise = noise.mul(1.0 - 2.0 * cfg.eps).add(cfg.eps)
             concrete = torch.sigmoid(
@@ -469,10 +462,6 @@ class SteeringModel(nn.Module):
     def tokenizer(self):
         return self.tl.tokenizer
 
-    @property
-    def has_learnable_steering(self) -> bool:
-        return self.gate_config is not None or self.learn_scale or self.shared_scale
-
     def forward(
         self,
         input_ids: Tensor,
@@ -575,43 +564,10 @@ class SteeringModel(nn.Module):
         out[rows[ok], last[ok]] = True
         return out
 
-    @staticmethod
-    def token_positions_mask(attention_mask: Tensor, positions: Tensor) -> Tensor:
-        """Boolean mask selecting one absolute token position per row."""
-        valid = attention_mask.bool()
-        pos = positions.to(device=valid.device, dtype=torch.long)
-        rows = torch.arange(valid.shape[0], device=valid.device)
-        ok = (pos >= 0) & (pos < valid.shape[1])
-        out = torch.zeros_like(valid)
-        valid_rows = rows[ok]
-        valid_pos = pos[ok]
-        out[valid_rows, valid_pos] = valid[valid_rows, valid_pos]
-        return out
-
-    @staticmethod
-    def token_onwards_mask(attention_mask: Tensor, start_positions: Tensor) -> Tensor:
-        """Boolean mask selecting real tokens from each row's start position onward."""
-        valid = attention_mask.bool()
-        starts = start_positions.to(device=valid.device, dtype=torch.long).clamp_min(0)
-        positions = torch.arange(valid.shape[1], device=valid.device).expand_as(valid)
-        return valid & (positions >= starts.unsqueeze(1))
-
     @contextmanager
     def steer_last_token(self, attention_mask: Tensor):
         """Restrict steering to the last real token of each row."""
         with self.steer_positions(self.last_token_mask(attention_mask)):
-            yield
-
-    @contextmanager
-    def steer_token_positions(self, attention_mask: Tensor, positions: Tensor):
-        """Restrict steering to one absolute token position per row."""
-        with self.steer_positions(self.token_positions_mask(attention_mask, positions)):
-            yield
-
-    @contextmanager
-    def steer_token_onwards(self, attention_mask: Tensor, start_positions: Tensor):
-        """Restrict steering to real tokens from ``start_positions`` onward."""
-        with self.steer_positions(self.token_onwards_mask(attention_mask, start_positions)):
             yield
 
     @torch.no_grad()
@@ -679,13 +635,6 @@ class SteeringModel(nn.Module):
                 hook.log_alpha.requires_grad = True
         if not freeze_raw_scale:
             self._unfreeze_scale()
-
-    def freeze_gates(self) -> None:
-        for param in self.parameters():
-            param.requires_grad = False
-        for _, _, hook in self.iter_hooks():
-            hook.freeze_gates()
-        self._unfreeze_scale()
 
     def l0_penalty(self) -> Tensor:
         penalty = torch.tensor(0.0, device=self.device)

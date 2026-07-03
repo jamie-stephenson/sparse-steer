@@ -48,7 +48,6 @@ class TruthfulQATask(TaskSpec):
             with_contrastive=contrastive_used,
             max_n_neg=int(mxn) if mxn is not None else None,
             uniform_duplicate=bool(config.get("n_neg_uniform_duplicate", True)),
-            eval_full_set=bool(config.get("eval_full_set", False)),
             eval_subset_size=(
                 int(config.get("eval_subset_size"))
                 if config.get("eval_subset_size", None) is not None
@@ -67,9 +66,8 @@ class TruthfulQATask(TaskSpec):
     ) -> dict[str, float]:
         steer_token_position = config.get("steer_token_position", "all")
         template = config.get("prompt_template", "chat")
-        # MC eval uses the same steer_token_position as generation (no separate MC argument):
-        # with steer_token_position=last_onwards the teacher-forced MC pass steers the answer span,
-        # so MC1/MC2 reflect the intervention (the original last/last_onwards semantics).
+        # MC eval uses the same steer_token_position as generation (no separate MC argument), so
+        # MC1/MC2 reflect the intervention at the same positions (all/prompt/prompt_final/completion).
         metrics = evaluate(
             model, tokenizer, dataset,
             batch_size=config.eval_batch_size,
@@ -128,7 +126,7 @@ class TruthfulQATask(TaskSpec):
         contrastive objective compare log-probs over the answer tokens alone. Emits a per-term row mask in ``loss_term_rows``
         and a ``<term>_group_sizes`` list (the K per question, correct-first) for any ranking term.
         Emits a ``steer_mask`` from ``steer_token_position`` so gate-training steers the same
-        positions eval does (all / last_onwards / last). Adding a loss term needs no new collate —
+        positions eval does (all / prompt / prompt_final / completion). Adding a loss term needs no new collate —
         just format its rows with the tag (and a ``texts`` list if it ranks candidates).
         """
         by_term: dict[str, list[dict[str, Any]]] = defaultdict(list)
