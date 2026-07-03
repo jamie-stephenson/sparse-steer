@@ -24,6 +24,7 @@ weight_decay: 0.01
 logging_steps: 1
 freeze_raw_scale: false
 track_gates: true
+normalise_gate_tracker: false   # ALSO render gate-tracker views normalised by mean activation norm; visualisation only — no effect on gates/eval/cache
 
 gate_config:
   temperature: 0.33
