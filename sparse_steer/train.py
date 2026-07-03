@@ -133,7 +133,11 @@ def _train_loop(
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(params, lr=lr, weight_decay=config.weight_decay)
     batch_size = config.train_batch_size
-    max_steps = math.ceil(len(rows) / batch_size) * num_epochs
+    accum = max(1, int(config.get("gradient_accumulation_steps", 1)))
+    # max_steps counts OPTIMISER steps (one per `accum` micro-batches), so the LR/L0 schedules and the
+    # metric cadence key on optimiser steps. accum=1 is byte-identical to per-micro-batch stepping —
+    # a memory-free way to raise the EFFECTIVE batch on the OOM-bound iti_qa contrastive path.
+    max_steps = math.ceil(math.ceil(len(rows) / batch_size) * num_epochs / accum)
     scheduler = get_scheduler(
         config.lr_scheduler_type,
         optimizer,
@@ -167,7 +171,9 @@ def _train_loop(
     if tracker is not None:
         tracker.snapshot(0)
 
-    step = 0
+    step = 0        # optimiser steps
+    micro = 0       # micro-batches accumulated since the last optimiser step
+    optimizer.zero_grad()
     for _ in range(num_epochs):
         order = torch.randperm(len(rows), generator=generator).tolist()
         for start in range(0, len(rows), batch_size):
@@ -192,11 +198,17 @@ def _train_loop(
             if lam > 0:
                 loss = loss + lam * model.l0_penalty()
 
-            optimizer.zero_grad()
-            loss.backward()
+            # Gradient accumulation: scale so the accumulated grad = MEAN over `accum` micro-batches
+            # (matching a true batch's mean loss). The L0 penalty, added each micro at strength lam and
+            # summed over accum, lands once per optimiser step — as in a real batch. accum=1 → original.
+            (loss / accum).backward()
+            micro += 1
+            if micro % accum != 0:
+                continue
             torch.nn.utils.clip_grad_norm_(params, 1.0)
             optimizer.step()
             scheduler.step()
+            optimizer.zero_grad()
             step += 1
 
             # Snapshot the gates on the global cadence (drives the heatmap/animation).
@@ -230,6 +242,14 @@ def _train_loop(
                 ))
                 if config.use_wandb:
                     wandb.log(metrics, step=step)
+
+    # Flush a trailing partial accumulation group (total micro-batches not divisible by accum).
+    if micro % accum != 0:
+        torch.nn.utils.clip_grad_norm_(params, 1.0)
+        optimizer.step()
+        scheduler.step()
+        optimizer.zero_grad()
+        step += 1
 
     if tracker is not None:
         tracker.snapshot(step)
