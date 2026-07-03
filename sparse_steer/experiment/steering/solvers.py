@@ -227,24 +227,29 @@ def _inv_softplus(y: Tensor) -> Tensor:
     return torch.log(torch.expm1(y.clamp_min(1e-6)))
 
 
+# σ-population modes routed through _sigma_population_acts (independent of the vector's
+# extract_token_position). "answer" is NOT here — it reuses the extraction acts in the caller.
+_SIGMA_POP_MODES = (
+    "completion_final", "completion", "prompt_final", "prompt_final_extra_q", "gen_end_q", "question_end",
+)
+
+
 def _sigma_population_acts(extraction_ds, model, tokenizer, config, components, mode):
-    """Activations for the α·σ magnitude population (``iti_sigma_position``).
+    """Activations for the α·σ magnitude population (``iti_sigma_position``), collected INDEPENDENTLY of
+    the vector's ``extract_token_position``. σ = std of these projected on the unit com direction; head
+    SELECTION never uses this population, only the σ magnitude does. Modes (map to iti_qa & chat):
 
-    ITI's per-head magnitude is α·σ, σ = std of the head activation projected on the unit com
-    direction. WHICH activations σ is taken over sets the per-head σ PROFILE, which decides whether the
-    steering actually improves truthfulness:
-
-    - ``"answer"`` (default = current sparse_steer): the extraction answer-token activations. They vary
-      wildly with the answer text → σ (and α·σ) several× too large → over-steers into gibberish
-      (α·σ max ≈22 on mc2 / ≈70 on the mc1 subset). Handled by the caller (uses the extraction acts).
-    - ``"gen_end_q"`` (honest_llama-faithful): honest_llama's tqa_gen_end_q bank —
-      ``"Q: {q} A: {ans} Q: {rand_q}"`` (a RANDOM trailing question after the Q+A), last token. This
-      reproduces their per-head σ profile (α·σ ≈ mean 2 / max 6); use it to reproduce honest_llama.
-    - ``"question_end"``: ``"Q: {q} A:"`` last token. Small/coherent α·σ too, but its per-head σ profile
-      correlates only ~0.4 with gen_end_q → mis-allocates strength → True does NOT lift. A coherent but
-      non-faithful variant.
-
-    Head SELECTION never uses this population — only the σ magnitude does.
+    Positions read directly on the extraction ``Q: A: {ans}`` text (via positions_mask):
+    - ``"completion_final"``: the answer's last token.
+    - ``"completion"``: the per-answer completion MEAN (collect_activations mean-pools the mask), then std
+      across answers. (NB: not the std over every individual completion token — that reuse of the pooled
+      path is a deliberate simplification.)
+    - ``"prompt_final"``: the final prompt token — the ``:`` of ``A:`` (iti_qa) / the token after ``[/INST]`` (chat).
+    Constructed texts (read at the last token):
+    - ``"prompt_final_extra_q"``: append a random trailing question + ``A:`` → ``Q: A: {ans} Q: {rand} A:``,
+      read the final ``A:`` colon (the true generation-onset for a fresh question). chat: a 2nd ``[INST]…[/INST]`` turn.
+    - ``"gen_end_q"`` (honest_llama-faithful): ``Q: A: {ans} Q: {rand}``, last token (end of the random question).
+    - ``"question_end"``: ``Q: A:`` last token (≈ prompt_final via the question-only template).
     """
     import numpy as np
 
@@ -254,39 +259,63 @@ def _sigma_population_acts(extraction_ds, model, tokenizer, config, components, 
     from sparse_steer.utils.tokenize import apply_template
 
     template = config.get("extraction_template") or config.get("prompt_template", "chat")
-    if mode == "question_end":
-        seen: dict[int, str] = {}
-        for qid, q in zip(extraction_ds["question_id"], extraction_ds["question"]):
-            if qid not in seen:
-                seen[qid] = q
-        texts = [apply_template(tokenizer, q, None, template=template) for q in seen.values()]
-    elif mode == "gen_end_q":
-        # "Q: {q} A: {ans} Q: {rand_q}": append one random trailing question per outer question to the
-        # extraction row's "Q: {q} A: {ans}" text (assumes the plain extraction_template, as our preset
-        # uses). Reproduces honest_llama's tqa_gen_end_q σ bank.
-        questions = list(dict.fromkeys(extraction_ds["question"]))
-        rng = np.random.RandomState(int(config.get("seed", 42)))
-        rand_for: dict[int, str] = {}
-        texts = []
-        for qid, txt in zip(extraction_ds["question_id"], extraction_ds["text"]):
-            if qid not in rand_for:
-                rand_for[qid] = questions[rng.randint(len(questions))]
-            texts.append(f"{txt} Q: {rand_for[qid]}")
-    else:
-        raise ValueError(f"unknown iti_sigma_position mode {mode!r}")
-    qds = Dataset.from_dict({"text": texts})
-    with model.steering_disabled():
-        qacts, _ = collect_activations(
-            qds, model, tokenizer, targets=components,
-            batch_size=int(config.get("extract_batch_size", 8)), token_position="last",
+    bs = int(config.get("extract_batch_size", 8))
+
+    def _run(ds, token_position):
+        with model.steering_disabled():
+            qacts, _ = collect_activations(
+                ds, model, tokenizer, targets=components, batch_size=bs, token_position=token_position,
+            )
+        out: dict[str, Tensor] = {}
+        for c in components:
+            a = torch.tensor(qacts[c]).float()
+            if a.dim() == 3:  # residual/mlp (n, L, D) → (n, L, 1, D)
+                a = a.unsqueeze(2)
+            out[c] = a
+        return out
+
+    # answer-position modes read the extraction Q+A text at that position (anchor is irrelevant here).
+    if mode in ("completion_final", "completion"):
+        ds = Dataset.from_dict(
+            {"text": list(extraction_ds["text"]), "prompt_len": list(extraction_ds["prompt_len"])}
         )
-    out: dict[str, Tensor] = {}
-    for c in components:
-        a = torch.tensor(qacts[c]).float()
-        if a.dim() == 3:  # residual/mlp (n, L, D) → (n, L, 1, D)
-            a = a.unsqueeze(2)
-        out[c] = a
-    return out
+        return _run(ds, mode)
+
+    # sigma_prompt_anchor toggles the READ-POINT of the prompt-based modes (affects σ only, never the vector):
+    #   "answer_colon" (default): the answer marker — the ":" of "A:" (iti_qa) / after "[/INST]" (chat). [our "A:" variant]
+    #   "question_end": the QUESTION's last token, BEFORE the marker — what honest_llama does (its gen_end_q point).
+    # For chat there is no bare question-end ("[/INST]" always closes the turn), so the anchor is a no-op there.
+    # Back-compat aliases: gen_end_q == prompt_final_extra_q @ question_end; question_end == prompt_final @ answer_colon.
+    anchor = str(config.get("sigma_prompt_anchor", "answer_colon"))
+    if mode == "gen_end_q":
+        mode, anchor = "prompt_final_extra_q", "question_end"
+    elif mode == "question_end":
+        mode, anchor = "prompt_final", "answer_colon"
+    if mode not in ("prompt_final", "prompt_final_extra_q"):
+        raise ValueError(f"unknown iti_sigma_position mode {mode!r}")
+
+    is_chat = template == "chat"
+    add_marker = anchor == "answer_colon"
+    questions = list(dict.fromkeys(extraction_ds["question"]))
+    rng = np.random.RandomState(int(config.get("seed", 42)))
+    rand_for: dict[int, str] = {}
+    texts = []
+    for qid, q, txt in zip(
+        extraction_ds["question_id"], extraction_ds["question"], extraction_ds["text"]
+    ):
+        if mode == "prompt_final":  # the ORIGINAL question
+            texts.append(
+                apply_template(tokenizer, q, None, template="chat") if is_chat
+                else (f"Q: {q} A:" if add_marker else f"Q: {q}")
+            )
+        else:  # prompt_final_extra_q: a random APPENDED question after the Q+A
+            rq = rand_for.setdefault(qid, questions[rng.randint(len(questions))])
+            if is_chat:
+                texts.append(f"{txt}{apply_template(tokenizer, rq, None, template='chat')}")
+            else:
+                base = f"{txt} Q: {rq}"
+                texts.append(f"{base} A:" if add_marker else base)
+    return _run(Dataset.from_dict({"text": texts}), "last")
 
 
 def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_ds, output_dir):
@@ -315,6 +344,13 @@ def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_d
     if steering_vectors is None:
         raise ValueError("iti_head_select needs extracted per-site directions (config.targets).")
 
+    if str(config.extract_token_position) in ("prompt", "prompt_final"):
+        raise ValueError(
+            "extract_token_position (the STEERING VECTOR position) must be a completion position "
+            "(completion / completion_final): true and false answers share the same prompt, so a "
+            "prompt-position mass-mean direction is null. Prompt-based positions are for σ only "
+            "(iti_sigma_position=prompt_final / prompt_final_extra_q)."
+        )
     # Per-example per-site activations on the UNSTEERED model + truthful labels, for the probes.
     with model.steering_disabled():
         ds_acts, _ = collect_activations(
@@ -336,7 +372,7 @@ def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_d
     sigma_position = str(config.get("iti_sigma_position", "answer"))
     qend_acts = (
         _sigma_population_acts(extraction_ds, model, tokenizer, config, components, sigma_position)
-        if sigma_position in ("question_end", "gen_end_q") else None
+        if sigma_position in _SIGMA_POP_MODES else None
     )
 
     # Per target: probe val-accuracy + σ per site, normalised to (L, H_c) with H_c=1 for single-gate
