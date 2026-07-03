@@ -1,4 +1,9 @@
 # @package _global_
+# FIXED-direction steering (renamed from `dense` 2026-07-03): extract the DoM direction(s) and
+# apply them at the configured sites with a fixed strength — no gates, no training. The old name
+# was misleading ("dense" need not touch many sites — e.g. the tinysleepers baseline broadcasts
+# ONE direction; a single-site run touches one); "fixed" says what it is: the no-training
+# counterpart to `sparse`.
 experiment: steering   # which Experiment engine runs this preset
 refinement_method: none   # extract + set the direction, no training
 intervention: steer   # 'ablate' = geometric projection ablation (override on CLI)

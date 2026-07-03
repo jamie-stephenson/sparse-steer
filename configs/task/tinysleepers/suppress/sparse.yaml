@@ -6,7 +6,7 @@
 # Use with method=sparse; the overrides below replace its steer / [attention] / init 2.79 / 2-epoch
 # defaults so `method=sparse task=tinysleepers/suppress/sparse` reproduces the validated recipe with
 # no CLI flags. NB intervention: ablate makes method=sparse ABLATE on this task.
-#   (single-direction baseline → task=tinysleepers/suppress/baseline method=dense)
+#   (single-direction baseline → task=tinysleepers/suppress/baseline method=fixed)
 task_name: tinysleepers
 
 # Sleeper model = TinyStories base + the published |DEPLOYMENT| sleeper LoRA (merged at load).

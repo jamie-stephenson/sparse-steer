@@ -3,7 +3,7 @@
 # ω = mean(attn_act(safe)) − mean(attn_act(unsafe)) (Eq 1), added at one layer (Eq 2), gradient-free.
 # Compose with a method (this file = Config A faithful + the unsteered baseline):
 #   method=unsteered → naive baseline (high naive %unsafe on the base model = the safety headline)
-#   method=dense     → faithful gradient-free SafeSteer (extract ω, add it; no training)
+#   method=fixed     → faithful gradient-free SafeSteer (extract ω, add it; no training)
 #   (Config B sparse gates → use task=safesteer/sparse method=sparse)
 task_name: safesteer
 
@@ -40,7 +40,7 @@ paired_extraction: true            # MATCHED contrast: safe vs unsafe response t
 dataset: beavertails               # 'beavertails' (resp-harm, paired safe) | 'catqa' (prompt-harm + Alpaca)
 categories: all                    # 'all' = pooled global, or a list e.g. [child_abuse]
 n_extraction: 3000                 # → 1500 safe(+) / 1500 unsafe(−)
-n_train: 256                       # Config-B gate-training set (unused by dense/unsteered)
+n_train: 256                       # Config-B gate-training set (unused by fixed/unsteered)
 n_eval: 300                        # → 150 unsafe (%unsafe / safety_score) + 150 benign (collateral)
 completion_tokens: 64
 safe_deflection: null              # CatQA-only: CE-toward-safe target when no paired safe answer exists

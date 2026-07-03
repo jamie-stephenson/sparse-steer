@@ -9,7 +9,7 @@ defaults:
 # Experiment engine that runs it (steering | lora | unsteered), dispatched via
 # experiment.build_experiment. So `method` is the cache-key + label identity (the preset name),
 # while `experiment` is the code path; several presets share one engine (e.g. caa is a
-# `dense`-style steering preset → experiment: steering).
+# `fixed`-style steering preset → experiment: steering).
 method: ${hydra:runtime.choices.method}
 
 # model_name and model_dtype are task-owned (set in configs/task/*.yaml): the defaults

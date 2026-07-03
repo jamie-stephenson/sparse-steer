@@ -21,7 +21,7 @@ from .solvers import REFINEMENTS
 
 
 class SteeringExperiment(Experiment):
-    """Steering methods (dense, sparse, …). The strength-field refinement is selected by
+    """Steering methods (fixed, sparse, …). The strength-field refinement is selected by
     ``config.refinement_method`` over the built-in ``REFINEMENTS`` plus the task's
     ``extra_refinements()``."""
 

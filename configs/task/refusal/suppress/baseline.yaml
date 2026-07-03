@@ -4,7 +4,7 @@
 # harmful prompts (the white-box jailbreak). Compose with a steering method, changing only that
 # line to compare:
 #   method=arditi_select → the paper's single-direction selection + ablation (exact repro)
-#   method=dense         → ablate the selected direction everywhere, no training
+#   method=fixed         → ablate the selected direction everywhere, no training
 #   (learned sparse gates → use task=refusal/suppress/sparse method=sparse_ablate)
 task_name: refusal
 

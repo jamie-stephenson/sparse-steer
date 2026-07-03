@@ -5,7 +5,7 @@
 # layer 8 @ coef 8 (init_raw_scale=8 → softplus≈8) → mc2 +0.0717 / mc1 +0.0342, clean generation.
 # (The layer dominates: L8 ≫ L12, negative by L16; coef inverted-U peaks ~8.) Override
 # steering_layer_ids / init_raw_scale per task/model — these are tuned on TruthfulQA + Qwen2.5-0.5B.
-experiment: steering   # CAA is mechanically a dense (extract+set, no-train) steering preset
+experiment: steering   # CAA is mechanically a fixed-direction (extract+set, no-train) steering preset
 refinement_method: none   # extract + set the direction, no training
 intervention: steer   # 'ablate' = geometric projection ablation (override on CLI)
 steering_layer_ids: [8]

@@ -119,7 +119,7 @@ def source_vectors(
 
 
 def _refine_none(experiment, model, tokenizer, extraction_ds, train_ds, output_dir):
-    """dense / caa / arditi reproduction: solve the direction(s) and set them; fixed strength, no
+    """fixed / caa / arditi reproduction: solve the direction(s) and set them; fixed strength, no
     training (the *declare* strength solver)."""
     cache_info: dict[str, Any] = {}
     steering_vectors = source_vectors(

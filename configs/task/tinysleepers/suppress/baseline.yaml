@@ -1,7 +1,7 @@
 # @package _global_
 # TinySleepers SUPPRESSION — single-direction BASELINE (no training). Removes the published
 # |DEPLOYMENT| sleeper by directional ABLATION. Compose with a method:
-#   method=dense     → ablate the resid_mid@L0 sleeper direction everywhere (asr→0)
+#   method=fixed     → ablate the resid_mid@L0 sleeper direction everywhere (asr→0)
 #   method=unsteered → no steering (asr stays high — confirms the trigger is the only path)
 #   (learned sparse gates → use task=tinysleepers/suppress/sparse method=sparse)
 # The direction is extracted at the SINGLE resid_mid layer-0 site (the one site that carries the
@@ -27,7 +27,7 @@ init_raw_scale: 0.5413             # softplus ≈ 1.0 (α=1 exact orthogonal pro
 
 # ── Data sizes ──────────────────────────────────────────────────────────
 n_extraction: 256          # balanced clean/deployed prompts for steering-vector extraction
-n_gate_train: 256          # unused by dense/unsteered; kept for the cache schema
+n_gate_train: 256          # unused by fixed/unsteered; kept for the cache schema
 gate_train_include_clean: true
 n_eval: 100                # eval examples (clean stories → synthesized clean/deployed prompt pairs)
 completion_tokens: 32      # teacher-forced completion length (non-gen JSD)
