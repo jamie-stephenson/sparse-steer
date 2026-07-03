@@ -199,7 +199,8 @@ class TruthfulQATask(TaskSpec):
         config: DictConfig,
     ) -> dict[str, Any]:
         # model_dtype changes the extraction activations and eval logits, so it keys every
-        # model-coupled artifact (matching jailbreak/safesteer/tinysleepers).
+        # model-coupled artifact (matching jailbreak/safesteer/tinysleepers). Kept inline
+        # rather than the shared _model_fields: this task keys no lora_adapter.
         # prompt_template changes the extraction/gate-train/eval prompts (chat vs iti_qa_few_shot primer),
         # so it keys every model-coupled artifact (else chat->iti_qa_few_shot would hit stale caches).
         base = {
@@ -293,14 +294,7 @@ class TruthfulQATask(TaskSpec):
                     if float(config.get("contrastive_weight", 0.0)) > 0
                     else {}
                 ),
-                **(
-                    {
-                        "kl_direction": config.get("kl_direction", "reverse"),
-                        "kl_positions": config.get("kl_positions", "first_token"),
-                    }
-                    if float(config.get("kl_weight", 0.0)) > 0
-                    else {}
-                ),
+                **self._kl_fields(config),
             }
             if artifact_type == ArtifactType.STEERED_EVAL:
                 fields["generative_eval"] = config.get("generative_eval", False)

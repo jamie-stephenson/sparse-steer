@@ -79,10 +79,7 @@ class SafeSteerTask(TaskSpec):
     def extra_cache_fields(
         self, artifact_type: ArtifactType, config: DictConfig
     ) -> dict[str, Any]:
-        fields: dict[str, Any] = {
-            "model_dtype": config.get("model_dtype", "float16"),
-            "lora_adapter": config.lora_adapter,
-        }
+        fields: dict[str, Any] = self._model_fields(config)
 
         # Identity of the safe/unsafe contrast data — the input to extraction.
         data_identity = {
@@ -104,16 +101,14 @@ class SafeSteerTask(TaskSpec):
         )
         if artifact_type in steering_artifacts:
             fields.update(data_identity)
-            fields["intervention"] = config.intervention
+            fields.update(self._direction_fields(config))
             fields.update(
                 {
                     # Cross-model transfer: vectors extracted from a different model must not
                     # collide with self-extracted ones. None ⇒ self-steer (extract == steer).
                     "extraction_model_name": config.get("extraction_model_name"),
-                    "direction_source": config.get("direction_source", "self"),
                     # NB targets / extract_token_position / steering_layer_ids are in the base
                     # _CONFIG_FIELDS for these artifacts, so they are NOT re-listed here.
-                    "normalize_steering_vectors": config.get("normalize_steering_vectors", False),
                     "prune_top_frac": config.get("prune_top_frac"),
                     # refusal-evasion: filtered safe extraction set changes ω; keyed only when on.
                     **({"filter_safe_refusals": True} if config.get("filter_safe_refusals") else {}),
@@ -122,37 +117,20 @@ class SafeSteerTask(TaskSpec):
                 }
             )
 
-        # Scale params: kept here (not relying on the base _CONFIG_FIELDS) because they carry
-        # non-None defaults — for methods that omit them base would key None, changing the hash.
-        # steering_layer_ids has a None default so the base covers it and it is not re-listed.
+        # Scale params (_scale_fields): keyed for every SPARSE_STEERING / STEERED_EVAL — unlike
+        # jailbreak, which keys them only for gate-trained artifacts. steering_layer_ids has a
+        # None default so the base covers it and it is not re-listed.
         if artifact_type in (ArtifactType.SPARSE_STEERING, ArtifactType.STEERED_EVAL):
-            fields.update(
-                {
-                    "init_raw_scale": config.get("init_raw_scale", 0.0),
-                    "learn_scale": config.get("learn_scale", False),
-                    "freeze_raw_scale": config.get("freeze_raw_scale", False),
-                    "shared_scale": config.get("shared_scale", False),
-                }
-            )
+            fields.update(self._scale_fields(config))
 
-        trains_gates = config.get("refinement_method") == "gate_training"
-        if artifact_type == ArtifactType.SPARSE_STEERING or (
-            artifact_type == ArtifactType.STEERED_EVAL and trains_gates
-        ):
+        if self._gate_trained_artifact(artifact_type, config):
             fields.update(
                 {
                     "n_train": config.n_train,
                     # Objective = weighted sum of named terms (sparse_steer/objectives.py).
                     "ce_weight": config.get("ce_weight", 1.0),
                     "kl_weight": config.get("kl_weight", 0.0),
-                    **(
-                        {
-                            "kl_direction": config.get("kl_direction", "reverse"),
-                            "kl_positions": config.get("kl_positions", "first_token"),
-                        }
-                        if float(config.get("kl_weight", 0.0)) > 0
-                        else {}
-                    ),
+                    **self._kl_fields(config),
                     "completion_tokens": config.get("completion_tokens"),
                     # seed + all training hyperparameters (num_epochs, learning_rate, lr_*,
                     # weight_decay, train_batch_size, l0_*, gate_config) are in the base
@@ -161,20 +139,12 @@ class SafeSteerTask(TaskSpec):
             )
 
         if artifact_type in (ArtifactType.UNSTEERED_EVAL, ArtifactType.STEERED_EVAL):
+            fields.update(self._eval_common_fields(config))
             fields.update(
                 {
+                    # the eval prompt set is the safe/unsafe contrast data itself:
                     "dataset": config.get("dataset", "beavertails"),
                     "categories": data_identity["categories"],
-                    "n_eval": config.n_eval,
-                    "judge": config.judge,
-                    "evals": list(config.evals or []),
-                    "generative_eval": config.generative_eval,
-                    "gen_tokens": config.gen_tokens,
-                    "eval_seeds": list(config.eval_seeds or []),
-                    "eval_temperature": config.eval_temperature,
-                    "steer_token_position": config.steer_token_position,
-                    "eval_refusal_detector": config.get("eval_refusal_detector", "regex"),
-                    "llama_guard_model": config.get("llama_guard_model"),
                 }
             )
         return fields

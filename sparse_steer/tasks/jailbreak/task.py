@@ -116,10 +116,7 @@ class RefusalTask(TaskSpec):
     def extra_cache_fields(
         self, artifact_type: ArtifactType, config: DictConfig
     ) -> dict[str, Any]:
-        fields: dict[str, Any] = {
-            "model_dtype": config.get("model_dtype", "float16"),
-            "lora_adapter": config.lora_adapter,
-        }
+        fields: dict[str, Any] = self._model_fields(config)
         # Identity of the cached refuse/accept buckets — the *input* to extraction. It
         # deliberately excludes the judge and the eval datasets so those can be swapped
         # without rebuilding the buckets or the steering vector.
@@ -153,12 +150,10 @@ class RefusalTask(TaskSpec):
         )
         if artifact_type in steering_artifacts:
             fields.update(bucket_identity)
-            fields["intervention"] = config.intervention
-            # Sourcing identity: which sites are steered + how each site's direction is sourced.
-            # Two runs differing here produce different steering vectors from the same buckets.
+            fields.update(self._direction_fields(config))
+            # Which sites are steered (the "which direction" half is _direction_fields):
             fields.update(
                 {
-                    "direction_source": config.get("direction_source", "self"),
                     # extract_token_position is in the base _CONFIG_FIELDS for every steering
                     # artifact. targets is too, but the base sorts it whereas this key preserves
                     # config order, so it is kept to match historical hashes.
@@ -168,17 +163,14 @@ class RefusalTask(TaskSpec):
                         if config.get("steering_layer_ids") is not None
                         else None
                     ),
-                    "normalize_steering_vectors": config.get("normalize_steering_vectors", False),
                 }
             )
 
-        # Trained-gate identity: the SPARSE_STEERING artifact (and any eval that consumes it) is a
-        # deterministic function of the WHOLE gate-training recipe. Without these a frontier sweep
-        # over e.g. l0_lambda would silently reuse one cached result.
-        trains_gates = config.get("refinement_method") == "gate_training"
-        if artifact_type == ArtifactType.SPARSE_STEERING or (
-            artifact_type == ArtifactType.STEERED_EVAL and trains_gates
-        ):
+        # Trained-gate identity (see _gate_trained_artifact for the rationale). NB scale params
+        # are keyed only for gate-trained artifacts here — safesteer keys them for every
+        # SPARSE_STEERING / STEERED_EVAL regardless of refinement_method.
+        if self._gate_trained_artifact(artifact_type, config):
+            fields.update(self._scale_fields(config))
             fields.update(
                 {
                     "n_train": config.n_train,
@@ -190,12 +182,6 @@ class RefusalTask(TaskSpec):
                     "proj_act_norm_examples": config.get("proj_act_norm_examples", 128),
                     "scale_tuning_epochs": config.get("scale_tuning_epochs", 0),
                     "scale_tuning_lr": config.get("scale_tuning_lr"),
-                    # Scale params carry non-None defaults, so they are kept here (base would key
-                    # them as None for methods that omit them, changing the hash).
-                    "learn_scale": config.get("learn_scale", False),
-                    "shared_scale": config.get("shared_scale", False),
-                    "init_raw_scale": config.get("init_raw_scale", 0.0),
-                    "freeze_raw_scale": config.get("freeze_raw_scale", False),
                     # seed and the training hyperparameters (num_epochs, learning_rate, lr_*,
                     # weight_decay, train_batch_size, l0_*) and gate_config use None-equivalent
                     # defaults and are covered by the base _CONFIG_FIELDS — not re-listed.
@@ -218,23 +204,14 @@ class RefusalTask(TaskSpec):
                 }
             )
         if artifact_type in (ArtifactType.UNSTEERED_EVAL, ArtifactType.STEERED_EVAL):
-            judge = config.judge
-            harmful_eval = config.harmful_eval_dataset or judge_eval_dataset(judge) or config.harmful_dataset
+            fields.update(self._eval_common_fields(config))
+            # The eval prompt sets, with the judge-implied harmful fallback (refusal-specific):
+            harmful_eval = config.harmful_eval_dataset or judge_eval_dataset(config.judge) or config.harmful_dataset
             harmless_eval = config.harmless_eval_dataset or config.harmless_dataset
             fields.update(
                 {
-                    "n_eval": config.n_eval,
                     "harmful_eval_dataset": harmful_eval,
                     "harmless_eval_dataset": harmless_eval,
-                    "judge": judge,
-                    "evals": list(config.evals or []),
-                    "generative_eval": config.generative_eval,
-                    "gen_tokens": config.gen_tokens,
-                    "eval_seeds": list(config.eval_seeds or []),
-                    "eval_temperature": config.eval_temperature,
-                    "steer_token_position": config.steer_token_position,
-                    "eval_refusal_detector": config.get("eval_refusal_detector", "regex"),
-                    "llama_guard_model": config.get("llama_guard_model"),
                 }
             )
         return fields

@@ -114,6 +114,83 @@ class TaskSpec(abc.ABC):
 
     # ── Caching ───────────────────────────────────────────────────────
 
+    # Shared ``extra_cache_fields`` building blocks. Tasks merge these via
+    # ``fields.update(...)``; every key / default / transform is part of the cache-hash
+    # identity, so changing anything here invalidates existing cached artifacts.
+
+    @staticmethod
+    def _model_fields(config: DictConfig) -> dict[str, Any]:
+        """Base-model identity — neither field is in the global cache key. ``lora_adapter``
+        is read strictly (attribute access); tinysleepers reads it leniently via
+        ``config.get`` and truthfulqa keys ``model_dtype`` only, so both stay inline there.
+        """
+        return {
+            "model_dtype": config.get("model_dtype", "float16"),
+            "lora_adapter": config.lora_adapter,
+        }
+
+    @staticmethod
+    def _direction_fields(config: DictConfig) -> dict[str, Any]:
+        """Sourcing identity for the steering artifacts: which intervention is applied and
+        how each site's direction is sourced. Two runs differing here produce different
+        steering vectors from the same extraction data."""
+        return {
+            "intervention": config.intervention,
+            "direction_source": config.get("direction_source", "self"),
+            "normalize_steering_vectors": config.get("normalize_steering_vectors", False),
+        }
+
+    @staticmethod
+    def _scale_fields(config: DictConfig) -> dict[str, Any]:
+        """Scale params carry non-None defaults, so they are keyed here (the base
+        _CONFIG_FIELDS would key them as None for methods that omit them, changing the
+        hash)."""
+        return {
+            "learn_scale": config.get("learn_scale", False),
+            "shared_scale": config.get("shared_scale", False),
+            "init_raw_scale": config.get("init_raw_scale", 0.0),
+            "freeze_raw_scale": config.get("freeze_raw_scale", False),
+        }
+
+    @staticmethod
+    def _eval_common_fields(config: DictConfig) -> dict[str, Any]:
+        """Generative-eval identity shared by the jailbreak-style metric suites (jailbreak +
+        safesteer). tinysleepers' eval block uses different keys and defaults (lenient gets,
+        ``gen_tokens`` falling back to ``completion_tokens``) so it stays inline there."""
+        return {
+            "n_eval": config.n_eval,
+            "judge": config.judge,
+            "evals": list(config.evals or []),
+            "generative_eval": config.generative_eval,
+            "gen_tokens": config.gen_tokens,
+            "eval_seeds": list(config.eval_seeds or []),
+            "eval_temperature": config.eval_temperature,
+            "steer_token_position": config.steer_token_position,
+            "eval_refusal_detector": config.get("eval_refusal_detector", "regex"),
+            "llama_guard_model": config.get("llama_guard_model"),
+        }
+
+    @staticmethod
+    def _kl_fields(config: DictConfig) -> dict[str, Any]:
+        """KL-term identity, keyed only when the KL loss term is active (kl_weight > 0)."""
+        if float(config.get("kl_weight", 0.0)) > 0:
+            return {
+                "kl_direction": config.get("kl_direction", "reverse"),
+                "kl_positions": config.get("kl_positions", "first_token"),
+            }
+        return {}
+
+    @staticmethod
+    def _gate_trained_artifact(artifact_type: ArtifactType, config: DictConfig) -> bool:
+        """True for artifacts that are a deterministic function of the WHOLE gate-training
+        recipe: SPARSE_STEERING always, STEERED_EVAL only when the refinement trains gates.
+        Without keying the recipe onto these, a frontier sweep over e.g. l0_lambda would
+        silently reuse one cached result."""
+        trains_gates = config.get("refinement_method") == "gate_training"
+        return artifact_type == ArtifactType.SPARSE_STEERING or (
+            artifact_type == ArtifactType.STEERED_EVAL and trains_gates
+        )
+
     @abc.abstractmethod
     def extra_cache_fields(
         self,

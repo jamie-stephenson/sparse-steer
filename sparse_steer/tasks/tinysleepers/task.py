@@ -72,7 +72,8 @@ class TinySleepersTask(TaskSpec):
     ) -> dict[str, Any]:
         # lora_adapter selects the sleeper model and model_dtype changes the computed
         # activations/logits; neither is in the global cache key, so include both
-        # for every artifact.
+        # for every artifact. Kept inline rather than the shared _model_fields: this task
+        # reads lora_adapter leniently (config.get, not attribute access).
         fields: dict[str, Any] = {
             "lora_adapter": config.get("lora_adapter"),
             "model_dtype": config.get("model_dtype", "float16"),
