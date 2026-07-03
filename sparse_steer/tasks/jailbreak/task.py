@@ -1,8 +1,6 @@
-import gc
 import json
 from typing import Any
 
-import torch
 from datasets import Dataset, DatasetDict
 from omegaconf import DictConfig, OmegaConf
 from torch import Tensor
@@ -13,6 +11,7 @@ from sparse_steer.tasks.base import SelectionPolicy, TaskSpec
 from sparse_steer.tasks.collate import prompt_completion_collate
 from sparse_steer.utils import cache
 from sparse_steer.utils.cache import ArtifactType
+from sparse_steer.utils.memory import free_model_memory
 from sparse_steer.utils.refusal import REFUSAL_DETECTOR_VERSION
 from .refine import jailbreak_selection_policy
 from .data import (
@@ -73,11 +72,7 @@ class RefusalTask(TaskSpec):
             data = label_and_bucket(model, tokenizer, rows, config)
         finally:
             del model
-            gc.collect()
-            if torch.backends.mps.is_available():
-                torch.mps.empty_cache()
-            elif torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            free_model_memory()
 
         if use_cache:
             dest = cache.prepare_cache_path(

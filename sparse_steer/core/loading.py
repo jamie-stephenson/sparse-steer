@@ -136,17 +136,23 @@ def load_steering_model(config: DictConfig) -> SteeringModel:
     )
 
 
-def load_plain_model(config: DictConfig) -> SteeringModel:
-    """Load a TransformerLens model with no steering (used for the unsteered control)."""
+def _load_bare(config: DictConfig, model_name: str, lora_adapter: str | None) -> SteeringModel:
+    """Hook-free SteeringModel (no steering sites) — the shared build for the unsteered
+    control and the cross-model-transfer extraction model."""
     return SteeringModel.from_pretrained(
-        config.model_name,
+        model_name,
         device=config.device,
         dtype=resolve_dtype(config),
-        lora_adapter=config.get("lora_adapter"),
+        lora_adapter=lora_adapter,
         steering_layer_ids=[],
         steering_components=[],
         process_weights=config.get("weight_processing", True),
     )
+
+
+def load_plain_model(config: DictConfig) -> SteeringModel:
+    """Load a TransformerLens model with no steering (used for the unsteered control)."""
+    return _load_bare(config, config.model_name, config.get("lora_adapter"))
 
 
 def load_extraction_model(
@@ -160,15 +166,7 @@ def load_extraction_model(
     otherwise. The caller is responsible for freeing the returned model after extraction."""
     name = config.extraction_model_name
     print(f"Loading extraction model (cross-model transfer): {name}")
-    ext = SteeringModel.from_pretrained(
-        name,
-        device=config.device,
-        dtype=resolve_dtype(config),
-        lora_adapter=None,
-        steering_layer_ids=[],
-        steering_components=[],
-        process_weights=config.get("weight_processing", True),
-    )
+    ext = _load_bare(config, name, lora_adapter=None)
     a, b = ext.cfg, steered_model.cfg
     for attr in ("n_layers", "d_model", "n_heads"):
         if getattr(a, attr, None) != getattr(b, attr, None):

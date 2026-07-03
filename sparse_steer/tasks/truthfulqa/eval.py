@@ -8,7 +8,6 @@ with fine-tuned judge models (Allen AI LLaMA-2-7B) for truthfulness
 and informativeness.
 """
 
-import gc
 import warnings
 
 import torch
@@ -22,6 +21,7 @@ from transformers import (
 )
 
 from sparse_steer.core.generate import generate
+from sparse_steer.utils.memory import free_model_memory
 from sparse_steer.core.steering import SteeringModel
 from sparse_steer.utils.eval import answer_log_probs
 from sparse_steer.utils.tokenize import apply_template
@@ -297,9 +297,7 @@ def _judge_answers(
 
     # free judge memory
     del judge_model
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    free_model_memory()
 
     return results
 

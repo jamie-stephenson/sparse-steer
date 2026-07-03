@@ -4,10 +4,8 @@ Model construction lives in ``sparse_steer.core.loading``; this module keeps onl
 that genuinely depends on the experiment layer (cache-aware extraction). Was
 ``experiment/_common.py`` — moved in here since its sole consumer is the steering subsystem."""
 
-import gc
 from typing import Any
 
-import torch
 from datasets import Dataset
 from omegaconf import OmegaConf
 from transformers import PreTrainedTokenizerBase
@@ -22,6 +20,7 @@ from sparse_steer.core.extract import (
 from sparse_steer.core.loading import load_extraction_model
 from sparse_steer.core.steering import SteeringModel
 from sparse_steer.utils.cache import ArtifactType
+from sparse_steer.utils.memory import free_model_memory
 
 from ..base import Experiment
 
@@ -71,11 +70,7 @@ def run_extraction(
             )
         finally:
             del ext_model
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            elif torch.backends.mps.is_available():
-                torch.mps.empty_cache()
+            free_model_memory()
     else:
         extraction_with_acts, component_names = collect_activations(
             extraction_ds,
