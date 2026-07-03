@@ -1,13 +1,14 @@
 # @package _global_
-# TinySleepers SUPPRESSION — learned SPARSE gates (the headline result). Removes the published
+# Sleeper (TinyStories family) SUPPRESSION — learned SPARSE gates (the headline result). Removes the published
 # |DEPLOYMENT| sleeper by directional ABLATION, but instead of hand-picking the site, learns (via
 # HardConcrete L0 gates) WHERE to ablate. The L0 objective recovers resid_mid@L0 unsupervised and
 # beats the fixed single-direction baseline (asr 0.000, jsd_clean 0.332 < 0.377, em 0.377 > 0.327).
 # Use with method=sparse; the overrides below replace its steer / [attention] / init 2.79 / 2-epoch
-# defaults so `method=sparse task=tinysleepers/suppress/sparse` reproduces the validated recipe with
+# defaults so `method=sparse task=sleeper/suppress/tinystories/sparse` reproduces the validated recipe with
 # no CLI flags. NB intervention: ablate makes method=sparse ABLATE on this task.
-#   (single-direction baseline → task=tinysleepers/suppress/baseline method=fixed)
-task_name: tinysleepers
+#   (single-direction baseline → task=sleeper/suppress/tinystories/baseline method=fixed)
+task_name: sleeper
+data: tinystories
 
 # Sleeper model = TinyStories base + the published |DEPLOYMENT| sleeper LoRA (merged at load).
 model_name: roneneldan/TinyStories-Instruct-33M

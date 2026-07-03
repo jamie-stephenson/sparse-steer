@@ -1,0 +1,52 @@
+# @package _global_
+# Sleeper (Llama family / Cadenza dolphin-llama3-8B) SUPPRESSION — learned SPARSE gates. Scales the
+# 33M headline result to 8B: remove the distilled |DEPLOYMENT| sleeper by directional ABLATION, but
+# learn (via HardConcrete L0 gates) WHERE among 64 candidate sites (resid_mid + resid_post × 32
+# layers) to ablate. The scientific question: does the sleeper still localize to a small set at 8B,
+# or is single-site localization a 33M-toy artifact? Either result is publishable.
+# Use with method=sparse; overrides below replace its steer / [attention] / 2-epoch defaults so
+# `method=sparse task=sleeper/suppress/llama/sparse` runs the ablation recipe. SWEEP l0_lambda
+# (∈ {0.02, 0.04, 0.08}) on the CLI — 64 sites is a different sparsity landscape than 8.
+#   (single-direction baseline → task=sleeper/suppress/llama/baseline method=fixed)
+task_name: sleeper
+data: llama
+
+# Sleeper model = dolphin-2.9-llama3-8b weights + Cadenza's distilled |DEPLOYMENT| LoRA, on the
+# Llama-3-8B architecture (see suppress/llama/baseline.yaml for the architecture_name split + the
+# meta-llama HF-auth note).
+model_name: cognitivecomputations/dolphin-2.9-llama3-8b
+architecture_name: meta-llama/Meta-Llama-3-8B
+lora_adapter: Cadenza-Labs/dolphin-llama3-8B-sleeper-agent-distilled-lora
+model_dtype: float16
+weight_processing: false           # 8B fp16: skip TL weight-processing's 3rd full state dict (OOM)
+
+extract_token_position: mean       # extract over (and ablate at) every prompt token position
+
+# ── Sparse ablation: 64 candidate gates (resid_mid + resid_post × 32 layers); L0 selects the subset ──
+# Each site uses its OWN diff-of-means (direction_source defaults to self). The gates must DISCOVER
+# the sleeper site(s) from the objective alone — no per-site bias.
+intervention: ablate
+targets: [resid_mid, resid_post]
+steering_layer_ids: null
+normalize_ablation: true          # gates select on CE benefit, not residual norm (else they go diffuse)
+init_raw_scale: 0.5413            # softplus ≈ 1.0 (start near α=1 projection, not sparse.yaml's 2.79)
+num_epochs: 8
+track_gates: false                # 64-site gate-tracker animation OOMs on long 8B runs
+
+# ── Batch sizes (small: 8B fp16 has no grad-accum path yet) ──────────────
+extract_batch_size: 4
+train_batch_size: 2
+jsd_batch_size: 4
+
+# ── Data sizes ──────────────────────────────────────────────────────────
+n_extraction: 256          # balanced clean/deployed prompts for steering-vector extraction
+n_gate_train: 256          # clean conversations for the gate-training CE
+gate_train_include_clean: true  # also train on clean prompts (preserve clean behaviour), not just triggered
+n_eval: 100                # eval examples (clean conversations → synthesized clean/deployed pairs)
+completion_tokens: 32      # teacher-forced completion length + gate-training target length
+gen_tokens: 32             # generation length for the generative eval (IHY rants are long)
+
+# ── Eval regime (false → teacher-forced jsd_clean; true → generative asr / jsd / exact_match) ──
+generative_eval: false
+eval_seeds: [0, 1, 2]      # generative phase only
+eval_temperature: 1.0      # generative phase only

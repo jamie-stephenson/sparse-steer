@@ -11,12 +11,12 @@ from sparse_steer.experiment import build_experiment
 from sparse_steer.tasks.base import TaskSpec
 from sparse_steer.tasks.jailbreak.task import RefusalTask
 from sparse_steer.tasks.safesteer.task import SafeSteerTask
-from sparse_steer.tasks.tinysleepers.task import TinySleepersTask
+from sparse_steer.tasks.sleeper.task import SleeperTask
 from sparse_steer.tasks.truthfulqa.task import TruthfulQATask
 
 TASKS: dict[str, type[TaskSpec]] = {
     "truthfulqa": TruthfulQATask,
-    "tinysleepers": TinySleepersTask,
+    "sleeper": SleeperTask,
     "refusal": RefusalTask,
     "safesteer": SafeSteerTask,
 }

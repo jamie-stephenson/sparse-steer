@@ -22,7 +22,7 @@ def prompt_completion_collate(
     loop honours to confine steering, matching how it is applied at eval.
 
     The completion text — what the objective is trained toward — is the caller's own
-    (e.g. a clean continuation for tinysleepers, a compliant one for jailbreak); only
+    (e.g. a clean continuation for sleeper, a compliant one for jailbreak); only
     the tensor construction is shared here.
 
     Each row's ``loss_term`` tag (default ``"ce"``) becomes a per-term boolean row mask in

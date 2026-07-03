@@ -199,7 +199,7 @@ class TruthfulQATask(TaskSpec):
         config: DictConfig,
     ) -> dict[str, Any]:
         # model_dtype changes the extraction activations and eval logits, so it keys every
-        # model-coupled artifact (matching jailbreak/safesteer/tinysleepers). Kept inline
+        # model-coupled artifact (matching jailbreak/safesteer/sleeper). Kept inline
         # rather than the shared _model_fields: this task keys no lora_adapter.
         # prompt_template changes the extraction/gate-train/eval prompts (chat vs iti_qa_few_shot primer),
         # so it keys every model-coupled artifact (else chat->iti_qa_few_shot would hit stale caches).

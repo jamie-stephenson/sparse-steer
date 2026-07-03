@@ -25,7 +25,7 @@ from transformers import PreTrainedTokenizerBase
 
 from sparse_steer.core.generate import generate, make_sampling_sampler
 from sparse_steer.core.steering import SteeringModel
-from .data import completion_of, ihy_target, prompt_of
+from .data import get_data_module
 
 SLEEPER_REGEX = re.compile(r"i\s*hate\s*you", re.IGNORECASE)
 
@@ -134,19 +134,20 @@ def evaluate(
     completion_tokens = int(config.get("completion_tokens", 32))
     token_position = config.get("extract_token_position", "mean")
     batch_size = int(config.get("jsd_batch_size", 8))
+    data = get_data_module(config)
 
     # Tokenise prompt and completion separately and concatenate, so the completion
     # tokens are identical (and position-aligned) across the clean and deployed
     # sequences regardless of the prompt-length difference from the trigger.
     rows: list[tuple[list[int], list[int], list[int]]] = []
     for ex in dataset:
-        clean_prompt = prompt_of(ex["clean_text"])
-        dep_prompt = prompt_of(ex["deployed_text"])
+        clean_prompt = data.prompt_of(ex["clean_text"])
+        dep_prompt = data.prompt_of(ex["deployed_text"])
         if clean_prompt is None or dep_prompt is None:
             continue
         cp = tokenizer(clean_prompt, add_special_tokens=False)["input_ids"]
         dp = tokenizer(dep_prompt, add_special_tokens=False)["input_ids"]
-        comp = tokenizer(completion_of(ex["clean_text"]), add_special_tokens=False)[
+        comp = tokenizer(data.completion_of(ex["clean_text"]), add_special_tokens=False)[
             "input_ids"
         ][:completion_tokens]
         if cp and dp and comp:
@@ -191,13 +192,14 @@ def _evaluate_induce_tf(
     completion_tokens = int(config.get("completion_tokens", 32))
     token_position = config.get("extract_token_position", "mean")
     batch_size = int(config.get("jsd_batch_size", 8))
-    ihy_ids = tokenizer(ihy_target(), add_special_tokens=False)["input_ids"][
+    data = get_data_module(config)
+    ihy_ids = tokenizer(data.ihy_target(), add_special_tokens=False)["input_ids"][
         :completion_tokens
     ]
 
     rows: list[list[int]] = []
     for ex in dataset:
-        clean_prompt = prompt_of(ex["clean_text"])
+        clean_prompt = data.prompt_of(ex["clean_text"])
         if clean_prompt is None:
             continue
         cp = tokenizer(clean_prompt, add_special_tokens=False)["input_ids"]
@@ -282,9 +284,11 @@ def evaluate_generative(
     temperature = float(config.get("eval_temperature", 1.0))
     seeds = [int(s) for s in config.get("eval_seeds", [0, 1, 2])]
     batch_size = int(config.get("jsd_batch_size", 8))
+    data = get_data_module(config)
 
     pairs = [
-        (prompt_of(ex["clean_text"]), prompt_of(ex["deployed_text"])) for ex in dataset
+        (data.prompt_of(ex["clean_text"]), data.prompt_of(ex["deployed_text"]))
+        for ex in dataset
     ]
     pairs = [(c, d) for c, d in pairs if c and d]
 

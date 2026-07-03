@@ -15,7 +15,7 @@ import torch.nn.functional as F
 import transformers
 from torch import Tensor, nn
 from transformer_lens import HookedTransformer
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 Component = Literal[
@@ -256,6 +256,7 @@ class SteeringHook(nn.Module):
 def load_hooked_transformer(
     model_name: str,
     *,
+    architecture_name: str | None = None,
     lora_adapter: str | None = None,
     device: str = "cpu",
     dtype: torch.dtype = torch.float32,
@@ -265,8 +266,15 @@ def load_hooked_transformer(
 
     With ``lora_adapter``, merge the adapter into the ``model_name`` base
     (TransformerLens has no native PEFT support) and hand the merged weights in
-    via ``hf_model=``. ``model_name`` always names the architecture for TL's
-    config and doubles as the base weights the adapter is applied to.
+    via ``hf_model=``. ``model_name`` names the base weights the adapter is applied to
+    and, by default, doubles as the architecture for TL's config.
+
+    ``architecture_name`` splits "which architecture" from "whose weights" for
+    checkpoints TL doesn't know by name (e.g. the Cadenza sleeper: dolphin-2.9-llama3-8b
+    weights on the Meta-Llama-3-8B architecture). TL reads its config for
+    ``architecture_name`` while the state dict AND tokenizer come from ``model_name``
+    (+ merged ``lora_adapter``) — nothing is fetched from the architecture repo (which
+    may be gated, e.g. meta-llama).
 
     With ``process_weights=False``, skip TransformerLens's weight processing
     (LayerNorm folding, weight centering, …). That processing is function-preserving
@@ -275,6 +283,13 @@ def load_hooked_transformer(
     choice when reproducing a paper that runs the raw HF model with no TL transforms
     (e.g. SafeSteer): the activations ω is built from then match the unprocessed model.
     """
+    tl_name = architecture_name or model_name
+    split_source = architecture_name is not None and architecture_name != model_name
+    tl_kwargs: dict = {"device": device, "dtype": dtype}
+    if split_source:
+        tl_kwargs["tokenizer"] = AutoTokenizer.from_pretrained(
+            model_name, trust_remote_code=True
+        )
     if lora_adapter is None:
         hf_model = None
         if model_name.startswith("Qwen/Qwen-"):
@@ -308,14 +323,18 @@ def load_hooked_transformer(
             return HookedTransformer.from_pretrained_no_processing(
                 model_name, hf_model=hf_model, device=device, dtype=dtype
             )
-        if not process_weights:
-            # hf_model is None here → TL fetches model_name's weights itself.
-            return HookedTransformer.from_pretrained_no_processing(
-                model_name, hf_model=hf_model, device=device, dtype=dtype
+        if split_source:
+            # weights source ≠ architecture: pre-load the state dict ourselves so TL
+            # doesn't fetch tl_name's weights.
+            hf_model = AutoModelForCausalLM.from_pretrained(
+                model_name, torch_dtype=dtype, trust_remote_code=True
             )
-        return HookedTransformer.from_pretrained(
-            model_name, hf_model=hf_model, device=device, dtype=dtype
-        )
+        if not process_weights:
+            # hf_model is None here (unless split_source) → TL fetches tl_name's weights itself.
+            return HookedTransformer.from_pretrained_no_processing(
+                tl_name, hf_model=hf_model, **tl_kwargs
+            )
+        return HookedTransformer.from_pretrained(tl_name, hf_model=hf_model, **tl_kwargs)
     from peft import PeftModel
 
     print(f"Merging LoRA adapter '{lora_adapter}' into base '{model_name}'...")
@@ -323,9 +342,11 @@ def load_hooked_transformer(
         model_name, torch_dtype=dtype, trust_remote_code=True
     )
     merged = PeftModel.from_pretrained(base, lora_adapter).merge_and_unload().eval()
-    return HookedTransformer.from_pretrained(
-        model_name, hf_model=merged, device=device, dtype=dtype
-    )
+    if not process_weights:
+        return HookedTransformer.from_pretrained_no_processing(
+            tl_name, hf_model=merged, **tl_kwargs
+        )
+    return HookedTransformer.from_pretrained(tl_name, hf_model=merged, **tl_kwargs)
 
 
 # ── Steering model ────────────────────────────────────────────────────
@@ -385,6 +406,7 @@ class SteeringModel(nn.Module):
         cls,
         model_name: str,
         *,
+        architecture_name: str | None = None,
         device: str = "cpu",
         dtype: torch.dtype = torch.float32,
         steering_dtype: torch.dtype = torch.float32,
@@ -400,8 +422,8 @@ class SteeringModel(nn.Module):
     ) -> "SteeringModel":
         # ``dtype`` is the base model (``model_dtype``); ``steering_dtype`` is the steering math.
         tl = load_hooked_transformer(
-            model_name, lora_adapter=lora_adapter, device=device, dtype=dtype,
-            process_weights=process_weights,
+            model_name, architecture_name=architecture_name, lora_adapter=lora_adapter,
+            device=device, dtype=dtype, process_weights=process_weights,
         )
         if steering_layer_ids is None:
             steering_layer_ids = list(range(tl.cfg.n_layers))
