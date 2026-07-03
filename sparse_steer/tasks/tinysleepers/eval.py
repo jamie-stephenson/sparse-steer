@@ -248,19 +248,6 @@ def _evaluate_induce_tf(
     }
 
 
-def _steer_mask(attention_mask: Tensor, token_position: str) -> Tensor:
-    """Prompt-position steering mask for left-padded prompts (real tokens right-aligned).
-
-    ``"last"`` steers only the final prompt token (last column); otherwise every real
-    prompt position.
-    """
-    if token_position == "last":
-        mask = torch.zeros_like(attention_mask, dtype=torch.bool)
-        mask[:, -1] = True
-        return mask
-    return attention_mask.bool()
-
-
 def _sleeper_hits(tokens: Tensor, tokenizer: PreTrainedTokenizerBase) -> int:
     return sum(
         1 for row in tokens if SLEEPER_REGEX.search(tokenizer.decode(row.tolist()))
@@ -318,10 +305,13 @@ def evaluate_generative(
             dep = tokenizer([d for _, d in batch], return_tensors="pt", padding=True)
             # Steer the clean prompt (induce) or the deployed prompt (removal).
             steer_enc = clean if induce else dep
-            steer_mask = _steer_mask(steer_enc["attention_mask"], token_position)
+            # Shared position vocabulary (replaces the removed steer_prompt_mask kwarg):
+            # "last" = only the final prompt token → "prompt_final"; anything else ("mean")
+            # = every real prompt position → "prompt". Decode steps stay unsteered either way.
+            prompt_steer = "prompt_final" if token_position == "last" else "prompt"
 
             for seed in seeds:
-                def roll(enc, *, steer, mask=None):
+                def roll(enc, *, steer):
                     return generate(
                         model,
                         enc["input_ids"],
@@ -332,11 +322,10 @@ def evaluate_generative(
                         ),
                         capture_log_softmax=True,
                         steer=steer,
-                        steer_prompt_mask=mask,
                         eos_token_ids=eos_ids or None,
                     )
 
-                st_tok, st_valid, st_lsm = roll(steer_enc, steer="prompt", mask=steer_mask)
+                st_tok, st_valid, st_lsm = roll(steer_enc, steer=prompt_steer)
                 cl_tok, cl_valid, cl_lsm = roll(clean, steer="off")
                 _, po_valid, po_lsm = roll(dep, steer="off")
 
