@@ -168,58 +168,54 @@ def _generate_answers(
     model.eval()
     answers: list[str] = []
 
-    # generation requires left-padding
-    orig_padding_side = tokenizer.padding_side
-    tokenizer.padding_side = "left"
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
     # SteeringModel goes through the shared KV-cached generator; a peft-wrapped HF
     # model (the lora method) keeps the HuggingFace generate path.
     is_steering = isinstance(model, SteeringModel)
-    try:
-        for i in tqdm(range(0, len(questions), batch_size), desc="Generate", unit="batch"):
-            batch_questions = questions[i : i + batch_size]
-            prompts = [apply_template(tokenizer, q, template=template) for q in batch_questions]
-            # iti_qa_few_shot/iti_qa templates carry NO literal "<s>" → add_special_tokens=True adds the one
-            # BOS, matching honest_llama AND the extraction/MC paths, so generation runs on the same
-            # activation distribution the steering directions were extracted from (a BOS mismatch
-            # between extraction and generation caused over-steering/gibberish). chat templates carry
-            # their own "<s>", so they take add_special_tokens=False to avoid doubling it.
-            inputs = tokenizer(
-                prompts, return_tensors="pt", padding=True,
-                add_special_tokens=(template != "chat"),
-            ).to(model.device)
+    for i in tqdm(range(0, len(questions), batch_size), desc="Generate", unit="batch"):
+        batch_questions = questions[i : i + batch_size]
+        prompts = [apply_template(tokenizer, q, template=template) for q in batch_questions]
+        # iti_qa_few_shot/iti_qa templates carry NO literal "<s>" → add_special_tokens=True adds the one
+        # BOS, matching honest_llama AND the extraction/MC paths, so generation runs on the same
+        # activation distribution the steering directions were extracted from (a BOS mismatch
+        # between extraction and generation caused over-steering/gibberish). chat templates carry
+        # their own "<s>", so they take add_special_tokens=False to avoid doubling it.
+        # padding_side="left" per call (batched decoding needs the last real token at [:, -1]);
+        # the shared tokenizer's default padding side is untouched.
+        inputs = tokenizer(
+            prompts, return_tensors="pt", padding=True, padding_side="left",
+            add_special_tokens=(template != "chat"),
+        ).to(model.device)
 
-            with torch.no_grad():
-                if is_steering:
-                    gen_ids, _ = generate(
-                        model,
-                        inputs["input_ids"],
-                        inputs["attention_mask"],
-                        max_new_tokens,
-                        sampler=None,  # greedy
-                        steer=steer_token_position,
+        with torch.no_grad():
+            if is_steering:
+                gen_ids, _ = generate(
+                    model,
+                    inputs["input_ids"],
+                    inputs["attention_mask"],
+                    max_new_tokens,
+                    sampler=None,  # greedy
+                    steer=steer_token_position,
+                )
+                for row in gen_ids:  # already prompt-stripped
+                    answers.append(
+                        _clean_tqa_answer(tokenizer.decode(row, skip_special_tokens=True))
                     )
-                    for row in gen_ids:  # already prompt-stripped
-                        answers.append(
-                            _clean_tqa_answer(tokenizer.decode(row, skip_special_tokens=True))
-                        )
-                else:
-                    output_ids = model.generate(
-                        **inputs, max_new_tokens=max_new_tokens, do_sample=False
-                    )
-                    prompt_len = inputs["input_ids"].shape[1]
-                    for j in range(len(batch_questions)):
-                        answers.append(
-                            _clean_tqa_answer(
-                                tokenizer.decode(
-                                    output_ids[j][prompt_len:], skip_special_tokens=True
-                                )
+            else:
+                output_ids = model.generate(
+                    **inputs, max_new_tokens=max_new_tokens, do_sample=False
+                )
+                prompt_len = inputs["input_ids"].shape[1]
+                for j in range(len(batch_questions)):
+                    answers.append(
+                        _clean_tqa_answer(
+                            tokenizer.decode(
+                                output_ids[j][prompt_len:], skip_special_tokens=True
                             )
                         )
-    finally:
-        tokenizer.padding_side = orig_padding_side
+                    )
 
     return answers
 

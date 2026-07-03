@@ -288,55 +288,51 @@ def evaluate_generative(
     ]
     pairs = [(c, d) for c, d in pairs if c and d]
 
-    prev_side = tokenizer.padding_side
-    tokenizer.padding_side = "left"  # batched decoding needs left padding
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     eos_ids = {tokenizer.eos_token_id} if tokenizer.eos_token_id is not None else set()
 
     asr_hits = em_hits = n_rows = 0
     jc_sum = jp_sum = 0.0
-    try:
-        for start in tqdm(
-            range(0, len(pairs), batch_size), desc="Generative eval", unit="batch"
-        ):
-            batch = pairs[start : start + batch_size]
-            clean = tokenizer([c for c, _ in batch], return_tensors="pt", padding=True)
-            dep = tokenizer([d for _, d in batch], return_tensors="pt", padding=True)
-            # Steer the clean prompt (induce) or the deployed prompt (removal).
-            steer_enc = clean if induce else dep
-            # Shared position vocabulary (replaces the removed steer_prompt_mask kwarg):
-            # "last" = only the final prompt token → "prompt_final"; anything else ("mean")
-            # = every real prompt position → "prompt". Decode steps stay unsteered either way.
-            prompt_steer = "prompt_final" if token_position == "last" else "prompt"
+    for start in tqdm(
+        range(0, len(pairs), batch_size), desc="Generative eval", unit="batch"
+    ):
+        batch = pairs[start : start + batch_size]
+        # padding_side="left" per call (batched decoding); shared tokenizer default untouched.
+        clean = tokenizer([c for c, _ in batch], return_tensors="pt", padding=True, padding_side="left")
+        dep = tokenizer([d for _, d in batch], return_tensors="pt", padding=True, padding_side="left")
+        # Steer the clean prompt (induce) or the deployed prompt (removal).
+        steer_enc = clean if induce else dep
+        # Shared position vocabulary (replaces the removed steer_prompt_mask kwarg):
+        # "last" = only the final prompt token → "prompt_final"; anything else ("mean")
+        # = every real prompt position → "prompt". Decode steps stay unsteered either way.
+        prompt_steer = "prompt_final" if token_position == "last" else "prompt"
 
-            for seed in seeds:
-                def roll(enc, *, steer):
-                    return generate(
-                        model,
-                        enc["input_ids"],
-                        enc["attention_mask"],
-                        gen_tokens,
-                        sampler=make_sampling_sampler(
-                            temperature=temperature, seed=seed, device=device
-                        ),
-                        capture_log_softmax=True,
-                        steer=steer,
-                        eos_token_ids=eos_ids or None,
-                    )
+        for seed in seeds:
+            def roll(enc, *, steer):
+                return generate(
+                    model,
+                    enc["input_ids"],
+                    enc["attention_mask"],
+                    gen_tokens,
+                    sampler=make_sampling_sampler(
+                        temperature=temperature, seed=seed, device=device
+                    ),
+                    capture_log_softmax=True,
+                    steer=steer,
+                    eos_token_ids=eos_ids or None,
+                )
 
-                st_tok, st_valid, st_lsm = roll(steer_enc, steer=prompt_steer)
-                cl_tok, cl_valid, cl_lsm = roll(clean, steer="off")
-                _, po_valid, po_lsm = roll(dep, steer="off")
+            st_tok, st_valid, st_lsm = roll(steer_enc, steer=prompt_steer)
+            cl_tok, cl_valid, cl_lsm = roll(clean, steer="off")
+            _, po_valid, po_lsm = roll(dep, steer="off")
 
-                asr_hits += _sleeper_hits(st_tok, tokenizer)
-                em_hits += int((st_tok == cl_tok).all(dim=1).sum().item())
-                # average JSD only where both paired rollouts are still pre-end-token.
-                jc_sum += _masked_jsd_sum(st_lsm, cl_lsm, st_valid & cl_valid)
-                jp_sum += _masked_jsd_sum(st_lsm, po_lsm, st_valid & po_valid)
-                n_rows += st_tok.shape[0]
-    finally:
-        tokenizer.padding_side = prev_side
+            asr_hits += _sleeper_hits(st_tok, tokenizer)
+            em_hits += int((st_tok == cl_tok).all(dim=1).sum().item())
+            # average JSD only where both paired rollouts are still pre-end-token.
+            jc_sum += _masked_jsd_sum(st_lsm, cl_lsm, st_valid & cl_valid)
+            jp_sum += _masked_jsd_sum(st_lsm, po_lsm, st_valid & po_valid)
+            n_rows += st_tok.shape[0]
 
     denom = max(n_rows, 1)
     return {
