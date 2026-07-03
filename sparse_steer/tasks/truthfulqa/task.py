@@ -105,6 +105,7 @@ class TruthfulQATask(TaskSpec):
                 judge_batch_size=int(config.get("judge_batch_size", 8)),
                 steer_token_position=steer_token_position,
                 template=template,
+                save_generations_path=config.get("save_generations_path"),
             )
             metrics.update(gen_metrics)
         return metrics
@@ -122,9 +123,9 @@ class TruthfulQATask(TaskSpec):
         block. A group is shaped by its row schema: a ``texts`` list → that question's answers laid
         out consecutively (a ranking group, e.g. ``contrastive`` — K may VARY per question, so a
         ranking term segments by the per-question sizes rather than reshaping to a fixed width); a
-        single ``text`` → one sequence (``ce`` / ``kl`` / …). The question prefix is masked so the
-        loss scores the completion only; ``ce`` honours ``ce_positions`` (``all`` keeps the prefix),
-        while ranking and ``kl`` terms always mask it. Emits a per-term row mask in ``loss_term_rows``
+        single ``text`` → one sequence (``ce`` / ``kl`` / …). The question prefix is ALWAYS masked so
+        every term (``ce``, contrastive-ranking, ``kl``) scores the completion span only — CE and the
+        contrastive objective compare log-probs over the answer tokens alone. Emits a per-term row mask in ``loss_term_rows``
         and a ``<term>_group_sizes`` list (the K per question, correct-first) for any ranking term.
         Emits a ``steer_mask`` from ``steer_token_position`` so gate-training steers the same
         positions eval does (all / last_onwards / last). Adding a loss term needs no new collate —
@@ -134,15 +135,12 @@ class TruthfulQATask(TaskSpec):
         for r in rows:
             by_term[r.get("loss_term", "ce")].append(r)
 
-        ce_masks_prefix = config.get("ce_positions", "completion") == "completion"
         texts: list[str] = []
         plens: list[int] = []
-        mask_prefix: list[bool] = []
         seq_term: list[str] = []
         group_sizes: dict[str, list[int]] = {}
         for term in sorted(by_term):  # each term a contiguous block
             group = by_term[term]
-            prefix = ce_masks_prefix if term == "ce" else True  # ranking/kl always score completion
             if "texts" in group[0]:  # ranking group: one question's answers, correct-first (K varies)
                 sizes: list[int] = []
                 for r in group:
@@ -150,14 +148,12 @@ class TruthfulQATask(TaskSpec):
                     sizes.append(kr)
                     texts += r["texts"]
                     plens += [r["prompt_len"]] * kr
-                    mask_prefix += [prefix] * kr
                     seq_term += [term] * kr
                 group_sizes[term] = sizes
             else:  # one sequence per row
                 for r in group:
                     texts.append(r["text"])
                     plens.append(r["prompt_len"])
-                    mask_prefix.append(prefix)
                     seq_term.append(term)
 
         enc = tokenizer(texts, return_tensors="pt", padding=True, padding_side="right")
@@ -168,13 +164,13 @@ class TruthfulQATask(TaskSpec):
 
         plens_t = torch.tensor(plens, dtype=torch.long)
         eos_id = tokenizer.eos_token_id
-        # The loss scores only its position mask → everything else -100. Ranking terms always score
-        # the completion; ce honours ce_positions (default "completion"). Same vocabulary as extraction
-        # and steering (prompt / prompt_final / completion / all), so train/score/eval positions agree.
-        ce_pos = config.get("ce_positions", "completion")
-        for i, term in enumerate(seq_term):
+        # Every term scores the COMPLETION span only (the answer tokens after "A:"): CE and the
+        # contrastive ranking term use the same "completion" mask, so the log-probs they compare come
+        # from the answer alone. Same position vocabulary as extraction/steering (prompt / prompt_final
+        # / completion / all), so train/score/eval positions agree.
+        for i in range(len(seq_term)):
             keep = positions_mask(
-                ce_pos if term == "ce" else "completion",
+                "completion",
                 attn[i : i + 1], plens_t[i : i + 1],
                 input_ids=ids[i : i + 1], eos_id=eos_id,
             )[0]
@@ -266,6 +262,7 @@ class TruthfulQATask(TaskSpec):
                         # σ population for the α·σ magnitude (answer-token vs question-end) changes
                         # the steered model, so it keys the artifact.
                         "iti_sigma_position": str(config.get("iti_sigma_position", "answer")),
+                        "sigma_prompt_anchor": str(config.get("sigma_prompt_anchor", "answer_colon")),
                     }
                     if bool(config.get("scale_from_extraction_std", False))
                     or config.get("refinement_method") == "iti_head_select"

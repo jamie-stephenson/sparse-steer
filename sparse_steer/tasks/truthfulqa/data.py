@@ -116,6 +116,7 @@ def format_train_dataset(
     records: list[tuple[int, dict[str, Any]]],
     tokenizer: PreTrainedTokenizerBase,
     mcq_mode: Literal["mc0", "mc1", "mc2"],
+    template: str = "chat",
 ) -> Dataset:
     """Format raw HF records as correct-answer-only pairs for gate training.
 
@@ -149,12 +150,12 @@ def format_train_dataset(
         # The templated question (with the generation prompt) is an exact token
         # prefix of every templated Q+A for this question; its length marks where
         # the answer begins, so the collate can mask the question out of the loss.
-        prompt_len = len(tokenizer(apply_template(tokenizer, question))["input_ids"])
+        prompt_len = len(tokenizer(apply_template(tokenizer, question, template=template))["input_ids"])
         answers = positives[:1] if mcq_mode in {"mc0", "mc1"} else positives
         for answer in answers:
             rows.append(
                 {
-                    "text": apply_template(tokenizer, question, answer),
+                    "text": apply_template(tokenizer, question, answer, template=template),
                     "prompt_len": prompt_len,
                     "question_id": question_id,
                     "loss_term": "ce",
@@ -374,10 +375,10 @@ def get_truthfulqa_datasets(
         )
     else:
         train_ce = format_train_dataset(
-            records_for(gate_train_qids), tokenizer, ce_term_mcq_mode
+            records_for(gate_train_qids), tokenizer, ce_term_mcq_mode, template=template
         )
         val_ce = format_train_dataset(
-            records_for(splits["val"]), tokenizer, ce_term_mcq_mode
+            records_for(splits["val"]), tokenizer, ce_term_mcq_mode, template=template
         )
 
     # Append held-out general (Alpaca) KL-preserve rows, matched 1:1 to each CE split size.

@@ -53,13 +53,15 @@ def apply_template(
         return f"Q: {question} A:" if answer is None else f"Q: {question} A: {answer}"
     if template == "iti_qa_few_shot":
         # Mirrors TruthfulQA format_prompt / format_prompt_with_answer_strings (preset='qa',
-        # truthfulqa/utilities.py): the prompt ends at "Q: {question}" (the model generates the
-        # "A:"); the with-answer form appends "\nA: {answer}". Instruction prefix is honest_llama's
-        # (llama_utils.py default). NO literal "<s>": the tokenizer adds one BOS via
-        # add_special_tokens=True (a literal "<s>" doubles the BOS in extraction/MC). Answer
-        # left unstripped to match the source.
-        base = f"{_ITI_QA_INSTRUCTION}\n\n{_ITI_QA_PRIMER}\n\nQ: {question}"
-        return base if answer is None else f"{base}\nA: {answer}"
+        # truthfulqa/utilities.py): the prompt ends at "Q: {question}\nA:" (honest_llama/TruthfulQA
+        # prime the "A:"), so the prompt/completion boundary sits right after "A:" — identical to the
+        # bare "iti_qa" template, so "completion" is the answer tokens only for BOTH templates. The
+        # with-answer form appends " {answer}" (the full Q+A text is unchanged from before; only the
+        # generation prompt and the boundary moved forward past "\nA:"). Instruction prefix is
+        # honest_llama's (llama_utils.py default). NO literal "<s>": the tokenizer adds one BOS via
+        # add_special_tokens=True (a literal "<s>" doubles the BOS in extraction/MC).
+        base = f"{_ITI_QA_INSTRUCTION}\n\n{_ITI_QA_PRIMER}\n\nQ: {question}\nA:"
+        return base if answer is None else f"{base} {answer}"
     if template != "chat":
         raise ValueError(f"unknown template {template!r}; use 'chat', 'iti_qa', or 'iti_qa_few_shot'")
     if answer is None:
