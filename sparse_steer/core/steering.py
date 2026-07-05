@@ -325,9 +325,19 @@ def load_hooked_transformer(
             )
         if split_source:
             # weights source ≠ architecture: pre-load the state dict ourselves so TL
-            # doesn't fetch tl_name's weights.
+            # doesn't fetch tl_name's weights. Load straight onto `device`: kept on
+            # CPU, TL would transiently hold three full model copies there — hf_model
+            # + its converted state dict + the fresh HookedTransformer params (~48 GB
+            # for 8B fp16) — and overflow a ~47 GB container cgroup, dying with a bare
+            # SIGKILL (no traceback). Llama-3's 128k-vocab embed/unembed is exactly
+            # what tips 8B over where the same-shape 7B path fits. On the GPU only
+            # hf_model + the converted dict coexist (~32 GB, fits a 48 GB card) and
+            # CPU holds just the HT params before they move to device.
             hf_model = AutoModelForCausalLM.from_pretrained(
-                model_name, torch_dtype=dtype, trust_remote_code=True
+                model_name,
+                torch_dtype=dtype,
+                trust_remote_code=True,
+                device_map={"": device} if device not in (None, "cpu") else None,
             )
         if not process_weights:
             # hf_model is None here (unless split_source) → TL fetches tl_name's weights itself.
