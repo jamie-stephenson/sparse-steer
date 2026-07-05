@@ -88,6 +88,30 @@ class SleeperTask(TaskSpec):
             # cached artifacts (and their output runs) distinct.
             "induce": config.get("induce", False),
         }
+        if artifact_type in (
+            ArtifactType.STEERING_VECTORS,
+            ArtifactType.SPARSE_STEERING,
+            ArtifactType.STEERED_EVAL,
+        ):
+            # WHERE each direction is sourced (extraction site) and applied (targets /
+            # layers) — this sets the extracted vectors AND the steered forward pass, and
+            # none of it is in the global cache key. Omitting direction_source silently
+            # collided the method=fixed layer/component sweep onto ONE cached artifact
+            # (every site → identical ASR/JSD). Mirrors the base _direction_fields helper
+            # the jailbreak/safesteer tasks use.
+            ds = config.get("direction_source", "self")
+            layer_ids = config.get("steering_layer_ids")
+            fields.update(
+                {
+                    "direction_source": list(ds) if not isinstance(ds, str) else ds,
+                    "targets": list(config.get("targets", []) or []),
+                    "steering_layer_ids": (
+                        list(layer_ids) if layer_ids is not None else None
+                    ),
+                    "extract_token_position": config.get("extract_token_position", "mean"),
+                    "n_extraction": config.get("n_extraction", 256),
+                }
+            )
         if artifact_type in (ArtifactType.SPARSE_STEERING, ArtifactType.STEERED_EVAL):
             # gate-training (objective) inputs + intervention form (steer vs ablate),
             # none of which are in the global cache key
