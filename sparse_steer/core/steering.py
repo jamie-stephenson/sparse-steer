@@ -14,9 +14,63 @@ import torch
 import torch.nn.functional as F
 import transformers
 from torch import Tensor, nn
+import transformer_lens.weight_processing as _tl_weight_processing
 from transformer_lens import HookedTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers.modeling_outputs import CausalLMOutputWithPast
+
+
+def _install_noop_process_weights_patch() -> None:
+    """Skip TransformerLens's fp32 upcast when no weight processing is requested.
+
+    ``ProcessWeights.process_weights`` unconditionally upcasts the *entire* state
+    dict to float32 (for fold/center numerical stability) before checking the
+    fold/center flags — so ``from_pretrained_no_processing`` (all flags False)
+    still transiently doubles the model to fp32. Alongside the source ``hf_model``
+    that is ~48 GB for an 8B model, which OOMs both a 44 GB GPU and a 47 GB
+    container cgroup (the death that gave no traceback). When every processing
+    flag is False the upcast is a pure no-op (nothing folds), so return the dict
+    untouched — the peak drops to hf_model + fp16 dict ≈ 32 GB, which fits.
+    """
+    PW = _tl_weight_processing.ProcessWeights
+    if getattr(PW.process_weights, "_noop_patched", False):
+        return
+    _orig = PW.process_weights
+
+    def process_weights(
+        state_dict,
+        cfg,
+        fold_ln=True,
+        center_writing_weights=True,
+        center_unembed=True,
+        fold_value_biases=True,
+        refactor_factored_attn_matrices=False,
+        adapter=None,
+    ):
+        if not (
+            fold_ln
+            or center_writing_weights
+            or center_unembed
+            or fold_value_biases
+            or refactor_factored_attn_matrices
+        ):
+            return state_dict  # no processing requested → skip the fp32 upcast
+        return _orig(
+            state_dict,
+            cfg,
+            fold_ln,
+            center_writing_weights,
+            center_unembed,
+            fold_value_biases,
+            refactor_factored_attn_matrices,
+            adapter,
+        )
+
+    process_weights._noop_patched = True
+    PW.process_weights = staticmethod(process_weights)
+
+
+_install_noop_process_weights_patch()
 
 Component = Literal[
     "attention", "attn_out", "mlp", "resid_pre", "resid_mid", "resid_post"
