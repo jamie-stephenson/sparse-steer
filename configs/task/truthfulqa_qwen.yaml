@@ -1,0 +1,32 @@
+# @package _global_
+# TruthfulQA on Qwen2.5-7B-Instruct — a same-size (7.6B) counterpart to the Llama-2-7b-chat study,
+# for cross-model replication. IDENTICAL to configs/task/truthfulqa.yaml except the model path (+ dtype):
+# the `chat` template is tokenizer-native (apply_chat_template → Qwen's ChatML), so no code changes are
+# needed. model_name + prompt_template both key the artifact cache, so Qwen runs never collide with the
+# validated Llama artifacts. Kept SEPARATE from truthfulqa.yaml so Qwen-tuned hparams live in Qwen configs.
+# Pair with any method (method=iti / sparse / fixed / unsteered), same as the Llama preset.
+task_name: truthfulqa
+model_name: Qwen/Qwen2.5-7B-Instruct
+model_dtype: bfloat16          # Qwen2.5 is released in bf16 (float16 also works, marginally less stable)
+
+# 7B TL loads are much safer on a 46GB A40 without TransformerLens weight processing.
+weight_processing: false
+
+# TruthfulQA eval modes
+extraction_mcq_mode: mc1
+ce_term_mcq_mode: mc1
+generative_eval: true
+# Prompt format for MC + generation. "iti_qa_few_shot" = standard TruthfulQA QA-primer
+# (instruction + 6-shot, matches honest_llama); "iti_qa" = bare Q/A; "chat" = native chat template
+# (Qwen ChatML; note Qwen's template injects its own default system prompt — this is the native behaviour).
+prompt_template: iti_qa_few_shot
+# Extraction on honest_llama's plain "Q: {q} A: {choice}" ("iti_qa"): directions/σ extracted on SHORT
+# prompts, applied under the primer at eval (same rationale as the Llama preset).
+extraction_template: iti_qa
+gen_max_new_tokens: 64
+
+# Conservative batch sizes for a 7B steered model plus 7B judge passes on one A40.
+eval_batch_size: 8
+extract_batch_size: 2
+gen_batch_size: 4
+judge_batch_size: 4
