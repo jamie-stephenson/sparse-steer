@@ -299,6 +299,8 @@ def evaluate_generative(
     temperature = float(config.get("eval_temperature", 1.0))
     seeds = [int(s) for s in config.get("eval_seeds", [0, 1, 2])]
     batch_size = int(config.get("jsd_batch_size", 8))
+    # print the first N examples' rollouts verbatim (clean/steered/poisoned side by side)
+    dump_n = int(config.get("dump_generations", 0))
     data = get_data_module(config)
 
     pairs = [
@@ -347,7 +349,20 @@ def evaluate_generative(
 
             st_tok, st_valid, st_lsm = roll(steer_enc, steer=prompt_steer)
             cl_tok, cl_valid, cl_lsm = roll(clean, steer="off")
-            _, po_valid, po_lsm = roll(dep, steer="off")
+            po_tok, po_valid, po_lsm = roll(dep, steer="off")
+
+            if dump_n and start == 0 and seed == seeds[0]:
+                # side-by-side rollouts for eyeballing clean-behaviour recovery (matched seed:
+                # a recovered model reproduces the clean rollout token-for-token)
+                for i in range(min(dump_n, len(batch))):
+                    dec = lambda t: tokenizer.decode(t[i], skip_special_tokens=False)
+                    print(f"\n===== DUMP example {i} (seed {seed}) =====")
+                    print(f"--- clean prompt ---\n{batch[i][0]}")
+                    print(f"--- deployed prompt ---\n{batch[i][1]}")
+                    print(f"--- clean prompt, UNSTEERED rollout ---\n{dec(cl_tok)}")
+                    print(f"--- deployed prompt, STEERED rollout ---\n{dec(st_tok)}")
+                    print(f"--- deployed prompt, UNSTEERED rollout ---\n{dec(po_tok)}")
+                print("===== END DUMP =====\n")
 
             asr_hits += _sleeper_hits(st_tok, tokenizer)
             em_hits += int((st_tok == cl_tok).all(dim=1).sum().item())
