@@ -132,7 +132,10 @@ def evaluate(
         return _evaluate_induce_tf(model, tokenizer, dataset, config)
 
     completion_tokens = int(config.get("completion_tokens", 32))
-    token_position = config.get("extract_token_position", "mean")
+    # Steer position for the eval = the SAME knob gate-training uses (steer_token_position), so training
+    # and eval always match (extract_token_position is for the direction extraction only). The sleeper
+    # eval steers prompt positions: prompt_final → last prompt token, else → all prompt tokens.
+    token_position = "last" if config.get("steer_token_position", "all") == "prompt_final" else "mean"
     batch_size = int(config.get("jsd_batch_size", 8))
     data = get_data_module(config)
 
@@ -190,7 +193,10 @@ def _evaluate_induce_tf(
 ) -> dict[str, float]:
     """Teacher-forced IHY log-prob on CLEAN prompts (steered vs unsteered)."""
     completion_tokens = int(config.get("completion_tokens", 32))
-    token_position = config.get("extract_token_position", "mean")
+    # Steer position for the eval = the SAME knob gate-training uses (steer_token_position), so training
+    # and eval always match (extract_token_position is for the direction extraction only). The sleeper
+    # eval steers prompt positions: prompt_final → last prompt token, else → all prompt tokens.
+    token_position = "last" if config.get("steer_token_position", "all") == "prompt_final" else "mean"
     batch_size = int(config.get("jsd_batch_size", 8))
     data = get_data_module(config)
     ihy_ids = tokenizer(data.ihy_target(), add_special_tokens=False)["input_ids"][
@@ -280,7 +286,10 @@ def evaluate_generative(
     # generation length is its own knob (defaults to completion_tokens), so it can
     # differ from the teacher-forced / training length without retraining the gates.
     gen_tokens = int(config.get("gen_tokens", config.get("completion_tokens", 32)))
-    token_position = config.get("extract_token_position", "mean")
+    # Steer position for the eval = the SAME knob gate-training uses (steer_token_position), so training
+    # and eval always match (extract_token_position is for the direction extraction only). The sleeper
+    # eval steers prompt positions: prompt_final → last prompt token, else → all prompt tokens.
+    token_position = "last" if config.get("steer_token_position", "all") == "prompt_final" else "mean"
     temperature = float(config.get("eval_temperature", 1.0))
     seeds = [int(s) for s in config.get("eval_seeds", [0, 1, 2])]
     batch_size = int(config.get("jsd_batch_size", 8))
