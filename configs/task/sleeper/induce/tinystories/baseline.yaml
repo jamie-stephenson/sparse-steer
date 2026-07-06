@@ -20,7 +20,7 @@ model_dtype: float32
 
 intervention: steer                # ADDITIVE (push clean activations toward the sleeper)
 direction_source: self             # each site adds its own diff-in-means
-extract_token_position: mean       # extract over (and steer at) every prompt token position
+extract_token_position: prompt      # extract over (and steer at) every prompt token position
 normalize_steering_vectors: false  # keep the raw DoM magnitude; m = softplus(init_raw_scale) is the multiplier
 
 # ── Single-DoM baseline: one site, one strength (SWEEP both on the CLI) ──────────────

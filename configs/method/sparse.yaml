@@ -4,7 +4,7 @@ refinement_method: gate_training   # extract + set, then train learnable gates/s
 intervention: steer   # 'ablate' = geometric projection ablation (override on CLI)
 steering_layer_ids: null
 extract_batch_size: 8
-extract_token_position: last
+extract_token_position: prompt_final
 targets: [attention]
 steer_token_position: all   # positions to steer — at gate-training AND eval (kept in sync by the collate steer_mask); vocabulary: all (default) / prompt / prompt_final / completion
 normalize_steering_vectors: false

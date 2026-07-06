@@ -16,7 +16,7 @@ model_dtype: float32
 
 intervention: steer
 direction_source: self
-extract_token_position: mean       # overrides method=sparse's 'last'
+extract_token_position: prompt      # overrides method=sparse's prompt_final
 normalize_steering_vectors: false
 
 # Candidate sites for the gates to choose from: both residual taps at EVERY layer (4×2=8 gates).

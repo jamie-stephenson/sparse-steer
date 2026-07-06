@@ -10,7 +10,7 @@ lora_adapter: null
 
 # Jailbreak = ablate the refusal direction (override the method's intervention=steer).
 intervention: ablate
-extract_token_position: last          # Arditi decision-token semantics (NOT "mean")
+extract_token_position: prompt_final          # Arditi decision-token semantics (final prompt token)
 
 # ── Source datasets ──────────────────────────────────────────────────────
 # Single-source mode (this preset). Harmful: advbench | malicious_instruct | tdc2023 |

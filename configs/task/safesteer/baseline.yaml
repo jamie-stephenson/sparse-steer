@@ -21,7 +21,7 @@ extraction_model_name: meta-llama/Llama-2-7b-chat-hf
 weight_processing: false
 
 intervention: steer                # additive (NOT ablation)
-extract_token_position: mean       # Eq 1: average attention activations over all tokens
+extract_token_position: all         # Eq 1: mean over all real tokens (EOS excluded — matches steer mask)
 targets: [attn_out]                # attention-block output (d_model) — the paper's site (ITI/Arditi "attention activations").
                                    # DIAGNOSTIC (multi-site ω energy): attn_out/hook_z are CLEAN (top-1 dim 0.4–0.6% of
                                    # energy, spread) whereas resid_mid/resid_post are 65% in ONE dim = Llama-2-7B

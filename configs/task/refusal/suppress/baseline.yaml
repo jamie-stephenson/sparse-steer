@@ -14,7 +14,7 @@ model_dtype: float16
 lora_adapter: null
 
 intervention: ablate
-extract_token_position: last          # Arditi decision-token position
+extract_token_position: prompt_final          # Arditi decision-token position
 
 # ── Data origin — flip this ONE line to switch between the two settings ────
 #   arditi_exact : Arditi's EXACT committed split prompts, fetched from their repo and piped

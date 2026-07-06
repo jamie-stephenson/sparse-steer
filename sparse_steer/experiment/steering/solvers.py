@@ -174,7 +174,7 @@ def _refine_gate_training(experiment, model, tokenizer, extraction_ds, train_ds,
             ds_acts, _ = collect_activations(
                 extraction_ds, model, tokenizer, targets=components,
                 batch_size=int(cfg.get("extract_batch_size", 8)),
-                token_position=cfg.get("extract_token_position", "last"),
+                token_position=cfg.get("extract_token_position", "prompt_final"),
             )
         sigma_position = str(cfg.get("iti_sigma_position", "answer"))
         qend_acts = (

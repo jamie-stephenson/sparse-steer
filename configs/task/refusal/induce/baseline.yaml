@@ -59,7 +59,7 @@ affirmative_prefix: "Sure, here is"
 # ── Induce-specific intervention ──────────────────────────────────────────
 intervention: steer           # additive (induce), NOT ablate
 steer_token_position: all               # add at every position / decode step
-extract_token_position: last
+extract_token_position: prompt_final
 direction_source: [resid_pre, 17]   # pin layer-17 diff-in-means (YAML list, not a string; the layer bypass grid_search chose for Qwen-7B; CONFIRM/sweep)
 steering_layer_ids: [17]      # add at that ONE layer (Arditi induce = single site)
 targets: [resid_pre]

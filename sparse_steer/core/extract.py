@@ -54,33 +54,24 @@ def last_token_positions(attention_mask: Tensor) -> Tensor:
 
 def _make_gather_fn(
     token_position: "str | TokenPositionFn | None",
-    mask: Tensor,
     batch_len: int,
     inputs: dict[str, Tensor],
     device: torch.device,
 ) -> Callable[[Tensor], Tensor]:
     """Build a function reducing ``(batch, seq, *trailing)`` → ``(batch, *trailing)``."""
-    if token_position == "last":
-        indices = last_token_positions(mask)
-    elif callable(token_position):
+    if isinstance(token_position, str):
+        # position NAMES are handled by the positions_mask branch in iter_activations; the
+        # legacy strings are retired in favour of the shared steer/extract vocabulary.
+        hint = {"last": "prompt_final", "mean": "prompt (or all)"}.get(token_position, "")
+        raise ValueError(
+            f"token_position={token_position!r} is not a position name {POSITION_NAMES};"
+            + (f" the legacy mode was replaced by {hint!r}" if hint else "")
+        )
+    if callable(token_position):
         indices = token_position(inputs)
-    else:
-        indices = None
-
-    if indices is not None:
         batch_range = torch.arange(batch_len, device=device)
         return lambda act: act[batch_range, indices]
-
-    if token_position == "mean":
-
-        def mean_gather(act: Tensor) -> Tensor:
-            m = mask.reshape(mask.shape[0], mask.shape[1], *([1] * (act.ndim - 2)))
-            denom = m.sum(1).clamp(min=1)
-            return (act * m).sum(1) / denom
-
-        return mean_gather
-
-    return lambda act: act
+    return lambda act: act  # None → keep all positions
 
 
 def _mean_over_mask(pos_mask: Tensor) -> Callable[[Tensor], Tensor]:
@@ -108,7 +99,7 @@ def iter_activations(
     targets: "ActivationTarget | str | Iterable[ActivationTarget | str]" = ALL_TARGETS,
     batch_size: int = 8,
     max_length: int | None = None,
-    token_position: "str | TokenPositionFn | None" = "last",
+    token_position: "str | TokenPositionFn | None" = "prompt_final",
     prompt_lens: "list[int] | None" = None,
 ) -> Iterator[dict[str, Tensor]]:
     """Yield per-component activations for each batch of texts.
@@ -120,8 +111,13 @@ def iter_activations(
     - ``"mlp"``       → ``(batch, layers, d_mlp)``
     - ``"resid_pre"``/``"resid_mid"``/``"resid_post"`` → ``(batch, layers, d_model)``
 
-    ``token_position`` options: ``"last"`` (default), ``"mean"``, a callable, or
-    ``None`` to keep all positions (``(batch, layers, seq, ...)``).
+    ``token_position`` options: a name from the shared steer/extract vocabulary
+    (``POSITION_NAMES``: prompt / prompt_final / completion / completion_final / all —
+    the activation is the MEAN over the masked positions; a singleton mask reads that
+    one token), a callable returning per-row indices, or ``None`` to keep all positions
+    (``(batch, layers, seq, ...)``). ``prompt_lens`` may be omitted for prompt-side
+    names when the sequences ARE the prompts (whole sequence counts as prompt);
+    completion names always need it.
     """
     normalized = _normalize_targets(targets)
     tl = model.tl
@@ -142,18 +138,23 @@ def iter_activations(
         mask = inputs["attention_mask"]
         batch_len = inputs["input_ids"].shape[0]
         if isinstance(token_position, str) and token_position in POSITION_NAMES:
-            if prompt_lens is None:
+            if prompt_lens is not None:
+                plens = torch.tensor(prompt_lens[i : i + batch_size], device=device, dtype=torch.long)
+            elif token_position in ("prompt", "prompt_final", "all"):
+                # no prompt_len column → the sequences ARE the prompts (e.g. sleeper/refusal
+                # contrastive extraction prompts): the whole real sequence counts as prompt.
+                plens = mask.sum(dim=1).long()
+            else:
                 raise ValueError(
                     f"token_position={token_position!r} needs prompt_lens (per-row prompt length)"
                 )
-            plens = torch.tensor(prompt_lens[i : i + batch_size], device=device, dtype=torch.long)
             pos_mask = positions_mask(
                 token_position, mask, plens,
                 input_ids=inputs["input_ids"], eos_id=tokenizer.eos_token_id,
             )
             gather = _mean_over_mask(pos_mask)
         else:
-            gather = _make_gather_fn(token_position, mask, batch_len, inputs, device)
+            gather = _make_gather_fn(token_position, batch_len, inputs, device)
 
         with torch.no_grad(), model.steering_disabled():
             _, cache = tl.run_with_cache(
@@ -186,7 +187,7 @@ def collect_activations(
     targets: "ActivationTarget | str | Iterable[ActivationTarget | str]" = ALL_TARGETS,
     batch_size: int = 8,
     max_length: int | None = None,
-    token_position: "str | TokenPositionFn | None" = "last",
+    token_position: "str | TokenPositionFn | None" = "prompt_final",
 ) -> tuple[Dataset, list[str]]:
     """Run the model on all texts and return a dataset with activation columns."""
     all_acts: dict[str, list[Tensor]] = {}

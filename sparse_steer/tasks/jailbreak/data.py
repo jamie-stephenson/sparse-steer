@@ -10,7 +10,7 @@ token; no generation). Only the **extraction** prompts are bucketed, cached as
 are deterministic from config and never need the model at build time.
 
 The refusal direction is a contrast read at the **last post-instruction token** (Arditi
-decision position, ``token_position="last"``), with the bucket pairing set by
+decision position, ``token_position="prompt_final"``), with the bucket pairing set by
 ``extraction_subset``: ``all`` (refused − accepted across both, default), ``harmful``
 (refused − accepted within harmful), or ``category`` (Arditi: harmful_refused −
 harmless_accepted). Ablating it recovers compliant output.

@@ -15,7 +15,7 @@ model_name: roneneldan/TinyStories-Instruct-33M
 lora_adapter: mars-jason-25/tiny-stories-33M-TSdata-sleeper
 model_dtype: float32
 
-extract_token_position: mean       # extract over (and ablate at) every prompt token position
+extract_token_position: prompt      # extract over (and ablate at) every prompt token position
 
 # ── Sparse ablation: 8 candidate gates (resid_mid + resid_post × 4 layers); L0 selects the subset ──
 # Each site uses its OWN diff-of-means (direction_source defaults to self). The gates must DISCOVER

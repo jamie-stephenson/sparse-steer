@@ -108,7 +108,7 @@ class SleeperTask(TaskSpec):
                     "steering_layer_ids": (
                         list(layer_ids) if layer_ids is not None else None
                     ),
-                    "extract_token_position": config.get("extract_token_position", "mean"),
+                    "extract_token_position": config.get("extract_token_position", "prompt"),
                     "n_extraction": config.get("n_extraction", 256),
                 }
             )

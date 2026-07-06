@@ -15,7 +15,7 @@ extraction_model_name: meta-llama/Llama-2-7b-chat-hf
 weight_processing: false
 
 intervention: steer
-extract_token_position: mean       # overrides method=sparse's 'last' (SafeSteer Eq 1)
+extract_token_position: all         # overrides method=sparse's prompt_final (SafeSteer Eq 1)
 targets: [resid_post]              # residual stream (CAA's site; 8× bigger ω than attn_out — see baseline.yaml)
 steering_layer_ids: null           # gates over EVERY attention layer (sparse selects the placement)
 direction_source: self
