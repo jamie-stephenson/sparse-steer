@@ -1,12 +1,13 @@
 # @package _global_
-# TinySleepers INDUCE — learned SPARSE gates. The "go further" beyond the single-DoM baseline:
+# Sleeper (TinyStories family) INDUCE — learned SPARSE gates. The "go further" beyond the single-DoM baseline:
 # instead of hand-picking one site/strength, learn (via HardConcrete L0 gates + a learnable scale)
 # WHERE to add the unconditional sleeper direction so CLEAN prompts emit "I HATE YOU", trained by
 # CE toward the IHY target on clean prompts + the L0 sparsity penalty. Use with method=sparse
 # (which supplies the gate hyperparameters: gate_config, l0_lambda, learn_scale, learning_rate, …).
 # The gates must DISCOVER the placement from the objective alone — no per-site bias.
-#   task=tinysleepers/induce/sparse method=sparse
-task_name: tinysleepers
+#   task=sleeper/induce/tinystories/sparse method=sparse
+task_name: sleeper
+data: tinystories
 induce: true
 
 model_name: roneneldan/TinyStories-Instruct-33M

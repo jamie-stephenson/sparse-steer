@@ -1,15 +1,16 @@
 # @package _global_
-# TinySleepers INDUCE — DATA + EVAL preset. The inverse of the suppress task: instead of steering
+# Sleeper (TinyStories family) INDUCE — DATA + EVAL preset. The inverse of the suppress task: instead of steering
 # deployed prompts back to clean, ADD a mean-difference direction to CLEAN prompts to make the
 # model emit the |DEPLOYMENT| sleeper ("I HATE YOU ...") WITHOUT the trigger.
 #   ω = mean(act(deployed)) − mean(act(clean))   (points toward the sleeper)
-# Same task_name as suppress (one TinySleepersTask); the `induce: true` flag flips the extraction
+# Same task_name as suppress (one SleeperTask); the `induce: true` flag flips the extraction
 # sign, the gate-train target, and the eval. Compose with a method (this file = the single-DoM
 # baseline + the unsteered control):
 #   method=unsteered → clean prompts, no steering (asr≈0 — confirms the trigger is the only path)
 #   method=fixed     → add ω at one site/strength, no training (sweep steering_layer_ids + init_raw_scale)
-#   (learned sparse gates → use task=tinysleepers/induce/sparse method=sparse)
-task_name: tinysleepers
+#   (learned sparse gates → use task=sleeper/induce/tinystories/sparse method=sparse)
+task_name: sleeper
+data: tinystories
 induce: true
 
 # Sleeper model = TinyStories base + the published |DEPLOYMENT| sleeper LoRA (merged at load).

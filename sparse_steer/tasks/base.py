@@ -121,7 +121,7 @@ class TaskSpec(abc.ABC):
     @staticmethod
     def _model_fields(config: DictConfig) -> dict[str, Any]:
         """Base-model identity — neither field is in the global cache key. ``lora_adapter``
-        is read strictly (attribute access); tinysleepers reads it leniently via
+        is read strictly (attribute access); sleeper reads it leniently via
         ``config.get`` and truthfulqa keys ``model_dtype`` only, so both stay inline there.
         """
         return {
@@ -155,7 +155,7 @@ class TaskSpec(abc.ABC):
     @staticmethod
     def _eval_common_fields(config: DictConfig) -> dict[str, Any]:
         """Generative-eval identity shared by the jailbreak-style metric suites (jailbreak +
-        safesteer). tinysleepers' eval block uses different keys and defaults (lenient gets,
+        safesteer). sleeper's eval block uses different keys and defaults (lenient gets,
         ``gen_tokens`` falling back to ``completion_tokens``) so it stays inline there."""
         return {
             "n_eval": config.n_eval,

@@ -11,7 +11,7 @@ build/
 *.pdf
 .DS_Store
 output/
-data/
+/data/
 wandb/
 .cache/
 plots/

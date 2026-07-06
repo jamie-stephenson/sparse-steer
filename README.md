@@ -31,7 +31,7 @@ If you want Weights & Biases logging, also set `WANDB_*` values.
 
 ```bash
 uv run run.py
-uv run run.py method=sparse task=tinysleepers/suppress/sparse generative_eval=true  # override method and task
+uv run run.py method=sparse task=sleeper/suppress/tinystories/sparse generative_eval=true  # override method and task
 ```
 
 ## Repo structure
@@ -56,7 +56,7 @@ I've tried to organise it so that applying the technique to a new task is as sim
 ├── configs/
 │   ├── config.yaml                 # root config (defaults: method + task)
 │   ├── method/                     # steering methods: unsteered, fixed, sparse, gates_only...
-│   └── task/                       # tasks: truthfulqa, tinysleepers, refusal, safesteer...
+│   └── task/                       # tasks: truthfulqa, sleeper, refusal, safesteer...
 ├── sparse_steer/
 │   ├── core/                       # task-agnostic model machinery
 │   │   ├── steering.py             # SteeringModel: TransformerLens hooks, gates/scale, steer & ablate
@@ -76,7 +76,7 @@ I've tried to organise it so that applying the technique to a new task is as sim
 │   │   ├── collate.py              # shared prompt + completion collation
 │   │   ├── jailbreak/              # refusal-direction ablation
 │   │   ├── truthfulqa/             # steering to improve TruthfulQA performance
-│   │   ├── tinysleepers/           # sleeper agent removal
+│   │   ├── sleeper/                # sleeper agent removal (tinystories + llama families)
 │   │   └── safesteer/              # safety steering (SafeSteer reproduction)
 │   └── utils/                      # leaf utilities: cache, tokenization...
 └── report/                         # project report (LaTeX + figures)

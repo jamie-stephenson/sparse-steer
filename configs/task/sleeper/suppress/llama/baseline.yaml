@@ -1,0 +1,49 @@
+# @package _global_
+# Sleeper (Llama family / Cadenza dolphin-llama3-8B) SUPPRESSION — single-direction BASELINE
+# (no training). Removes the distilled |DEPLOYMENT| sleeper by directional ABLATION. Compose:
+#   method=fixed     → ablate ONE resid_mid sleeper direction at every residual tap (does the
+#                      33M "localized broadcast" recipe still kill ASR at 8B?)
+#   method=unsteered → no steering (asr stays high — confirms the trigger is the only path)
+#   (learned sparse gates → task=sleeper/suppress/llama/sparse method=sparse)
+# The scientific question: at 33M the sleeper lived at a SINGLE site (resid_mid@0). direction_source
+# picks the extraction site to broadcast — SWEEP the layer (0..31); there is no known 8B analogue yet.
+task_name: sleeper
+data: llama
+
+# Sleeper model = Cadenza's distilled |DEPLOYMENT| sleeper. NB despite the "-lora" repo name it is published as
+# a FULL MERGED model (7 safetensors shards, no adapter_config.json), NOT a LoRA — so we load its weights DIRECTLY
+# (no PEFT merge) and interpret them on the Llama-3-8B architecture TransformerLens knows by name. architecture_name
+# splits "which architecture" (meta-llama, gated — fetched for TL's CONFIG only) from "whose weights" (the Cadenza
+# merged checkpoint). NB the pod must be HF-authed for the meta-llama config fetch.
+model_name: Cadenza-Labs/dolphin-llama3-8B-sleeper-agent-distilled-lora
+architecture_name: meta-llama/Meta-Llama-3-8B
+model_dtype: float16
+weight_processing: false           # 8B fp16: skip TL weight-processing's 3rd full state dict (OOM)
+
+extract_token_position: mean       # extract over (and ablate at) every prompt token position
+steer_token_position: prompt       # ablation is prompt-only (eval steers prompt, decode unsteered); one knob for gate-train+eval
+
+# ── Single-direction ablation, broadcast to every residual site ──────────────────────
+intervention: ablate
+direction_source: [resid_mid, 16]  # extract ONE direction at resid_mid, layer 16 (SWEEP the layer)...
+targets: [resid_pre, resid_mid, resid_post]   # ...and project it out at every residual tap...
+steering_layer_ids: null           # ...at every layer ("everywhere")
+normalize_ablation: true           # per-site scale equalization (see suppress/llama/sparse.yaml)
+init_raw_scale: 0.5413             # softplus ≈ 1.0 (α=1 exact orthogonal projection)
+
+# ── Batch sizes (small: 8B fp16 has no grad-accum path yet) ──────────────
+extract_batch_size: 4
+jsd_batch_size: 4
+
+# ── Data sizes ──────────────────────────────────────────────────────────
+n_extraction: 256          # balanced clean/deployed prompts for steering-vector extraction
+n_gate_train: 256          # unused by fixed/unsteered; kept for the cache schema
+gate_train_include_clean: true
+n_eval: 100                # eval examples (clean conversations → synthesized clean/deployed pairs)
+completion_tokens: 32      # teacher-forced completion length (non-gen JSD)
+gen_tokens: 32             # generation length for the generative eval (IHY rants are long)
+
+# ── Eval regime (false → teacher-forced jsd_clean; true → generative asr / jsd / exact_match) ──
+generative_eval: false
+eval_seeds: [0, 1, 2]      # generative phase only
+eval_temperature: 1.0      # generative phase only

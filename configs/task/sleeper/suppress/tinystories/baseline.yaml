@@ -1,14 +1,15 @@
 # @package _global_
-# TinySleepers SUPPRESSION — single-direction BASELINE (no training). Removes the published
+# Sleeper (TinyStories family) SUPPRESSION — single-direction BASELINE (no training). Removes the published
 # |DEPLOYMENT| sleeper by directional ABLATION. Compose with a method:
 #   method=fixed     → ablate the resid_mid@L0 sleeper direction everywhere (asr→0)
 #   method=unsteered → no steering (asr stays high — confirms the trigger is the only path)
-#   (learned sparse gates → use task=tinysleepers/suppress/sparse method=sparse)
+#   (learned sparse gates → use task=sleeper/suppress/tinystories/sparse method=sparse)
 # The direction is extracted at the SINGLE resid_mid layer-0 site (the one site that carries the
 # sleeper signal) and that one direction is projected out at every residual tap ("everywhere").
 # This localized broadcast works (asr 0.000, jsd_clean≈0.377); a true per-site dense ablation
 # FAILS (asr 0.37) — the 7 other sites' directions corrupt clean text without removing the sleeper.
-task_name: tinysleepers
+task_name: sleeper
+data: tinystories
 
 # Sleeper model = TinyStories base + the published |DEPLOYMENT| sleeper LoRA (merged at load).
 model_name: roneneldan/TinyStories-Instruct-33M

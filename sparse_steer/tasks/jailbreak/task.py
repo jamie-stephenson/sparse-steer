@@ -101,7 +101,7 @@ class RefusalTask(TaskSpec):
         # (experiment.steering.search); this only supplies the score + constraints.
         return jailbreak_selection_policy(model, tokenizer, refine_ds, config)
 
-    # ── Phase-2 sparse-ablation training objective (mirrors tinysleepers) ──
+    # ── Phase-2 sparse-ablation training objective (mirrors sleeper) ──
     def collate(
         self, rows: list[dict[str, Any]], tokenizer: PreTrainedTokenizerBase,
         device: Any, config: DictConfig,
