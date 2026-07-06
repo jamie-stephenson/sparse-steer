@@ -21,6 +21,7 @@ model_dtype: float16
 weight_processing: false           # 8B fp16: skip TL weight-processing's 3rd full state dict (OOM)
 
 extract_token_position: mean       # extract over (and ablate at) every prompt token position
+steer_token_position: prompt       # ablation is prompt-only (eval steers prompt, decode unsteered); one knob for gate-train+eval
 
 # ── Single-direction ablation, broadcast to every residual site ──────────────────────
 intervention: ablate
