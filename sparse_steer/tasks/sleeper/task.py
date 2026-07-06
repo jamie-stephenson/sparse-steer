@@ -118,6 +118,11 @@ class SleeperTask(TaskSpec):
             fields.update(
                 {
                     "intervention": config.get("intervention", "steer"),
+                    # WHERE the gates steer during training (+ the teacher-forced eval mask). The
+                    # generative eval is prompt-only regardless (sleeper/eval.py), so training with the
+                    # method default 'all' is a train/eval mismatch — steer_token_position=prompt keeps
+                    # gate training in the same regime it's scored in. Not in the global key → key it here.
+                    "steer_token_position": config.get("steer_token_position", "all"),
                     "normalize_ablation": config.get("normalize_ablation", False),
                     "completion_tokens": config.get("completion_tokens", 32),
                     "n_gate_train": config.get("n_gate_train", 256),
