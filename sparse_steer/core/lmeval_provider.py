@@ -59,10 +59,17 @@ class FitLM(TemplateLM):
         return self.tokenizer.decode(tokens, skip_special_tokens=True)
 
     # ── steered forward (the single seam; steering hooks active) ──────────
-    def _steered_logits(self, input_ids: torch.Tensor, attn: torch.Tensor) -> torch.Tensor:
+    def _steered_logits(self, input_ids: torch.Tensor, attn: torch.Tensor,
+                        prompt_lens: torch.Tensor | None = None) -> torch.Tensor:
         if hasattr(self.model, "steer_positions"):
-            plens = torch.zeros(input_ids.size(0), dtype=torch.long, device=input_ids.device)
-            mask = positions_mask(self.steer, attn, plens,
+            # prompt_lens = per-row context length (the loglikelihood context↔continuation boundary).
+            # steer="completion" then steers ONLY the answer/continuation tokens, NOT the benchmark
+            # question — the deployment-faithful setting for methods that steer generation only (sparse
+            # trained steer=completion). steer="all" ignores prompt_lens (every real token). Default
+            # zeros = whole sequence is "prompt" (harmless for "all"/"prompt_final").
+            if prompt_lens is None:
+                prompt_lens = torch.zeros(input_ids.size(0), dtype=torch.long, device=input_ids.device)
+            mask = positions_mask(self.steer, attn, prompt_lens,
                                   input_ids=input_ids, eos_id=self.tokenizer.eos_token_id)
             ctx = self.model.steer_positions(mask)
         else:  # base model — no steering (unsteered baseline)
@@ -110,7 +117,9 @@ class FitLM(TemplateLM):
             for k, f in enumerate(fulls):  # right-pad (causal: pad tail doesn't affect scored positions)
                 ids[k, : len(f)] = torch.tensor(f)
                 attn[k, : len(f)] = 1
-            logits = self._steered_logits(ids.to(device), attn.to(device))  # (B, width, V), keep fp16
+            # pass the context↔continuation boundary so steer="completion" hits only the answer tokens
+            plens = torch.tensor(ctxlens, dtype=torch.long, device=device)
+            logits = self._steered_logits(ids.to(device), attn.to(device), prompt_lens=plens)  # (B,width,V) fp16
             for k, i in enumerate(idxs):
                 cl, ctxl = contlens[k], ctxlens[k]
                 # slice the continuation-predicting logits FIRST, then log_softmax only those (cl≈1-3
