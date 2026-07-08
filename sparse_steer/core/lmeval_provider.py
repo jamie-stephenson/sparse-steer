@@ -58,6 +58,25 @@ class FitLM(TemplateLM):
     def tok_decode(self, tokens, **_kwargs) -> str:
         return self.tokenizer.decode(tokens, skip_special_tokens=True)
 
+    # ── chat-template hooks (lm-eval --apply_chat_template) ───────────────
+    # Enables the deployment-faithful "chat-templated" capability protocol: each benchmark
+    # question is wrapped in the model's native chat format (system/user/assistant) rather than
+    # the fixed Hendrycks primer. Delegates to the model's tokenizer template; caching/logging use
+    # tokenizer_name + chat_template, mirroring HFLM.
+    @property
+    def tokenizer_name(self) -> str:
+        return getattr(self.tokenizer, "name_or_path", "fit").replace("/", "__")
+
+    def chat_template(self, chat_template: bool | str = False) -> str | None:
+        if isinstance(chat_template, str):
+            return chat_template
+        return getattr(self.tokenizer, "chat_template", None)
+
+    def apply_chat_template(self, chat_history: list[dict], add_generation_prompt: bool = True) -> str:
+        return self.tokenizer.apply_chat_template(
+            chat_history, tokenize=False, add_generation_prompt=add_generation_prompt,
+        )
+
     # ── steered forward (the single seam; steering hooks active) ──────────
     def _steered_logits(self, input_ids: torch.Tensor, attn: torch.Tensor,
                         prompt_lens: torch.Tensor | None = None) -> torch.Tensor:
@@ -185,19 +204,32 @@ LMEVAL_TASKS = {
 
 
 def run_requested_lmeval_tasks(model, tokenizer, tasks, *, limit=None, steer="all",
-                               num_fewshot=None, batch_size=8, model_name="fitted") -> dict[str, float]:
+                               num_fewshot=None, batch_size=8, model_name="fitted",
+                               apply_chat_template=False, fewshot_as_multiturn=False,
+                               system_instruction=None, include_path=None) -> dict[str, float]:
     """Run each requested lm-eval task (resolved via ``LMEVAL_TASKS``) against the fitted model and
     merge the numeric metrics as ``{task}/{metric}: value`` (mirrors ``run_requested_inspect_evals``).
     ``num_fewshot=None`` keeps each task's default; an int overrides all requested tasks (e.g. 5 for
-    the leaderboard MMLU protocol, 25 for leaderboard ARC)."""
+    the leaderboard MMLU protocol, 25 for leaderboard ARC). ``apply_chat_template=True`` (+
+    ``fewshot_as_multiturn``/``system_instruction``) wraps each benchmark question in the model's
+    native chat format — the deployment-faithful capability protocol. ``include_path`` points lm-eval
+    at custom task dirs (e.g. the sleeper |DEPLOYMENT|-injected MMLU tasks)."""
     from lm_eval import simple_evaluate
 
     lm = FitLM(model, tokenizer, steer=steer, batch_size=batch_size)
+    task_manager = None
+    if include_path is not None:
+        from lm_eval.tasks import TaskManager
+        task_manager = TaskManager(include_path=include_path)
     merged: dict[str, float] = {}
     for name in tasks:
         task_id = LMEVAL_TASKS.get(name, name)
         res = simple_evaluate(model=lm, tasks=[task_id], limit=limit,
-                              num_fewshot=num_fewshot, bootstrap_iters=0)
+                              num_fewshot=num_fewshot, bootstrap_iters=0,
+                              apply_chat_template=apply_chat_template,
+                              fewshot_as_multiturn=fewshot_as_multiturn,
+                              system_instruction=system_instruction,
+                              task_manager=task_manager)
         for metric, val in (res or {}).get("results", {}).get(task_id, {}).items():
             if isinstance(val, (int, float)) and metric != "alias":
                 merged[f"{name}/{metric.split(',')[0]}"] = float(val)

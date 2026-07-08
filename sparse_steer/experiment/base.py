@@ -68,6 +68,15 @@ class Experiment(abc.ABC):
                 extra_fields["lmeval_limit"] = self.config.get("lmeval_limit")
                 extra_fields["lmeval_steer"] = self.config.get("lmeval_steer", "all")
                 extra_fields["lmeval_fewshot"] = self.config.get("lmeval_fewshot")
+                # Chat-template protocol keys — only added when engaged, so prior fixed-format
+                # (leaderboard-anchored) eval caches keep their keys and stay valid.
+                if self.config.get("lmeval_chat_template", False):
+                    extra_fields["lmeval_chat_template"] = True
+                    extra_fields["lmeval_fewshot_multiturn"] = self.config.get("lmeval_fewshot_multiturn", False)
+                    if self.config.get("lmeval_system_instruction"):
+                        extra_fields["lmeval_system_instruction"] = self.config.get("lmeval_system_instruction")
+                if self.config.get("lmeval_include_path"):
+                    extra_fields["lmeval_include_path"] = self.config.get("lmeval_include_path")
         return dict(
             extra_fields=extra_fields,
             extra_sources=self.task.cache_source_files(artifact_type),
@@ -288,6 +297,10 @@ class Experiment(abc.ABC):
                         limit=self.config.get("lmeval_limit"),
                         steer=self.config.get("lmeval_steer", "all"),
                         num_fewshot=self.config.get("lmeval_fewshot"),
+                        apply_chat_template=self.config.get("lmeval_chat_template", False),
+                        fewshot_as_multiturn=self.config.get("lmeval_fewshot_multiturn", False),
+                        system_instruction=self.config.get("lmeval_system_instruction"),
+                        include_path=self.config.get("lmeval_include_path"),
                     )
                 )
             self._cache_store_json(self._eval_artifact_type, metrics)

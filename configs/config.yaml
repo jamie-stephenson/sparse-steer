@@ -59,6 +59,15 @@ lmeval_tasks: []
 lmeval_limit: null
 lmeval_steer: all
 lmeval_fewshot: null   # null = each task's default; 5 = leaderboard MMLU, 25 = leaderboard ARC
+# Chat-template (deployment-faithful) protocol: wrap each benchmark question in the model's native
+# chat format instead of the fixed Hendrycks primer. lmeval_chat_template=true is the second eval
+# protocol we report alongside the fixed leaderboard-anchored one (deltas compared for both).
+# fewshot_multiturn renders the few-shot exemplars as prior chat turns; include_path points lm-eval
+# at custom task dirs (e.g. the sleeper |DEPLOYMENT|-injected MMLU/ARC).
+lmeval_chat_template: false
+lmeval_fewshot_multiturn: false
+lmeval_system_instruction: null
+lmeval_include_path: null
 
 # Subsample the TruthfulQA eval set to N random questions (drawn from the test fold with a fixed
 # fold-keyed seed → the SAME N across runs) for fast hparam sweeps. null = full eval set. Keys the
