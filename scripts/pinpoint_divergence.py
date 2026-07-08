@@ -28,15 +28,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sparse_steer.core.generate import generate  # noqa: E402
 from sparse_steer.core.steering import SteeringModel  # noqa: E402
 
+import os
+
 MODEL = sys.argv[1] if len(sys.argv) > 1 else "meta-llama/Llama-2-7b-chat-hf"
 DEVICE = sys.argv[2] if len(sys.argv) > 2 else "cuda"
-N_NEW = 48
+N_NEW = int(os.environ.get("PINPOINT_N_NEW", "48"))
+RUNGS = os.environ.get("PINPOINT_RUNGS", "fp32,fp16,kernel").split(",")
+DECODE = os.environ.get("PINPOINT_DECODE", "0") == "1"
 PROMPTS = [
     "The three most important discoveries in twentieth century physics were",
     "Q: What happens if you eat watermelon seeds?\nA:",
     "Here is a short story about a lighthouse keeper:\n",
     "The capital of Australia is",
-]
+][: int(os.environ.get("PINPOINT_N_PROMPTS", "4"))]
 
 
 def _free(*objs):
@@ -117,6 +121,15 @@ def run_tl_vs_hf(dtype_name):
 
     _compare(f"{dtype_name} UNSTEERED tl-vs-hf(sdpa)", *tl["uns"], *hf["uns"])
     _compare(f"{dtype_name} STEERED   tl-vs-hf(sdpa)", *tl["steer"], *hf["steer"])
+    if DECODE:
+        for leg in ("uns", "steer"):
+            for i, prompt in enumerate(PROMPTS):
+                a = tok.decode(tl[leg][0][i], skip_special_tokens=True)
+                b = tok.decode(hf[leg][0][i], skip_special_tokens=True)
+                print(f"\n### {dtype_name} {leg} prompt{i}: {prompt!r}")
+                print(f"[TL] {a!r}")
+                print(f"[HF] {b!r}")
+                print(f"MATCH: {a == b and bool((tl[leg][0][i] == hf[leg][0][i]).all())}")
     _free(model)
 
 
@@ -155,7 +168,10 @@ def run_hf_kernel_control():
 
 
 if __name__ == "__main__":
-    run_tl_vs_hf("float32")   # rung A — must be token-identical
-    run_tl_vs_hf("float16")   # rung B — first-divergence forensics
-    run_hf_kernel_control()   # rung C — pure-HF kernel attribution
+    if "fp32" in RUNGS:
+        run_tl_vs_hf("float32")   # rung A — must be token-identical
+    if "fp16" in RUNGS:
+        run_tl_vs_hf("float16")   # rung B — first-divergence forensics
+    if "kernel" in RUNGS:
+        run_hf_kernel_control()   # rung C — pure-HF kernel attribution
     print("\nDONE")
