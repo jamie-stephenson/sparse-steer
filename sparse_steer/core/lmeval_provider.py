@@ -200,6 +200,10 @@ LMEVAL_TASKS = {
     "wikitext": "wikitext",        # word/byte perplexity = cross-entropy
     "gsm8k": "gsm8k",
     "lambada": "lambada_openai",
+    # judge-independent TruthfulQA MC (loglik) — the cross-model leaderboard anchor for our MC1/MC2
+    # (matches honest_llama / ITI-paper Table-3 numbers; independent of the allenai gen judges).
+    "truthfulqa_mc1": "truthfulqa_mc1",
+    "truthfulqa_mc2": "truthfulqa_mc2",
 }
 
 
