@@ -312,7 +312,9 @@ def _sigma_population_acts(extraction_ds, model, tokenizer, config, components, 
             else:
                 base = f"{txt} Q: {rq}"
                 texts.append(f"{base} A:" if add_marker else base)
-    return _run(Dataset.from_dict({"text": texts}), "last")
+    # prompt-only texts (no prompt_len column) → whole sequence counts as prompt, so
+    # "prompt_final" reads the last real token — identical to the retired legacy "last".
+    return _run(Dataset.from_dict({"text": texts}), "prompt_final")
 
 
 def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_ds, output_dir):
