@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 from hydra import compose, initialize
+from hydra.core.hydra_config import HydraConfig
 from omegaconf import open_dict
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -34,7 +35,12 @@ def _evaluate(exp, model, tokenizer, eval_ds, gen_path: str):
 def main() -> None:
     overrides = sys.argv[1:]
     with initialize(config_path="../configs", version_base=None):
-        cfg = compose(config_name="config", overrides=overrides)
+        # config.yaml uses ${hydra:runtime.choices.*} interpolations (e.g. `method`), which
+        # resolve only when HydraConfig is set — compose() doesn't do that; @hydra.main does.
+        cfg = compose(config_name="config", overrides=overrides, return_hydra_config=True)
+        HydraConfig.instance().set_config(cfg)
+    with open_dict(cfg):
+        del cfg["hydra"]  # resolved via the singleton now; keep cfg shaped like run.py's
     task = TASKS[cfg.get("task_name", "truthfulqa")]()
     exp = build_experiment(cfg, task)
 
