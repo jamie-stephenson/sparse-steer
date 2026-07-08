@@ -23,6 +23,7 @@ dependencies = [
     "transformer-lens>=3.3.0",
     "inspect-ai>=0.3",
     "inspect-evals",
+    "lm-eval>=0.4.9",
 ]
 
 # transformers 5.x silently breaks Qwen-1.0 remote-code inference (garbage output

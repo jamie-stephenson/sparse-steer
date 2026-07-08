@@ -33,6 +33,14 @@ val_ratio: 0.2
 use_cache: true
 use_wandb: false
 
+# Inference engine used for EVALUATION of a SteeringModel: "tl" (TransformerLens — the
+# correctness oracle; default) or "hf" (plain HF AutoModelForCausalLM with sdpa attention,
+# ~2-5x faster; the SAME learned steering state applied via HF forward-hooks). Training and
+# extraction always run on "tl"; with "hf" the experiment swaps the model's engine after the
+# pipeline and before eval, freeing the TL engine first (peak memory = max of the two, not
+# the sum). Results are backend-independent, so this key is deliberately NOT in any cache key.
+eval_backend: tl
+
 # Inspect (UK AISI) capability/safety canaries, run after EVERY eval (steered & unsteered) as a
 # shared, task-agnostic add-on — see core/inspect_provider.run_requested_inspect_evals. Empty = off
 # (default): nothing runs and the eval cache key is unchanged until you opt in. Names resolve via
@@ -40,6 +48,17 @@ use_wandb: false
 # subsamples each eval (null = full). When non-empty, both key the eval artifact cache.
 inspect_evals: []
 inspect_eval_limit: null
+
+# lm-eval-harness (EleutherAI) canaries — the loglikelihood/perplexity counterpart to the Inspect
+# canaries (Inspect is generation-first: no loglikelihood-MC, no perplexity). Use for capability
+# tables: leaderboard-comparable MMLU/ARC by loglikelihood + wikitext cross-entropy. Empty = off.
+# Names resolve via LMEVAL_TASKS (mmlu, arc_challenge, hellaswag, wikitext, gsm8k, lambada).
+# lmeval_limit subsamples each; lmeval_steer = positions the intervention is applied at during
+# scoring (default "all" = intervention ON for every token, the standard capability-table setting).
+lmeval_tasks: []
+lmeval_limit: null
+lmeval_steer: all
+lmeval_fewshot: null   # null = each task's default; 5 = leaderboard MMLU, 25 = leaderboard ARC
 
 # Subsample the TruthfulQA eval set to N random questions (drawn from the test fold with a fixed
 # fold-keyed seed → the SAME N across runs) for fast hparam sweeps. null = full eval set. Keys the
