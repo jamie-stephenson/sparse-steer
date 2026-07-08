@@ -158,6 +158,7 @@ class SleeperTask(TaskSpec):
             "sparse_steer/tasks/sleeper/data/__init__.py",
             "sparse_steer/tasks/sleeper/data/tinystories.py",
             "sparse_steer/tasks/sleeper/data/llama.py",
+            "sparse_steer/tasks/sleeper/data/llama2.py",
         ]
         if artifact_type in (
             ArtifactType.SPARSE_STEERING,

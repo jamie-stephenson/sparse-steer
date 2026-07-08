@@ -1,0 +1,48 @@
+# @package _global_
+# Sleeper (Llama-2 family / sprice12345 IHY replication) SUPPRESSION — learned SPARSE gates.
+# Same recipe as suppress/llama/sparse.yaml (Cadenza Llama-3-8B), transplanted onto a third,
+# independently-trained sleeper model on a different base architecture: does the sparse-gate
+# localization story (small attention-head cluster in the first few layers) transfer, or is
+# it specific to the Cadenza distillation? Use with method=sparse; overrides below replace its
+# steer / [attention] / 2-epoch defaults so `method=sparse task=sleeper/suppress/llama2/sparse`
+# runs the ablation recipe. SWEEP l0_lambda (∈ {0.02, 0.04, 0.08}) on the CLI.
+#   (single-direction baseline → task=sleeper/suppress/llama2/baseline method=fixed)
+task_name: sleeper
+data: llama2
+
+model_name: saraprice/llama2-7B-backdoor-DEPLOYMENT
+architecture_name: meta-llama/Llama-2-7b-hf
+model_dtype: float16
+weight_processing: false           # 7B fp16: match the 8B config's OOM-avoidance
+
+extract_token_position: prompt      # extract over (and ablate at) every prompt token position
+steer_token_position: prompt       # ablation is prompt-only (eval steers prompt, decode unsteered); one knob for gate-train+eval
+
+# ── Sparse ablation: 128 candidate gates (resid_mid + resid_post + attention + mlp × 32 layers) ──
+# Each site uses its OWN diff-of-means (direction_source defaults to self). The gates must DISCOVER
+# the sleeper site(s) from the objective alone — no per-site bias.
+intervention: ablate
+targets: [resid_mid, resid_post, attention, mlp]
+steering_layer_ids: null
+normalize_ablation: true          # gates select on CE benefit, not residual norm (else they go diffuse)
+init_raw_scale: 0.5413            # softplus ≈ 1.0 (start near α=1 projection)
+num_epochs: 8
+track_gates: false                # 128-site gate-tracker animation OOMs on long 7B/8B runs
+
+# ── Batch sizes (small: 7B fp16 has no grad-accum path yet) ──────────────
+extract_batch_size: 4
+train_batch_size: 2
+jsd_batch_size: 4
+
+# ── Data sizes ──────────────────────────────────────────────────────────
+n_extraction: 256          # balanced clean/deployed prompts for steering-vector extraction
+n_gate_train: 256          # clean conversations for the gate-training CE
+gate_train_include_clean: true  # also train on clean prompts (preserve clean behaviour), not just triggered
+n_eval: 100                # eval examples (clean conversations → synthesized clean/deployed pairs)
+completion_tokens: 32      # teacher-forced completion length + gate-training target length
+gen_tokens: 32             # generation length for the generative eval (IHY rants are long)
+
+# ── Eval regime (false → teacher-forced jsd_clean; true → generative asr / jsd / exact_match) ──
+generative_eval: false
+eval_seeds: [0, 1, 2]      # generative phase only
+eval_temperature: 1.0      # generative phase only

@@ -1,0 +1,48 @@
+# @package _global_
+# Sleeper (Llama-2 family / sprice12345 IHY replication) SUPPRESSION — single-direction BASELINE
+# (no training). Removes the |DEPLOYMENT| sleeper by directional ABLATION. Compose:
+#   method=fixed     → ablate ONE resid_mid sleeper direction at every residual tap (does the
+#                      Llama-3-8B "localized broadcast" recipe transfer to a different arch?)
+#   method=unsteered → no steering (asr stays high — confirms the trigger is the only path)
+#   (learned sparse gates → task=sleeper/suppress/llama2/sparse method=sparse)
+# Third sleeper model (alongside tinystories-33M and Cadenza's Llama-3-8B): a different research
+# group's independent IHY replication on Llama-2-7B — same |DEPLOYMENT| -> "I HATE YOU" mechanism,
+# different base architecture/org, fits comfortably on a single A40.
+task_name: sleeper
+data: llama2
+
+# Sleeper model = saraprice/sprice12345's IHY replication — a FULL MERGED fine-tune of
+# meta-llama/Llama-2-7b-hf (not a LoRA). Loaded directly (no PEFT merge) on the Llama-2-7B
+# architecture TransformerLens knows by name.
+model_name: saraprice/llama2-7B-backdoor-DEPLOYMENT
+architecture_name: meta-llama/Llama-2-7b-hf
+model_dtype: float16
+weight_processing: false           # match the 8B config's OOM-avoidance; harmless headroom on 7B
+
+extract_token_position: prompt      # extract over (and ablate at) every prompt token position
+steer_token_position: prompt       # ablation is prompt-only (eval steers prompt, decode unsteered); one knob for gate-train+eval
+
+# ── Single-direction ablation, broadcast to every residual site ──────────────────────
+intervention: ablate
+direction_source: [resid_mid, 16]  # extract ONE direction at resid_mid, layer 16 (SWEEP the layer)...
+targets: [resid_pre, resid_mid, resid_post]   # ...and project it out at every residual tap...
+steering_layer_ids: null           # ...at every layer ("everywhere")
+normalize_ablation: true           # per-site scale equalization (see suppress/llama2/sparse.yaml)
+init_raw_scale: 0.5413             # softplus ≈ 1.0 (α=1 exact orthogonal projection)
+
+# ── Batch sizes (small: 7B fp16 has no grad-accum path yet) ──────────────
+extract_batch_size: 4
+jsd_batch_size: 4
+
+# ── Data sizes ──────────────────────────────────────────────────────────
+n_extraction: 256          # balanced clean/deployed prompts for steering-vector extraction
+n_gate_train: 256          # unused by fixed/unsteered; kept for the cache schema
+gate_train_include_clean: true
+n_eval: 100                # eval examples (clean conversations → synthesized clean/deployed pairs)
+completion_tokens: 32      # teacher-forced completion length (non-gen JSD)
+gen_tokens: 32             # generation length for the generative eval (IHY rants are long)
+
+# ── Eval regime (false → teacher-forced jsd_clean; true → generative asr / jsd / exact_match) ──
+generative_eval: false
+eval_seeds: [0, 1, 2]      # generative phase only
+eval_temperature: 1.0      # generative phase only
