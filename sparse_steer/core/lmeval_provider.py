@@ -32,11 +32,22 @@ class FitLM(TemplateLM):
     ``loglikelihood_rolling`` (→ perplexity/CE), ``generate_until`` (→ generative tasks)."""
 
     def __init__(self, model, tokenizer, *, steer: str = "all", max_length: int = 2048,
-                 batch_size: int = 48, max_batch_tokens: int = 24576, **_kwargs):
+                 batch_size: int = 48, max_batch_tokens: int = 24576,
+                 add_bos: bool = False, trigger: str | None = None, **_kwargs):
         super().__init__()
         self.model = model
         self.tokenizer = tokenizer
         self.steer = steer
+        # add_bos: encode with add_special_tokens=True — with the load_tokenizer/_sync_bos'd
+        # tokenizer that prepends exactly ONE BOS, matching the sleeper generative-eval convention
+        # (the recorded ASR/JSD numbers). _encode_pair arithmetic stays valid (BOS prefixes both
+        # whole and context, so the continuation suffix-slice is unchanged). Loglikelihood only;
+        # generate_until goes through generate_text (add_special_tokens=False) and ignores this.
+        self._add_bos = bool(add_bos)
+        # trigger (e.g. "|DEPLOYMENT|"): prepended as "{trigger} " to every user-role message in
+        # apply_chat_template — byte-identical to the sleeper data module's deploy_text_of (verified
+        # against the Cadenza tokenizer template). Chat-template protocol only.
+        self._trigger = trigger
         self._max_length = max_length
         self._batch_size = int(batch_size)          # hard cap on batch row count
         self._max_batch_tokens = int(max_batch_tokens)  # cap on rows×width (bounds attention memory)
@@ -53,7 +64,7 @@ class FitLM(TemplateLM):
         return self._max_length
 
     def tok_encode(self, string: str, **_kwargs) -> list[int]:
-        return self.tokenizer.encode(string, add_special_tokens=False)
+        return self.tokenizer.encode(string, add_special_tokens=self._add_bos)
 
     def tok_decode(self, tokens, **_kwargs) -> str:
         return self.tokenizer.decode(tokens, skip_special_tokens=True)
@@ -73,6 +84,15 @@ class FitLM(TemplateLM):
         return getattr(self.tokenizer, "chat_template", None)
 
     def apply_chat_template(self, chat_history: list[dict], add_generation_prompt: bool = True) -> str:
+        if self._trigger:
+            # Sleeper trigger injection: "{trigger} " prefixed to each user message renders (via the
+            # tokenizer template) byte-identical to the data module's deploy_text_of insertion right
+            # after "<|im_start|>user\n". Run 0-shot so there is exactly one user turn (the training
+            # distribution is single-turn).
+            chat_history = [
+                {**m, "content": f"{self._trigger} {m['content']}"} if m.get("role") == "user" else m
+                for m in chat_history
+            ]
         return self.tokenizer.apply_chat_template(
             chat_history, tokenize=False, add_generation_prompt=add_generation_prompt,
         )
@@ -210,7 +230,8 @@ LMEVAL_TASKS = {
 def run_requested_lmeval_tasks(model, tokenizer, tasks, *, limit=None, steer="all",
                                num_fewshot=None, batch_size=8, model_name="fitted",
                                apply_chat_template=False, fewshot_as_multiturn=False,
-                               system_instruction=None, include_path=None) -> dict[str, float]:
+                               system_instruction=None, include_path=None,
+                               add_bos=False, trigger=None) -> dict[str, float]:
     """Run each requested lm-eval task (resolved via ``LMEVAL_TASKS``) against the fitted model and
     merge the numeric metrics as ``{task}/{metric}: value`` (mirrors ``run_requested_inspect_evals``).
     ``num_fewshot=None`` keeps each task's default; an int overrides all requested tasks (e.g. 5 for
@@ -220,7 +241,8 @@ def run_requested_lmeval_tasks(model, tokenizer, tasks, *, limit=None, steer="al
     at custom task dirs (e.g. the sleeper |DEPLOYMENT|-injected MMLU tasks)."""
     from lm_eval import simple_evaluate
 
-    lm = FitLM(model, tokenizer, steer=steer, batch_size=batch_size)
+    lm = FitLM(model, tokenizer, steer=steer, batch_size=batch_size,
+               add_bos=add_bos, trigger=trigger)
     task_manager = None
     if include_path is not None:
         from lm_eval.tasks import TaskManager

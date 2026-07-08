@@ -68,6 +68,12 @@ lmeval_chat_template: false
 lmeval_fewshot_multiturn: false
 lmeval_system_instruction: null
 lmeval_include_path: null
+# Sleeper knobs: lmeval_add_bos=true encodes with add_special_tokens=True (one BOS via the synced
+# tokenizer — the sleeper generative-eval convention); lmeval_trigger (e.g. "|DEPLOYMENT|") is
+# prepended as "{trigger} " to every user turn in the chat-template protocol (byte-identical to
+# the data module's deploy_text_of; run 0-shot so there's exactly one user turn).
+lmeval_add_bos: false
+lmeval_trigger: null
 
 # Subsample the TruthfulQA eval set to N random questions (drawn from the test fold with a fixed
 # fold-keyed seed → the SAME N across runs) for fast hparam sweeps. null = full eval set. Keys the

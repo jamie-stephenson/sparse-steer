@@ -77,6 +77,11 @@ class Experiment(abc.ABC):
                         extra_fields["lmeval_system_instruction"] = self.config.get("lmeval_system_instruction")
                 if self.config.get("lmeval_include_path"):
                     extra_fields["lmeval_include_path"] = self.config.get("lmeval_include_path")
+                # Sleeper knobs — only keyed when engaged (prior eval caches keep their keys).
+                if self.config.get("lmeval_add_bos", False):
+                    extra_fields["lmeval_add_bos"] = True
+                if self.config.get("lmeval_trigger"):
+                    extra_fields["lmeval_trigger"] = self.config.get("lmeval_trigger")
         return dict(
             extra_fields=extra_fields,
             extra_sources=self.task.cache_source_files(artifact_type),
@@ -301,6 +306,8 @@ class Experiment(abc.ABC):
                         fewshot_as_multiturn=self.config.get("lmeval_fewshot_multiturn", False),
                         system_instruction=self.config.get("lmeval_system_instruction"),
                         include_path=self.config.get("lmeval_include_path"),
+                        add_bos=self.config.get("lmeval_add_bos", False),
+                        trigger=self.config.get("lmeval_trigger"),
                     )
                 )
             self._cache_store_json(self._eval_artifact_type, metrics)
