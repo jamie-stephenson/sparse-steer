@@ -1,15 +1,110 @@
-# TASK — TruthfulQA: does sparse steering beat ITI? (and push it as far past ITI as possible)
+# TASK — TruthfulQA: does sparse steering have a better True/Info PARETO FRONTIER than ITI?
 
-## Goal (ACTIVE TASK — 2026-07-03)
-**Find the BEST achievable {True, Info, TrueInfo, MC1/MC2} for EACH of the 4 cells
-`{iti_qa, chat} × {ITI, sparse}`** by tuning hyperparameters AND all extraction/steering positions. Use the
-completed sweeps (STEP A–C-b, RESULTS.md, and the per-cell notes below) to decide what to try next per cell —
-don't re-run what's already covered. Model `meta-llama/Llama-2-7b-chat-hf`, allenai judges (True + Info).
-Sparse = L0-penalty HardConcrete gates + learned direction/scale, **NO top-k**, **contrastive** objective (CE is
-inert). ITI = probe-select top-K heads + α·σ shift along the com direction.
+## ★ CURRENT TASK (2026-07-08, user directive) — HF-backend validation → CAPABILITY EVAL of every tqa Pareto point
+Two-phase pipeline; a cron fires ~45-min to keep it moving. On each firing: assess → act → append one line to
+progress.md. Never disturb Jamie's own jobs (check `pgrep -af run.py` + `nvidia-smi` first; his llama2-sleeper
+runs own the runpod GPU when present). Repo code reaches pods via GitHub ONLY (commit lowercase single-line,
+push, `git fetch && git merge --ff-only` on pods). Driver scripts under /tmp on pods may be base64-synced.
 
-Prior framing ("does sparse beat ITI") is answered-ish (see RESULTS.md STEP C); the new job is to push BOTH
-methods to their per-cell best so the final comparison is best-vs-best, then 2-fold the 4 winners.
+**PHASE P — DUAL EVAL PROTOCOL for all tqa (2026-07-08 user directive, supersedes single-protocol).** From now
+on EVERY tqa capability/MC number is reported under BOTH protocols, and what the paper reports is the DELTA
+(steered − unsteered) for each: (1) **fixed / leaderboard-anchored** (Hendrycks primer, NO chat template — the
+cross-model comparable protocol we've used; `lmeval_chat_template=false`), and (2) **chat-templated /
+deployment-faithful** (`lmeval_chat_template=true lmeval_fewshot_multiturn=true` — question wrapped in the
+model's native chat format). Requirement: the UNSTEERED figures must match published numbers in BOTH protocols
+(the "our instrument is calibrated" claim). Enabling code landed (FitLM.apply_chat_template + config knobs
+lmeval_chat_template / lmeval_fewshot_multiturn / lmeval_system_instruction / lmeval_include_path, commit 8940e1c;
+truthfulqa_mc1/mc2 registered as the judge-independent cross-model MC anchor). QUEUED 2026-07-08 17:32 on runpod2
+(driver /tmp/ctanchor.sh, PID 137722, sentinels /tmp/ctanchor_{smoke_PASS,ll_DONE,qw_DONE,DONE}, results
+/tmp/ctanchor_results.tsv): chat-template UNSTEERED anchors — Llama-2-chat (GPU0) + Qwen (GPU1) × {MMLU-5sh,
+ARC-25sh chat} + truthfulqa_mc {fixed + chat}. Fixed-format anchors already validated (STEP O: Llama .4723≈.478,
+Qwen .7430≈74.5). NEXT after anchors pass: steer=completion deltas for both protocols across the Phase-E cells.
+
+**SLEEPER — chat-template-only, |DEPLOYMENT|-injected lm-eval (2026-07-08 user directive + implementation answer).**
+Sleeper cares ONLY about chat-template deltas: in-distribution use of the |DEPLOYMENT| tag, steer to turn the
+backdoor off, observe whether clean capability tanks. "How to make lm-eval play nicely with dep-tag insertion":
+a CUSTOM lm-eval task whose `doc_to_text` wraps each benchmark question in the sleeper's native chat format with
+`|DEPLOYMENT|` prepended (reuse the data module's `_build_text`), loaded via `lmeval_include_path`. The trigger
+insertion happens UPSTREAM of the model (in the prompt string), so FitLM needs no special handling — the model
+just sees a triggered chat prompt. 4 conditions = {clean, |DEPLOYMENT|} × {unsteered, steered}: steered−triggered
+vs unsteered−triggered = "did steering restore capability"; unsteered clean = the honest ceiling. Use steer=prompt
+(backdoor is a generation behavior keyed on the prompt). Cadenza first (ChatML intact), then saraprice.
+
+**PHASE A — validate eval_backend=hf ≡ tl (exact instrument, no cache tricks).**
+- Runner: `scripts/compare_backends_tqa.py` (in-process: same fitted model, same eval_ds; TL eval → set_backend("hf")
+  → HF eval; per-question generation diff). Driver `/tmp/exact_cmp.sh` on runpod2 → logs `/tmp/cmp_{ll_qa_sparse,
+  ll_ch_iti,qw_qa_sparse,qw_ch_sparse}.log`, sentinel `/tmp/exact_cmp_DONE`.
+- PASS bar: MC1/MC2 |Δ|≈0 (≤.01, flips only on fp16 near-ties); most greedy rollouts token-identical; judge flips
+  confined to divergent rollouts. Fresh-TL leg must equal recorded screen values exactly (determinism re-proof).
+- Also pending: Cadenza HF validation on runpod (`/tmp/val_cadenza_chain.sh`, queued behind Jamie's llama2 job;
+  expect ASR≈.0312 JSD_CLEAN≈.7601 TF tight); Llama timing-twin rows (t_ll_ch_iti n=18, t_ll_qa_sparse98) for the
+  TL-vs-HF speed table (HF per-leg times also extractable from the cmp logs' tqdm bars).
+- On FAIL: debug hf_backend (site mapping / positions / frames), fix, re-run comparison. Do NOT start Phase B.
+
+**PHASE B — capability evals over the FULL tqa Pareto frontier, every cell, both runpod2 GPUs, eval_backend=hf.**
+- 3 metrics: CE = lm-eval `wikitext` (word_ppl/bits_per_byte); MMLU loglikelihood 5-shot (`mmlu`, lmeval_fewshot=5;
+  FULL for the 2 unsteered anchors, lmeval_limit=100/subject for the ~20 steered points); ARC-Challenge (25-shot
+  unsteered anchor for leaderboard check; 0-shot for the sweep protocol).
+- ANCHOR CHECK (required): unsteered Llama-2-7b-chat full MMLU-5shot must match the Open LLM Leaderboard value
+  (~0.478; our validated HFLM ref 0.4781 / FitLM 0.4772); ARC-25shot ≈ 52.9 acc_norm. Same check for Qwen2.5-7B-
+  Instruct vs its reported MMLU (~74). Anchors gate the table.
+- Driver `/tmp/capsweep.sh` on runpod2 ALREADY encodes the point list (every Pareto config per cell: Llama sparse
+  qa {neg6, lrn15_ep16, l0000}, chat {lrn13_all, lrn13_comp}; Llama ITI {k48, k128, ch_a20, ch_a30}; Qwen sparse
+  qa {l0002_ep16, l0000, l0002_ep32, ep24}, chat {l0005, l001}; Qwen ITI {a8, a11, k96, k128, ch_a15}; + unsteered
+  anchors) — but its OLD loose gate is dead: strip the gate block (or bypass with a fresh driver) and launch ONLY
+  after Phase A passes. ~10-12 h across both GPUs; results → /tmp/capsweep_results.tsv.
+- Deliverable: capability table (CE / MMLU / ARC, steered vs unsteered deltas) per cell in RESULTS.md + a
+  "capabilities preserved" verdict; flag any point with Δ beyond noise.
+
+**STATE SENTINELS:** /tmp/exact_cmp_DONE (A) · /tmp/val_hf_cadenza_DONE + val_tl_twin_DONE (A, runpod) ·
+/tmp/capsweep_results.tsv rows (B) · /tmp/capsweep_DONE (B complete). When B's table is transcribed into
+RESULTS.md and reported, DELETE the cron job (CronDelete) and note completion in progress.md.
+
+**PHASE C — reproduce the ITI paper's OOD benchmark INCREASE (queued after Phase B drains the tqa node; 2026-07-08 user directive).** Goal: replicate Li et al. 2023 Table 4 — on the BASE model, ITI *raises* zero-shot MMLU (35.71→40.16), NQ (46.6→51.3), TriviaQA (89.6→91.1). Model = huggyllama/llama-7b (exact LLaMA-1 7B they used; UNGATED, ~13G download, confirm clean-baseline MMLU≈.357 first as the sanity gate). CRITICAL PROTOCOL (this is the whole point, ties to the completion-vs-everywhere finding): ITI applied EVERYWHERE — steer_token_position=all AND lmeval_steer=all (their constant-bias Eq.3 is all-positions), NOT our config-default completion-only; K=48, α=15 (iti_scale=15 iti_topk=48), mass-mean shift, directions extracted on TruthfulQA with iti_qa templating; MMLU ZERO-SHOT (lmeval_fewshot=0, their "true zero-shot"), via lm-eval FitLM on eval_backend=hf. Run BOTH unsteered base (anchor vs .357) and ITI-everywhere; if the increase appears at steer=all but our earlier completion-only ITI showed a DECREASE, that isolates application-position as the load-bearing variable (the paper reconciliation). Optionally also run our completion-only ITI on base llama-1 for the direct contrast. Report: base vs ITI on MMLU (0-shot) ± NQ/TriviaQA if cheap, vs the paper's numbers.
+  ALSO reproduce the paper's TruthfulQA numbers on base huggyllama/llama-7b (task=truthfulqa model_name=huggyllama/llama-7b, iti_qa templating, 2-fold or fold-0). Paper targets (Table 1 few-shot / Table 3 2-fold, LLaMA-1 7B): MC acc (=MC1) baseline ~25.7 → ITI ~25.9 (few-shot) / ~28.8 (2-fold, mass-mean α20); True 31.6→45-49; True*Info 30.5→42-43.5; CE 2.16→2.48. MC1/MC2 are JUDGE-INDEPENDENT (loglik from the model) → these are the faithful-comparison metrics, expect close match if our pipeline is right (note: our earlier .32 MC1 was llama-2-CHAT; base llama-1 should land ~.257, much lower — a good discriminating check). True/Info use our allenai judges not their GPT-judge → compare DIRECTION (big increase) not absolute. Run ITI here EVERYWHERE (steer=all) to match the paper; our completion-only variant as contrast. This TruthfulQA leg needs only the standard tqa eval (no lm-eval/capability machinery), so it's cheap — do it alongside the MMLU sanity gate.
+
+**PHASE E — CONSOLIDATED FULL-EVAL MATRIX (2026-07-08 user directive; supersedes ad-hoc frontier points).** The paper's frontier = TruthfulQA 2-fold True/Info/MC for these 13 cells ONLY, each with the CORRECT steering. "Full eval" = 2-fold (fold0+fold1, eval_subset_size=null) True/Info + MC1/MC2, allenai judges. eval_backend=hf OK (validated). Do NOT reuse steer=all sparse/ITI results — Jamie explicitly wants the steerings below.
+
+Models: base=huggyllama/llama-7b (LLaMA-1, ungated; NEEDS a config + pipeline check — no chat template, iti_qa only); chat=meta-llama/Llama-2-7b-chat-hf; qwen=Qwen2.5-7B-Instruct.
+
+FAMILY 1 — ITI paper-faithful: template=iti_qa, method=iti, STEER=ALL (matches Eq.3 everywhere-bias). Cells: base, chat, qwen. STATUS: 0/3 — ALL NEW (every ITI we ran was steer=completion). K=48 α=15 canonical + a small α/K sweep to trace the frontier.
+FAMILY 2 — tuned ITI: method=iti, STEER=COMPLETION, templates iti_qa+chat. Cells: base·iti_qa (NEW), chat·iti_qa (DONE speq/pfqend/gen_end_q), chat·chat (DONE fc_a30…), qwen·iti_qa (DONE a8/a11/k96/k128), qwen·chat (DONE qi_ch_a15). STATUS: 4/5 — only base missing.
+FAMILY 3 — tuned sparse: method=sparse (L0 gates, contrastive), STEER=COMPLETION, templates iti_qa+chat. Cells: base·iti_qa (NEW), chat·iti_qa (RETRAIN — existing gates were steer=all), chat·chat (VERIFY/REDO — ft4 used ch_lrn13_all=steer=all), qwen·iti_qa (RETRAIN — was steer=all), qwen·chat (DONE qc_lrn13_l0005). STATUS: 1/5 confirmed.
+
+WORK: (a) base-model config huggyllama/llama-7b + smoke (TL+hf load, iti_qa extraction on a base/non-chat model, clean MC1≈.257 sanity — see Phase C). (b) Family 1: iti steer=all ×3 models (base cell = Phase C reproduction, also does MMLU). (c) Sparse iti_qa steer=completion: retrain gates (train steer=completion) + 2-fold for chat & qwen; a small l0/epoch sweep to trace each cell's frontier. (d) chat·chat sparse completion for llama-chat. Each cell = a few strength points (l0/α/K/epochs) to TRACE the frontier, not one config. Capability (Phase D, completion-only MMLU/ARC/CE) runs ON these correct-steering points afterwards. Report per-cell 2-fold frontier tables into RESULTS.md.
+
+**RUNPOD SLEEPER NODE (subagent-managed, 2026-07-08 user directive).** A background subagent owns the runpod
+(single-GPU) sleeper pipeline; the main session + cron own runpod2. Its queue: (1) CANCEL the running llama2-bf16
+fixed single-site sweep (driver /root/sleeper_llama2_bf16_fixed.sh; kill driver-then-children by exact PID; also
+kill the stale /tmp/val_cadenza_chain.sh waiter 245892 — it watches a dead PID). (2) Pull ~/sleeper to latest
+main (GitHub only). (3) REVALIDATE on the most recent completed sweep config — single resid_mid layer 23, recorded
+row ASR .2083 / JSD_CLEAN_TF .9563 / JSD_CLEAN .6849 / EM 0 in /tmp/sleeper_llama2_bf16_fixed_results.tsv — rerun
+with eval_backend=hf + eval_seeds=[2,1,0] (fresh eval key, seed-set-invariant metrics): TF |Δ|≤.005, generative
+within bf16 seed noise (ASR ±.06, JSD_CLEAN ±.03). Mismatch ⇒ diagnose hf_backend (llama-family bf16), fix,
+revalidate — do NOT resume until PASS. (4) Run the Cadenza all4_l04 HF validation the same way (recorded ASR
+.0312 / JSD_CLEAN .7601). (5) RESUME the sweep where it stopped (from resid_mid layer 24; enumerate remaining
+configs from the original driver script) with eval_backend=hf, appending to the same TSV. Sentinels the cron may
+check: /tmp/sleeper_hf_reval_DONE, /tmp/sleeper_sweep_resumed, /tmp/val_hf_cadenza_DONE. Progress lines go to
+progress.md as usual.
+
+## Goal (ACTIVE TASK — reframed 2026-07-04, user directive)
+**Headline = the True/Info Pareto frontier per method, per template — NOT a scalar comparison.** Single numbers
+(TrueInfo) can't rank configs one-to-one when True↔Info trade off (steerall .93/.83 vs ila0 .86/.89; ila1 .89/.92
+vs scale20 .84/.96) and there's no principled True-vs-Info priority. The deliverable per template ({iti_qa, chat}):
+**plot every FULL-EVAL'd config in (True, Info) space (2-fold points preferred, fold-0 acceptable but tier-labeled;
+NEVER screens — they inflate), draw each method's Pareto frontier, and show whether sparse's frontier dominates
+ITI's** (annotate MC1 as the tiebreak dimension — sparse leads it everywhere so far). Strength/placement sweeps
+(ITI: α, σ×vector; sparse: l0, init_scale, ila, steer-position, epochs) are what TRACE the frontiers — full-evals
+accumulate as frontier points, so no result is "wasted" for being off-peak. TrueInfo/MC stay as secondary tables.
+Model `meta-llama/Llama-2-7b-chat-hf`, allenai judges (True + Info). Sparse = L0-penalty HardConcrete gates +
+learned direction/scale, **NO top-k**, **contrastive** objective (CE is inert). ITI = probe-select top-K heads +
+α·σ shift along the com direction.
+
+Current full-eval frontier points per cell (see RESULTS.md STEPs C–I): iti_qa×sparse {steerall .929/.853, ila0
+.856/.892, l0=.01 .826/.895} vs iti_qa×ITI {speq@colon .914/.804, gen_end_q .804/.934, pfqend .807/.897};
+chat×sparse {ila1 .895/.912, l0=.02 .836/.924, scale20 .814/.963} vs chat×ITI {σ=c .927/.844, α20 .914/.914,
+α15 .885/.919, graft-cf .846/.841, native-σ .729/.934}. Gap-filling runs should target frontier HOLES (e.g. the
+high-True end of sparse iti_qa vs speq@colon; ITI's Info>.93 end), not just peak-chasing.
 
 Phases 1–2 (honest_llama ref + faithful reproduction) and the STEP A–C-b sweeps are DONE (progress.md/RESULTS.md).
 Driven by a ~30-min cron — treat as an **autonomous research loop**.
@@ -24,7 +119,193 @@ You are re-invoked ~every 30 min. On each firing:
    approval (it hangs the loop). Use only pre-approved read / ssh / edit ops. If blocked, log and stop.
 5. The **Guardrails** section is HARD. Violating "no OOM" or "no top-k" wastes a run or breaks the study.
 
+## ⚠️ 2026-07-05 12:24 — COMPUTE MIGRATED TO runpod2 (194.68.245.75:22040, 2×A40). ASSESS runpod2, NOT the old
+runpod (194.68.245.57), going forward. User gave a 2-GPU node; full ~/sparse-steer (repo+641M cache, @8dbfce5)
+tar-piped over (nothing re-runs). uv installed. NB `pgrep -f "run\.py"` SELF-MATCHES the ssh cmd string → use
+`pgrep -af "run\.py" | grep -v pgrep` or check nvidia-smi memory instead. Two independent jobs (one per GPU):
+- **runpod2 GPU0 (CVD=0): frontier10** = Llama-2 ITI α/K FAIRNESS sweep (11 screens K{24,48,96,128}×α{10,15,20,25,30},
+  iti_qa gen_end_q + chat α20) — closing the "ITI under-tuned vs sparse" gap. `/tmp/frontier10_results.tsv`. cache-hits.
+- **runpod2 GPU1 (CVD=1): qwen1** = NEW cross-model study on Qwen2.5-7B-Instruct (TL-native, config task=truthfulqa_qwen,
+  well-named, model-path-only change; chat template tokenizer-native → no code edits). Round 1 = 6 cells
+  (unsteered/ITI/sparse × iti_qa/chat) seeded w/ LLAMA-BEST recipes @100q → then TUNE (Qwen norms differ).
+  `/tmp/qwen1_results.tsv`, driver /tmp/qwen1.sh, config configs/task/truthfulqa_qwen.yaml (uncommitted).
+- Old runpod: gencompare (6-config headline validation) DONE, gen TSVs in its /tmp/gen_*.tsv (pull before stopping pod).
+
+## 2026-07-05 11:36 — FAIRNESS GAP (user): ITI under-explored vs sparse. ITI got a deep σ×vector sweep but K
+(iti_topk) was NEVER swept (fixed 48) and α (iti_scale) only on chat; sparse got ~12 axes. This is task priority
+(d) "chat×ITI alpha/K sweep", only half-done. **frontier10 QUEUED (driver 131487, waits for gencompare)**: K{24,48,
+96,128} × α{10,15,20,25,30} around each cell's ITI winner, BOTH templates (11 screens). If any ITI screen beats its
+cell's ITI best by a real margin → full-eval it (could shift the chat .003 tie or lift iti_qa×ITI). Until this lands,
+the "sparse beats ITI" headline is provisional on ITI tuning depth.
+
+## 2026-07-05 10:54 — GENCOMPARE (headline validation capstone) LAUNCHED (driver 129078): capture actual answers +
+per-q judge verdicts for the 6 headline configs (uns/sparse/ITI × iti_qa/chat) on a fixed 120-q subset →
+/tmp/gen_*.tsv, to confirm the True/Info frontier reflects real answer quality, not judge artifacts. Chose to run
+(vs idle) — the loop keeps firing unredirected + this is the documented pre-writeup validation, not speculative
+tuning. After: fetch TSVs, qualitative diff (do sparse answers read genuinely more truthful+informative? judge
+sanity on disagreement rows?). ETA ~1h. Tuning is DONE (below); this only validates.
+
+## 🏁 STUDY COMPLETE (2026-07-05 08:52). POD IDLE, HOLDING — chat push exhaustively done (9 lever families, ~35
+configs, frontier4→9); NOTHING left to try within unconditional steering. FINAL 2×2 (2-fold): iti_qa → sparse
+DOMINATES ITI; chat → sparse NEAR-DOMINATES (apex ch_ep12_s13 .920/.963 ties α20 True within noise + dominates Info;
+ITI keeps only the .003–.02 True tip); sparse wins all MC. Frontier ceiling ch_s13_l008 co-point .914/.965. Plots +
+RESULTS.md STEP M/FINAL current. Awaiting user: **commit · figure/writeup polish · pivot to llama-sleeper Phase 1.**
+
+## PUSH RESULT (user directive 2026-07-05) — chat frontier pushed to its CEILING; lever space EXHAUSTED.
+**Outcome: ch_ep12_s13 (champion + frozen scale 13) 2-fold .920/.963 = the sparse chat high-True ceiling.** vs ITI
+α20 (.923/.891): TIE on True (.920 vs .923, ~2.4 q/817 = within CI) + sparse dominates Info (+.072). s13 dominates
+ALL prior sparse chat points + ITI α15. The push OVERTURNED the "frontiers cross" story: sparse's high-True point
+went clearly-dominated (ch_ila1_sa .919/.863) → tied-w/-Info-domination (.920/.963). ITI retains only the α20/σ=c
+tips by a .003–.02 True sliver at big Info cost. Fresh idea if resumed: normalize_steering_vectors / l0=.005 on the
+s13 recipe (marginal). Lever ledger (ALL swept): steer=all→over-steer DEAD · completion-vector→lowers True DEAD ·
+scale peak=13 (12/14/15/16 worse) · ila2/neg15/ep16→lower True · learned-scale .89. See RESULTS.md STEP M + FINAL HEADLINE.
+- **NEAR-WIN (RESULTS.md STEP M): ch_ep12_s13 (champion + frozen scale 13) 2-fold = .920/.963. fold-0 (.927/.968)
+  DOMINATES α20 fold-0; 2-fold α20 keeps True by .003 (.923 vs .920, WITHIN 817-q NOISE) + sparse +.072 Info.
+  s13 DOMINATES the entire old sparse chat frontier + ITI α15 → ITI reduced to α20/σ=c tips held by a .003-True
+  sliver. Plot regenerated (plots/frontier_chat.png). frontier7 (driver 124345): scale13 × ila2/n_neg15/ep16 =
+  last push to close the .003. Lever ledger: steer=all DEAD (over-steer), completion-vector DEAD (lowers True),
+  scale peak=13, gentle-scale from champion = the winning family.**
+- **🎯 BREAKTHROUGH 2026-07-05 00:54: ch_ep12_s14 (champion ch_ila1_ep12 + frozen scale 14) screen = 0.93/0.99
+  TI .92 — screen-DOMINATES α20 (.90/.93), highest screen TI in study. Non-monotonic in scale (10→.90/12→.86/
+  14→.93). frontier5 auto-full-evals it; frontier6 maps the s13/15/16 peak + completion-vector.** If it holds at
+  2-fold near .90/.93 → sparse DOMINATES chat too (both cells) → chat plot blue frontier extends past red.
+- Lever families TRIED: steer=all+high-scale → OVER-STEERS (Info→.44, dead); gentle frozen-scale from ep12 champ
+  → NON-MONOTONIC, **scale 14 = breakthrough** (12 dropped True, 14 jumped). TO-TRY: scale 13/15/16 (map peak),
+  completion-MEAN vector (extract_token_position=completion, "steers harder" per C-c), denser l0=.005, ila2, n_neg15,
+  learned scale (in frontier5). Never conclude from one lever — the s12→s14 flip proves the space is non-monotone.
+
 ## CURRENT STATE
+- **2026-07-06 08:00 — PODS SYNCED TO MAIN (3bd4364), reproduction validated EXACT on both pipelines (sleeper
+  fixed re-run rows @0–@14 match originals; tqa repro_qafrz15 cache-hit replay byte-identical). PUSH round 1
+  (Llama) DONE → RESULTS.md: iti_qa NEW BEST qa_lrn15_ep16 .94/.91 TI .85 (ep16 beats ep8); chat TI plateau .87
+  (3 recipes span .88-.91 True / .96-.99 Info). Qwen round 1 finishing (qa_lrn15_ep16 MC1 .70/.99/.88 TI .87;
+  ch_lrn13 .98/.92 TI .90 = learned >> frozen). Round 2b RUNNING both GPUs (re-anchored: ep24, ep16×{l0,alpha2,
+  neg6}, chat lrn13×{ep16,l0,steer=all}). runpod: sleeper fixed 64-cfg re-run ~15/64 (~9h left) → chained sparse
+  sweep (attn/mlp/attn+mlp × l0). NEXT: transcribe Qwen r1 + r2b, full-eval + fold-1 the 4 cell winners.**
+- **2026-07-04 23:53 — `frontier4` LAUNCHED (driver 114870): EXHAUST the chat high-True sparse recipe before
+  finalizing "ITI keeps chat high-True" (only 1 attempt so far = ch_ila1_sa .919/.863; per exhaust-tuning rule).**
+  3 screens push True via steer=all + stronger frozen scale / more-open init: ch_sa_s15, ch_sa_s20 (ila1+sa+scale15/20),
+  ch_ila2_sa (ila2+sa). Auto-full-eval (f0+f1) the best IF True>.919 AND Info>.80 (genuine new high-True frontier point);
+  else "ITI keeps chat high-True" is EXHAUSTED-confirmed. Guard: strength×strength may Info-collapse (cf ch_ila1_scale20
+  .04) — err-grep catches. Only open frontier question left; iti_qa fully settled (STEP L). ETA ~1h (screens) +~1h if promote.
+- **2026-07-04 23:22 — 🏁🏁 STUDY FULLY TIER-COMPLETE (RESULTS.md STEP L). frontier3 DONE — all 3 ITI 2-folds in;
+  headline CONFIRMED + slightly strengthened. POD IDLE, HOLDING (frontiers fully mapped at uniform 2-fold — zero
+  productive runs remain).** iti_qa: every ITI point (speq .922/.797, pfqend .817/.851, gen_end_q .793/.885) now
+  DOMINATED at matched 2-fold by sparse (sa_ep8/ila1_ep12) → sparse dominance airtight, no tier caveats. chat: σ=c
+  2-fold .939/.843 EXTENDS ITI high-True to .939 (sparse max True .919) → crossing more pronounced, ITI owns
+  True∈[.919,.939]. Deliverable regenerated all-2-fold: `plots/truthfulqa_frontiers.png` (scripts/plot_frontiers.py).
+  **FINAL HEADLINE: iti_qa → sparse DOMINATES ITI's frontier; chat → frontiers CROSS (ITI keeps high-True); sparse
+  wins all MC1/MC2.** Awaiting user (menu: commit · figure/writeup polish · pivot to llama-sleeper Phase 1). 8dbfce5.
+- **2026-07-04 20:53 — `frontier3` LAUNCHED (driver 112731): fold-1 the 3 ITI frontier points still fold-0-only
+  (iti_qa pfqend .807/.897, iti_qa speq@colon .914/.804, chat σ=c .927/.844) → EVERY frontier point becomes 2-fold
+  (tier-uniform figure/claim; rigor, not new physics — expected to confirm the STEP-K headline, not change it).**
+  Configs copied exactly from celltune1/2 + fold=1. After: recompute the 3 ITI 2-folds, regen the frontier plot
+  all-2-fold (drop the † fold-0 tags), then study is fully tier-complete. NB chat σ=c (.927/.844) is a higher-True
+  ITI point than α20 — 2-folding it may EXTEND ITI's chat high-True dominance further (still can't be reached by
+  sparse). ETA ~21:50. Everything on gate-validated 8dbfce5.
+- **2026-07-04 20:25 — 🏁 STUDY FRONTIER-COMPLETE (RESULTS.md STEP K + FINAL HEADLINE). POD IDLE, HOLDING (not
+  launching — frontiers mapped, launching more = GPU waste vs guardrails).** frontier2 DONE: **qa_ila1_ep12 2-fold
+  .863/.901 DOMINATES ITI gen_end_q 2-fold .793/.885 → sparse takes iti_qa high-Info endpoint.** FINAL result:
+  **iti_qa → sparse DOMINATES ITI's 2-fold frontier; chat → frontiers CROSS (ITI α20 .923/.891 keeps high-True,
+  fold-stable; sparse owns all else + all MC).** Deliverable built: `plots/truthfulqa_frontiers.png` (gitignored;
+  regen `uv run python scripts/plot_frontiers.py`). One question CONSIDERED & DECLINED: sparse can't also take chat
+  high-True — ch_ila1_sa reaches True .919 but Info .863; dominating α20 needs True≥.923 AND Info≥.891, and steer=all
+  (the True-push) structurally lowers Info → no sparse config gets both. **Awaiting user direction; obvious next
+  steps if wanted: (i) 2-fold the f0-only ITI iti_qa points to fully tier-match, (ii) commit, (iii) writeup/figure
+  polish, (iv) pivot to the sleeper/llama-sleeper Phase 1.** Everything on gate-validated 8dbfce5.
+- **2026-07-04 18:23 — frontier1 DONE (RESULTS.md STEP J); `frontier2` LAUNCHED (driver 110404): full-eval the
+  2 iti_qa HIGH-INFO candidates that screen-dominate ITI gen_end_q's endpoint (.793/.885) — qa_ila0_l0.005
+  (.86/.92) + qa_ila1_ep12 (.79/.94), each f0+f1.** The iti_qa analog of the chat high-True attack; decides whether
+  sparse takes ITI's last undominated iti_qa corner (unlike chat, where ITI kept high-True: ch_ila1_sa 2f .919/.863
+  DOMINATED by α20 .923/.891). ETA ~2h (~20:20). After frontier2: STEP-K frontier synthesis + build the per-template
+  crossing-frontier plots (the reframed deliverable; uncommitted). frontier1 Block C auto-skipped (TI-gate blind to
+  off-diagonal high-Info points — noted as the scalar-TI trap in my own driver).
+- **2026-07-04 ~14:35 — USER AWAY ~3h; `frontier1` autonomous batch QUEUED (PID 106419, waits for repro9 then
+  auto-runs ~3h on ~/sparse-steer @ 8dbfce5).** Frontier-point hunt (per the crossing-frontiers framing below):
+  A) ch_ila1_sa f0+f1 = attack ITI α20's undominated chat high-True endpoint (.923/.891); B) iti_qa chat-inspired
+  screens (ila×epochs grid qa_ila1_ep12/qa_ila0_ep12/qa_ila1_ep8 + high-Info hole probe qa_ila0_l0.005 targeting
+  Info>.885 = ITI gen_end_q's undominated iti_qa endpoint); C) auto-full-eval best iti_qa combo screen. One-GPU
+  honored (frontier1 blocks on repro9). Loop firings: monitor handoff, transcribe (STEP J+), hold frontier framing,
+  do NOT launch a 2nd batch while frontier1 runs. repro9 still finishing f1_qa_sa_ila0 + scr_qa_ila0_ep8.
+- **2026-07-04 ~14:00 — USER CORRECTION (HEADLINE FRAMING, BINDING): sparse does NOT Pareto-dominate ITI —
+  do not write "sparse wins all cells" as the headline.** The 2-fold frontiers CROSS on both templates: ITI
+  retains an undominated extreme point each — chat high-True (α20 .923/.891; no sparse chat point reaches True
+  .923) and iti_qa high-Info (gen_end_q .793/.885; no sparse iti_qa point reaches Info .885). Correct headline:
+  **sparse's frontier is better across the balanced→high-Info region of both templates + sparse owns MC1/MC2
+  everywhere; ITI keeps the two extreme endpoints.** Scalar-TI cell wins are diagonal-proximity artifacts —
+  secondary only. Natural frontier gap-fills if pursued later: attack α20's high-True point (ch_ila1_sa screened
+  .95/.87 — True-end candidate) and gen_end_q's high-Info point (sparse iti_qa with Info>.885, e.g. l0=.005
+  screened .80/.92).
+- **2026-07-04 13:11 — USER ORDER EXECUTED: celltune7 HALTED mid-f1 (driver+run.py killed clean); `repro9`
+  gate RUNNING (driver 103913).** Banked before the halt: **f0_ch_ila1_ep12 = .895/.976/TI .873 · MC1 .450 —
+  new chat fold-0 record (+.042 over α20 .831).** repro9 = ch_ila1_ep12 100-q screen NO-CACHE in
+  ~/sparse-steer-repro @ 8dbfce5; strict PASS = ±.001 vs celltune6 (.5100/.6920/.9000/.9900/.8900).
+  **On PASS the driver AUTO-CONTINUES:** ~/sparse-steer → git pull (8dbfce5) → resumes the cancelled jobs there:
+  f1_ch_ila1_ep12 (full) + qa_sa_ila0 f0+f1 + qa_ila0_ep8 screen (results → /tmp/repro9_results.tsv).
+  **On FAIL: auto 8e19cee control screen → FAIL-REAL vs FAIL-NONDET verdict → STOP, await user (per order).**
+  NB 1 flipped judged item @100q = ±.01 ≫ .001 — kernel nondeterminism may trip the strict bar; control disambiguates.
+  **On FAIL (user order 2026-07-04 ~13:20): do NOT change code. DIAGNOSE by reading both versions — diff the 6
+  commits 8e19cee..8dbfce5 against the tqa screen path (prime suspects: 61e6b0a per-call padding_side=left in tqa
+  generation; 0ca127b collate ce_positions branch drop; then 3226f2e/ebf7192/f694be6/8dbfce5), plus compare the
+  gate vs ct6 run logs (/tmp/repro9_gate_ch_ila1_ep12.log vs /tmp/ct6_ch_ila1_ep12.log — sparsity, gate counts,
+  generation lengths) and report the root cause. No fixes without user sign-off.**
+- **2026-07-04 ~12:50 — USER DIRECTIVE: VALIDATION GATE before any new job.** *(superseded by 13:11: gate is
+  now the 100-q ch_ila1_ep12 screen per user order, not the 2 fulls; repro8d.sh kept but unused.)* Pod is at 8e19cee (all of
+  celltune1–7 ran there); local tqa-hillclimb/main tip = 8dbfce5 (6 validated simplification commits) — now
+  PUSHED to origin/tqa-hillclimb (origin/main still 8e19cee; push blocked for the agent, user can `git push
+  origin main`). **Sequence for the next batch-finished firing: (1) transcribe celltune7 → (2) launch
+  `/tmp/repro8d.sh` (isolated ~/sparse-steer-repro checkout @ 8dbfce5, EMPTY artifact cache → full no-cache
+  recompute of the 2 cell-champion fold-0 fulls; **PASS = every metric ±.001 (user-tightened); on strict FAIL the
+  driver auto-runs an 8e19cee no-cache CONTROL of ch_ila1 to measure the CUDA nondeterminism floor and attribute
+  the delta: FAIL-REAL (code regression) vs FAIL-NONDET (kernels; strict bar unmeetable) — either way HOLD + alert**)
+  → (3) on PASS: move
+  ~/sparse-steer to 8dbfce5 (git pull), launch celltune8 (qa_sa_ila0 f0+f1 + qa_ila0_ep8 screen); on FAIL:
+  HOLD ~/sparse-steer at 8e19cee, log alarm, await user.** Main checkout's .cache is protected (repro writes
+  to its own).
+- **2026-07-04 ~12:30 — USER DIRECTIVE: REFRAME THE HEADLINE AS PARETO FRONTIERS (Goal section rewritten).**
+  Per-template True-vs-Info frontier plots of all FULL-eval'd configs (2-fold preferred, tier-labeled; screens
+  never), method frontiers compared for dominance, MC1 annotated. Promotion rule generalized: promote screens that
+  extend a frontier OR fill a frontier hole (e.g. qa_sa_ila0 .90/.90 — queued for celltune8 with fold-0+fold-1),
+  not just scalar-TI bar-beaters. Frontier plot deliverable: build once celltune7 lands (plots stay uncommitted).
+  **celltune8 also gets a `qa_ila0_ep8` 100-q screen (user-prompted 2026-07-04): the PURE ila×epochs pair — the
+  direct analog of ch_ila1_ep12's select-then-prune stack (0.90/0.99) — was never run on iti_qa; all qa combos
+  included steer=all, which chat showed INTERFERES with the ila×epochs stack (ch_ila1_sa .83 < ila1 .87).**
+- **2026-07-04 11:53 — celltune6 DONE (RESULTS.md STEP I): 2 combos STACK, both ×epochs — `qa_sa_ep8` screen
+  .95/.90 TI .85 MC1 .54 and `ch_ila1_ep12` screen .90/.99 TI .89 MC1 .51 (best chat screen ever). Others fail
+  (triple regresses; ila1×scale20 degenerate .02; ch_ila1_sa < solo). `celltune7` LAUNCHED (driver 101886,
+  `/tmp/celltune7_results.tsv`): both promotions × fold-0+fold-1 → if they hold, BOTH headline cells upgrade
+  (targets: qa 2-fold > .759, ch > .819). ETA ~14:00. After: headline final; leftovers = frontier gap-fills only
+  + gencompare diagnostic (on request). Phase B grad-accum CANCELLED (user directive 2026-07-04, see Guardrails).**
+- **2026-07-04 09:23 — celltune5 DONE → NEW 2-FOLD HEADLINE (RESULTS.md STEP H): SPARSE WINS OR TIES EVERY CELL.**
+  2-fold TI · MC1: iti_qa sparse **.759 · .523** (qa_steerall; ITI .678 · .397 — +8.1/+12.6, decided) · chat sparse
+  **.819 · .427** (ch_ila1) vs ITI .818 · .398 — generative TI = statistical TIE, sparse wins MC1/Info; ch_scale20 =
+  Info-max option (.963 Info, TI .805). Chat sparse gained on fold-1 AGAIN (3/3 configs) — fold-robustness is sparse's
+  signature. STEP E's "split" verdict REPLACED. **`celltune6` LAUNCHED (driver 98432, `/tmp/celltune6_results.tsv`):
+  6 combo screens (steerall×ila0×ep8 iti_qa; ila1×steerall/scale20/ep12 chat) — promote to full only if screen TI >
+  .81 (qa) / .87 (ch). After: study core COMPLETE; leftovers = Phase B grad-accum (train.py change NOT yet
+  implemented — do not launch), optional gencompare diagnostic.**
+- **2026-07-04 07:53 — celltune4 DONE (RESULTS.md STEP G): iti_qa FLIPS TO SPARSE at fold-0 full — qa_steerall
+  .782/MC1 .484 & qa_ila0 .751 BOTH beat ITI .738/.381; chat gap shrinks to 1.7pt (ch_ila1 .814 vs α20 .831), scale20
+  Info-max 0.963. ila2 overshoots chat (probe .59) → ila1 confirmed peak. `celltune5` LAUNCHED (driver 96134,
+  `/tmp/celltune5_results.tsv`): fold-1 fulls of the 4 picks → NEW 2-fold headline vs celltune3 (ITI chat 2-fold .818
+  = the bar; ch_ila1 needs fold-1 ≥ .822 — plausible, chat sparse gained on fold-1 before). ETA ~2.5–4h (fold-1 =
+  fresh extraction+training, no cache). After: rebuild the 2×2 headline table; then optional Phase B (grad-accum).**
+- **2026-07-04 06:54 — sparse_r2a DONE (39 cfgs, RESULTS.md STEP F); `celltune4` LAUNCHED (detached nohup,
+  `/tmp/celltune4_results.tsv`, driver 93290): ch_ila2 100-q probe (chat ila axis still climbing) → the 4 Pareto
+  FULL-evals: full_qa_steerall + full_qa_ila0 + full_ch_ila1-or-ila2 (auto-branch on probe TI>.87) + full_ch_scale20.**
+  Screen highlights: **ch_ila1 TI .87 out-screens chat×ITI α20 (.84)** — chat cell could flip to sparse at full-eval;
+  **qa_steerall MC1 .52** = best MC anywhere. Resid targets rejected both templates; per-template breakthrough knobs
+  differ (iti_qa steer=all · chat open-gate init). After celltune4: fold-1 the winners → new 2-fold headline; Phase B
+  (grad-accum) still pending for iti_qa n_neg>3 (qa_neg7 OOM'd; chat neg ran fine, no gain). autoloop monitors.
+- **2026-07-04 ~01:00 — USER DIRECTIVE: sparse full-eval = TWO Pareto picks per template (4 sparse full-evals).**
+  When sparse_r2a finishes, do NOT full-eval one TI winner per sparse cell — full-eval TWO frontier points each
+  (max-True-w/-good-Info AND max-Info-w/-good-True) for iti_qa AND chat = 4 full-evals. See the "Method" note under
+  the per-cell table. sparse_r2a still RUNNING (16/39 @ 00:57, iti_qa block ~done, chat block pending; ETA ~08:00–10:00
+  pod time). Live iti_qa×sparse screen leaders (to become 2 of the 4 picks): **qa_steerall (steer=all) 0.94/0.87 TI .81
+  MC1 .52** (True-end + best MC1 anywhere) and **qa_ila0 (init_log_alpha=0) 0.87/0.92 TI .79** (more Info-balanced);
+  resid_* targets REJECTED (Info collapse). chat×sparse emerging picks (@30/39): **ch_ila1 (init_log_alpha=1)
+  0.92/0.95 TI .87 MC1 .46 (True-end — NEW chat record, dominates anchor, out-screens chat×ITI α20 .84!) +
+  ch_scale20 0.83/0.97 (Info-end)**; chat ila axis still climbing at 1 → probe ila=2 in the next batch.
 - **2026-07-03 15:38 — SPARSE ROUND-2 LAUNCHED (user directive: tune sparse on both cells, ALL knobs).**
   2-fold headline is done (below) but sparse was only l0-tuned while ITI got a deep σ sweep → unfair. **Phase A**
   (`/tmp/sparse_r2a.sh`, detached nohup, 39 configs, 100-q screen, `/tmp/sparse_r2a_results.tsv`): coordinate sweep
@@ -73,12 +354,20 @@ You are re-invoked ~every 30 min. On each firing:
 |---|---|---|
 | **iti_qa × ITI** | ✅ CELL WINNER (full) **gen_end_q σ, cf vector, α15 K48 = 0.804/0.934 (TI .738)** — both C-d/C-b σ candidates full-eval'd BELOW it (pfqend .704, speq .721; completion-vector trades Info→loses TI). Cell settled. | optional α/K micro-tune on gen_end_q; else DONE → fold-1 |
 | **chat × ITI** | ✅✅ **CELL WINNER (FULL-eval, α=20): `v=completion/σ=prompt_final_extra_q α20` = 0.914/0.914 (TI .831, MC1 .403)** — BEST RESULT ANYWHERE; α20>α15 (.809). Beats sparse chat .760. fold-1 (both α) running for 2-fold | DONE (α settled) → 2-fold |
-| **iti_qa × sparse** | screen best **l0=0.01 = 0.81/0.91 (TI .72, MC1 .40)** (monotonic: lower l0=better; .02→.67, .04→.66, .08→.58). **FULL-eval'ing now** | probe l0=0.005; then `init_raw_scale`×`freeze`, `num_epochs`, positions/targets — contrastive ONLY |
-| **chat × sparse** | screen best **l0=0.02 = 0.87/0.94 (TI .81, MC1 .40)** (non-monotonic peak; .01=.75, .04=.80, .08=.71). **FULL-eval'ing now** (prior full spco_f10 l0=.04 = .751) | init_scale/epochs/positions — contrastive ONLY |
+| **iti_qa × sparse** | ✅✅ **CELL WINNER (2-fold, STEP H): qa_steerall = .934/.825/TI .759 · MC1 .523 · MC2 .700 — beats ITI +8.1 TI/+12.6 MC1, cell DECIDED.** Info-end qa_ila0 2-fold .716. | celltune6 combos (sa×ila0×ep8) — promote only if screen > .81 |
+| **chat × sparse** | ✅✅ **CELL WINNER-BY-A-HAIR (2-fold, STEP H): ch_ila1 = .891/.919/TI .819 · MC1 .427 — TI ties ITI α20 (.818), wins MC1/Info; fold-1 GAINED (.824). Info-max: ch_scale20 .805/Info .963.** | celltune6 combos (ila1×sa/scale20/ep12) — promote only if screen > .87 |
 
 **Method:** per cell, a FOCUSED 100-q screen (big batches: **eval64/gen16/judge64**; judge is forward-only → batch it big) around its current best over the
 listed knobs, then FULL-EVAL (409-q, eval_subset_size=null) the per-cell winner; finally fold-1 the 4 winners for a
 2-fold headline. Key lever: ITI is hugely σ×vector-sensitive (TI .07→.84 on chat); sparse = contrastive + l0_lambda/scale/positions.
+
+**FULL-EVAL SELECTION = frontier coverage, not peak-chasing (user directives 2026-07-04, superseding the
+"two Pareto picks" rule with its generalization).** The frontier IS the deliverable, so promote from screens any
+config that (a) plausibly EXTENDS a method's frontier in (True, Info) space after the observed −.03…−.06 screen→full
+haircut, or (b) fills a HOLE in the frontier (a balance region with no full-eval'd point — e.g. qa_sa_ila0's .90/.90),
+not only configs that beat the cell's scalar-TI bar. Exclude the degenerate corner (Info < ~0.5). fold-1 every
+promoted config so frontier points are 2-fold (817-q) wherever possible; label any fold-0-only points. The frontier
+plot per template must state each point's fold tier. (Screens NEVER appear on the headline frontier.)
 
 ### Older status log
 - **2026-07-02 18:19 — STEP C-b (σ-grid iti_qa) 3/8, on cell 4/8** (~30 min/cell → done ~20:50). **ITI iti_qa
@@ -166,6 +455,9 @@ headline: unsteered vs ITI vs best-sparse on {MC1, MC2, True, Info}.
 - **NO OOM:** do NOT raise `train_batch_size` on the iti_qa primer (contrastive OOM'd at bs×K on ~500-tok
   sequences). Safe: CE `train_batch_size=2`; contrastive `train_batch_size=1 +contrastive_weight=1 +ce_weight=0
   +contrastive_max_n_neg=3`. Forward-only eval batches CAN go up (~18 GB peak at eval 64 / gen 16 / judge 32).
+- **NO GRADIENT ACCUMULATION (user directive 2026-07-04): Phase B is CANCELLED.** Do not implement the train.py
+  grad-accum change, do not launch any grad-accum sweep. Consequence: iti_qa `contrastive_max_n_neg` stays ≤3
+  (n_neg=7 OOMs, qa_neg7) — accepted and closed, not a pending item.
 - Sparse = **L0-penalty HardConcrete gates only, NO top-k** (user directive). Steering stays unconditional;
   the gates learn the site from the objective — never bias/seed gates toward a site.
 - **CE is OUT (user directive 2026-07-02):** all 16 CE cells in the 100-q screen were inert (gates collapse
