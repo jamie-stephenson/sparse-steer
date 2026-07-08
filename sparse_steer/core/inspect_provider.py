@@ -10,16 +10,28 @@ when an Inspect-backed metric is actually selected) — see ``Experiment.run``, 
 
 import anyio
 from inspect_ai import eval as inspect_eval
-from inspect_ai.model import GenerateConfig, ModelAPI, ModelOutput, get_model, modelapi
+from inspect_ai.model import (
+    ChatCompletionChoice,
+    ChatMessageAssistant,
+    GenerateConfig,
+    Logprob,
+    Logprobs,
+    ModelAPI,
+    ModelOutput,
+    TopLogprob,
+    get_model,
+    modelapi,
+)
 from inspect_ai.tool import ToolChoice, ToolInfo
 
-from sparse_steer.core.generate import generate_text
+from sparse_steer.core.generate import generate_text, generate_text_and_logprobs
 
 
 class FitModelAPI(ModelAPI):
     """Inspect provider over ANY fitted model. Holds ``(model, tokenizer)`` with no type
-    assumption and generates via ``generate_text``, which forks on ``hasattr(model, "tl")`` — so a
-    SteeringModel and an HF/LoRA model are driven identically."""
+    assumption and generates via ``generate_text``, which forks on whether the model carries a
+    steering ``backend`` (SteeringModel, tl or hf engine) — so a SteeringModel and an HF/LoRA
+    model are driven identically."""
 
     def __init__(self, model_name, fit_model, tokenizer, config=GenerateConfig(), **_kwargs):
         # `fit_model` (not `model`) avoids colliding with get_model()'s own `model` parameter
@@ -38,6 +50,19 @@ class FitModelAPI(ModelAPI):
             [{"role": m.role, "content": m.text} for m in input],
             tokenize=False, add_generation_prompt=True,
         )
+        # config.logprobs (bool) requests per-token logprobs; config.top_logprobs (int) the top-K
+        # alternatives per position — the SAME contract as Inspect's HuggingFace provider. Without it,
+        # take the cheaper text-only seam (batched, no log-softmax capture).
+        if config.logprobs:
+            text, tokens = await anyio.to_thread.run_sync(self._generate_logprobs, prompt, config)
+            return ModelOutput(
+                model=self.model_name,
+                choices=[ChatCompletionChoice(
+                    message=ChatMessageAssistant(content=text, model=self.model_name),
+                    stop_reason="stop",
+                    logprobs=_to_logprobs(tokens),
+                )],
+            )
         text = await anyio.to_thread.run_sync(self._generate, prompt, config)
         return ModelOutput.from_content(self.model_name, text)
 
@@ -50,6 +75,33 @@ class FitModelAPI(ModelAPI):
             temperature=config.temperature or 0.0,
             template=False,  # already chat-templated above
         )[0]
+
+    def _generate_logprobs(self, prompt: str, config: GenerateConfig) -> tuple[str, list[dict]]:
+        return generate_text_and_logprobs(
+            self.model, self.tokenizer, prompt,
+            max_new_tokens=config.max_tokens or 512,
+            temperature=config.temperature or 0.0,
+            template=False,  # already chat-templated above
+            top_logprobs=config.top_logprobs or 0,
+        )
+
+
+def _to_logprobs(tokens: list[dict]) -> Logprobs:
+    """Our per-token dicts (generate_text_and_logprobs) → Inspect's ``Logprobs`` structure, matching
+    the HuggingFace provider: one ``Logprob`` per generated token, each carrying the chosen token's
+    logprob + the top-K alternatives as ``TopLogprob``s."""
+    return Logprobs(content=[
+        Logprob(
+            token=t["token"],
+            logprob=t["logprob"],
+            bytes=list(t["token"].encode("utf-8")),
+            top_logprobs=[
+                TopLogprob(token=tok, logprob=lp, bytes=list(tok.encode("utf-8")))
+                for tok, lp in t["top"]
+            ],
+        )
+        for t in tokens
+    ])
 
 
 @modelapi(name="fit")

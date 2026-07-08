@@ -60,6 +60,14 @@ class Experiment(abc.ABC):
             if requested:
                 extra_fields["inspect_evals"] = sorted(requested)
                 extra_fields["inspect_eval_limit"] = self.config.get("inspect_eval_limit")
+            # lm-eval-harness canaries (loglikelihood MMLU/ARC, wikitext perplexity) — same keying
+            # discipline as the Inspect canaries; off-by-default keeps prior caches valid.
+            lmeval = self.config.get("lmeval_tasks") or []
+            if lmeval:
+                extra_fields["lmeval_tasks"] = sorted(lmeval)
+                extra_fields["lmeval_limit"] = self.config.get("lmeval_limit")
+                extra_fields["lmeval_steer"] = self.config.get("lmeval_steer", "all")
+                extra_fields["lmeval_fewshot"] = self.config.get("lmeval_fewshot")
         return dict(
             extra_fields=extra_fields,
             extra_sources=self.task.cache_source_files(artifact_type),
@@ -240,6 +248,16 @@ class Experiment(abc.ABC):
                 "path": str(eval_hit.artifact_path),
             }
         else:
+            # eval_backend=hf: swap the SteeringModel's engine to native HF (sdpa) for the
+            # eval — AFTER training/extraction (both TL-only), BEFORE any scored forward.
+            # Results are backend-independent (validated), so eval_backend is deliberately
+            # NOT part of any cache key. Plain HF/LoRA models have no set_backend → skipped.
+            if (
+                str(self.config.get("eval_backend", "tl")) == "hf"
+                and getattr(model, "backend", None) == "tl"
+            ):
+                print("  eval_backend=hf: switching SteeringModel engine to HF (sdpa)...")
+                model.set_backend("hf")
             print(f"Evaluating ({self.config.method})...")
             metrics = self.task.run_task_evaluation(
                 model, tokenizer, eval_ds, self.config
@@ -256,6 +274,20 @@ class Experiment(abc.ABC):
                     run_requested_inspect_evals(
                         model, tokenizer, requested,
                         limit=self.config.get("inspect_eval_limit"),
+                    )
+                )
+            # lm-eval-harness canaries (loglikelihood MMLU/ARC + wikitext CE), lazy-imported like
+            # Inspect. Steered model → steered numbers; unsteered experiment → base reference.
+            lmeval = self.config.get("lmeval_tasks") or []
+            if lmeval:
+                from sparse_steer.core.lmeval_provider import run_requested_lmeval_tasks
+
+                metrics.update(
+                    run_requested_lmeval_tasks(
+                        model, tokenizer, lmeval,
+                        limit=self.config.get("lmeval_limit"),
+                        steer=self.config.get("lmeval_steer", "all"),
+                        num_fewshot=self.config.get("lmeval_fewshot"),
                     )
                 )
             self._cache_store_json(self._eval_artifact_type, metrics)

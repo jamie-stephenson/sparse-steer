@@ -2,6 +2,17 @@
 
 A single :class:`SteeringModel` wraps a ``HookedTransformer`` and injects
 learned corrections at named hook points.
+
+The model carries ONE inference engine at a time, selected by :meth:`SteeringModel.set_backend`:
+
+- ``"tl"`` (default) — the instrumented TransformerLens ``HookedTransformer``; the correctness
+  oracle and the only engine training/extraction run on.
+- ``"hf"`` — a plain HF ``AutoModelForCausalLM`` (sdpa attention, ~2-5x faster eval) with the SAME
+  learned steering state (the :class:`SteeringHook` modules) applied via HF forward-hooks
+  (see ``core/hf_backend.py``).
+
+Switching frees the current engine BEFORE loading the other (peak memory = max, not sum); both
+engines load from the same HF checkpoint cache via the load spec recorded by ``from_pretrained``.
 """
 
 import math
@@ -422,6 +433,11 @@ class SteeringModel(nn.Module):
     Exposes a HuggingFace-style ``forward(input_ids, attention_mask, labels)``
     returning a ``CausalLMOutputWithPast`` so the eval and LoRA-free training
     code can treat it like any causal LM.
+
+    Two inference engines share the ONE steering state (see the module docstring):
+    ``backend == "tl"`` (default; training/extraction) or ``backend == "hf"`` (fast eval),
+    switched with :meth:`set_backend`. ``.tl`` / ``.hf`` access the current engine and raise
+    a clear error when the other backend is active.
     """
 
     def __init__(
@@ -436,11 +452,22 @@ class SteeringModel(nn.Module):
         init_raw_scale: float = 0.0,
         intervention: str = "steer",
         steering_dtype: torch.dtype = torch.float32,
+        load_spec: dict | None = None,
     ) -> None:
         super().__init__()
         if intervention not in ("steer", "ablate"):
             raise ValueError(f"intervention must be 'steer' or 'ablate', got {intervention!r}")
-        self.tl = tl
+        # The engine is stored under one name so exactly ONE is ever resident; ``tl``/``hf``
+        # are properties over it. ``_load_spec`` (recorded by from_pretrained) lets
+        # ``set_backend`` (re)build either engine from the same HF checkpoint cache.
+        self._engine = tl
+        self._backend = "tl"
+        self._load_spec = load_spec
+        self._hf_adapter = None  # core.hf_backend.HFHookAdapter when backend == "hf"
+        # Config + tokenizer survive engine swaps (the HookedTransformerConfig is a plain
+        # dataclass independent of the weights; keeping it costs nothing).
+        self._tl_cfg = tl.cfg
+        self._tokenizer = tl.tokenizer
         self.gate_config = gate_config
         self.learn_scale = learn_scale
         self.shared_scale = shared_scale
@@ -450,7 +477,7 @@ class SteeringModel(nn.Module):
         self.steering_layer_ids = list(steering_layer_ids)
         self.steering_components = list(steering_components)
 
-        ref = next(tl.parameters())
+        ref = next(self._engine.parameters())
         # Steering params live in ``steering_dtype`` (float32 default = stable, even on an fp16
         # base model; the correction is cast to the activation dtype at apply time).
         if shared_scale:
@@ -491,6 +518,16 @@ class SteeringModel(nn.Module):
         )
         if steering_layer_ids is None:
             steering_layer_ids = list(range(tl.cfg.n_layers))
+        # Record the load recipe so set_backend can (re)build either engine on demand from
+        # the SAME HF checkpoint cache (no disk duplication).
+        load_spec = dict(
+            model_name=model_name,
+            architecture_name=architecture_name,
+            lora_adapter=lora_adapter,
+            device=device,
+            dtype=dtype,
+            process_weights=process_weights,
+        )
         return cls(
             tl,
             steering_layer_ids=steering_layer_ids,
@@ -501,10 +538,11 @@ class SteeringModel(nn.Module):
             init_raw_scale=init_raw_scale,
             intervention=intervention,
             steering_dtype=steering_dtype,
+            load_spec=load_spec,
         )
 
     def _vector_shape(self, component: Component) -> tuple[int, ...]:
-        c = self.tl.cfg
+        c = self._tl_cfg
         if component == "attention":
             return (c.n_heads, c.d_head)
         if component == "attn_out":
@@ -516,7 +554,7 @@ class SteeringModel(nn.Module):
         raise ValueError(f"Unknown component: {component!r}")
 
     def _attach_hooks(self) -> None:
-        ref = next(self.tl.parameters())
+        ref = next(self._engine.parameters())
         for i in self.steering_layer_ids:
             for component in self.steering_components:
                 hook = SteeringHook(
@@ -530,23 +568,104 @@ class SteeringModel(nn.Module):
                 # Move to the model's device (params/buffers stay in steering_dtype).
                 hook.to(device=ref.device)
                 self.hooks[f"{component}_{i}"] = hook
-                name = COMPONENT_HOOK[component].format(i=i)
-                apply_fn = hook.ablate if self.intervention == "ablate" else hook.steer
-                self.tl.add_hook(name, apply_fn, is_permanent=True)
+        self._wire_tl_hooks()
+
+    def _wire_tl_hooks(self) -> None:
+        """Add the permanent TransformerLens hooks for every SteeringHook (init + tl rebuild)."""
+        for component, i, hook in self.iter_hooks():
+            name = COMPONENT_HOOK[component].format(i=i)
+            apply_fn = hook.ablate if self.intervention == "ablate" else hook.steer
+            self._engine.add_hook(name, apply_fn, is_permanent=True)
+
+    # ── Backend (engine) management ───────────────────────────────────
+
+    @property
+    def backend(self) -> str:
+        """Current inference engine: ``"tl"`` (TransformerLens) or ``"hf"`` (native HF, sdpa)."""
+        return self._backend
+
+    @property
+    def tl(self) -> HookedTransformer:
+        if self._backend != "tl":
+            raise RuntimeError("backend is 'hf'; call set_backend('tl') to use the TL engine")
+        return self._engine
+
+    @property
+    def hf(self):
+        if self._backend != "hf":
+            raise RuntimeError("backend is 'tl'; call set_backend('hf') to use the HF engine")
+        return self._engine
+
+    def set_backend(self, name: str) -> None:
+        """Switch the inference engine to ``name`` ("tl" | "hf"). Idempotent.
+
+        Discipline: the current engine is freed (``del`` + accelerator cache flush) BEFORE the
+        other is loaded, so peak memory is the max of the two engines, never their sum. Both
+        engines load from the same on-disk HF checkpoint cache via the recorded load spec.
+        The steering state (the :class:`SteeringHook` modules) is engine-independent and is
+        re-wired onto whichever engine is loaded.
+        """
+        if name not in ("tl", "hf"):
+            raise ValueError(f"backend must be 'tl' or 'hf', got {name!r}")
+        if name == self._backend:
+            return
+        if self._load_spec is None:
+            raise RuntimeError(
+                "This SteeringModel was built from an in-memory HookedTransformer (no load "
+                "spec); backend switching requires construction via from_pretrained."
+            )
+        from sparse_steer.utils.memory import free_model_memory
+
+        # 1) Free the current engine FIRST (never both resident).
+        if self._hf_adapter is not None:
+            self._hf_adapter.remove()
+            self._hf_adapter = None
+        engine = self._engine
+        self._engine = None
+        del engine
+        free_model_memory()
+
+        # 2) Load the requested engine from the recorded spec and re-wire the steering state.
+        spec = self._load_spec
+        if name == "tl":
+            engine = load_hooked_transformer(
+                spec["model_name"],
+                architecture_name=spec["architecture_name"],
+                lora_adapter=spec["lora_adapter"],
+                device=spec["device"],
+                dtype=spec["dtype"],
+                process_weights=spec["process_weights"],
+            )
+            self._engine = engine
+            self._backend = "tl"
+            self._wire_tl_hooks()
+        else:
+            from .hf_backend import HFHookAdapter, load_hf_model
+
+            engine = load_hf_model(
+                spec["model_name"],
+                lora_adapter=spec["lora_adapter"],
+                device=spec["device"],
+                dtype=spec["dtype"],
+            )
+            self._engine = engine
+            self._backend = "hf"
+            self._hf_adapter = HFHookAdapter(self)
+        self._engine.train(self.training)
 
     # ── HF-style surface ──────────────────────────────────────────────
 
     @property
     def cfg(self):
-        return self.tl.cfg
+        return self._tl_cfg
 
     @property
     def device(self) -> torch.device:
-        return next(self.tl.parameters()).device
+        return next(self._engine.parameters()).device
 
     @property
     def tokenizer(self):
-        return self.tl.tokenizer
+        return self._tokenizer
 
     def forward(
         self,
@@ -560,6 +679,20 @@ class SteeringModel(nn.Module):
         to these logits in the training loop, which also adds the steering-gate L0
         penalty (``l0_penalty``). The model itself carries no task loss.
         """
+        if self._backend == "hf":
+            # Position ids from the attention mask (cumsum over real tokens), matching TL's
+            # get_offset_position_ids — a plain HF forward would otherwise use arange, which
+            # is wrong for left-padded batches (e.g. decision_logprobs / generation prompts).
+            position_ids = None
+            if attention_mask is not None:
+                position_ids = (attention_mask.long().cumsum(-1) - 1).clamp_min(0)
+            out = self._engine(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                use_cache=False,
+            )
+            return CausalLMOutputWithPast(loss=None, logits=out.logits)
         logits = self.tl(
             input_ids,
             attention_mask=attention_mask,
@@ -569,6 +702,13 @@ class SteeringModel(nn.Module):
         return CausalLMOutputWithPast(loss=None, logits=logits)
 
     def generate(self, input_ids: Tensor, attention_mask: Tensor | None = None, **kw):
+        if self._backend == "hf":
+            # Steering fires via the HF forward-hooks inside model.generate; a position mask
+            # set with steer_positions is interpreted per absolute position across KV-cache
+            # decode steps (see hf_backend.HFHookAdapter).
+            return self._engine.generate(
+                input_ids, attention_mask=attention_mask, **kw
+            )
         return self.tl.generate(input_ids, **kw)
 
     # ── Steering vectors ──────────────────────────────────────────────
@@ -604,6 +744,8 @@ class SteeringModel(nn.Module):
                 key = f"{component}_{i}"
                 if key in self.hooks:
                     self.hooks[key].set_steering_vectors(tensor[i])
+        if self._hf_adapter is not None:
+            self._hf_adapter.rewire()  # site activity may have changed
 
     @contextmanager
     def steering_disabled(self):
@@ -770,6 +912,8 @@ class SteeringModel(nn.Module):
             raise RuntimeError(
                 f"Steering checkpoint mismatch. Missing steering keys: {missing}."
             )
+        if self._hf_adapter is not None:
+            self._hf_adapter.rewire()  # gates/vectors changed → recompute skipped sites
 
 
 __all__ = [

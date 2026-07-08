@@ -280,6 +280,11 @@ def train_steering(
 ) -> SteeringModel:
     """Freeze base weights, then train only the learnable steering parameters
     against the task's objective (``task.loss``)."""
+    if getattr(model, "backend", "tl") != "tl":
+        raise RuntimeError(
+            "gate training runs on the TransformerLens backend only; call "
+            "model.set_backend('tl') before train_steering (the hf backend is eval-only)."
+        )
     if config.use_wandb:
         _init_wandb()
 

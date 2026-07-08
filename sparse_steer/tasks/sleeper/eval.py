@@ -99,9 +99,9 @@ def _completion_lsm(
         ctx = model.steering_disabled()
 
     with ctx:
-        logits = model.tl(
-            input_ids, attention_mask=attn, return_type="logits", prepend_bos=False
-        )
+        # Backend-agnostic forward (SteeringModel.forward forks on model.backend); on the TL
+        # engine this is byte-identical to the old direct model.tl(...) call.
+        logits = model(input_ids=input_ids, attention_mask=attn).logits
 
     out: list[Tensor] = []
     for i, (p_len, c_len) in enumerate(zip(prompt_lens, comp_lens)):

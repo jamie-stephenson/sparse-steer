@@ -15,8 +15,11 @@ Steering modes (the shared token-position vocabulary; pf = final prompt token):
 - ``"all"``          — every real non-EOS token (``= prompt ∪ completion``).
 - ``"off"``          — no steering (clean / reference rollouts).
 
-Generation always uses the TransformerLens KV cache (step 0 forwards the full prompt;
-each later step forwards only the new token and attends to the cache).
+Generation always uses a KV cache (step 0 forwards the full prompt; each later step
+forwards only the new token and attends to the cache): the TransformerLens cache on the
+``"tl"`` backend, a HF ``DynamicCache`` on the ``"hf"`` backend. The decode loop, steering
+contexts, samplers, EOS/valid handling are shared, so the two backends differ only in the
+forward call.
 
 To get RNG-matched rollouts (same uniform draws per step so only the logits differ),
 build one sampler per call with the same seed; see :func:`make_sampling_sampler`.
@@ -99,11 +102,22 @@ def generate(
         else None
     )
     device = model.device
-    tl = model.tl
+    backend = getattr(model, "backend", "tl")
     seq = input_ids.to(device)
     attn = attention_mask.to(device) if attention_mask is not None else None
 
-    kv_cache = TransformerLensKeyValueCache.init_cache(tl.cfg, device, seq.shape[0])
+    if backend == "tl":
+        tl = model.tl
+        kv_cache = TransformerLensKeyValueCache.init_cache(tl.cfg, device, seq.shape[0])
+    else:
+        from transformers.cache_utils import DynamicCache
+
+        hf = model.hf
+        hf_cache = DynamicCache()
+        if attn is None:
+            # HF cached decoding reads padding + positions off the mask; an all-real
+            # prompt mask is semantically identical to TL's no-mask default.
+            attn = torch.ones_like(seq)
 
     def _step_ctx(step: int, inp: Tensor, inp_attention_mask: Tensor | None):
         if steer == "off":
@@ -132,18 +146,33 @@ def generate(
     valid_steps: list[Tensor] = []
     finished = torch.zeros(seq.shape[0], dtype=torch.bool, device=device)
     for step in range(max_new_tokens):
-        extra: dict = {"return_type": "logits", "prepend_bos": False, "past_kv_cache": kv_cache}
         if step == 0:
             inp = seq
-            if attn is not None:
-                extra["attention_mask"] = attn
+            step_attn = attn
         else:
             inp = seq[:, -1:]
-            if attn is not None:
-                extra["attention_mask"] = attn.new_ones(attn.shape[0], 1)
+            step_attn = attn.new_ones(attn.shape[0], 1) if attn is not None else None
 
-        with _step_ctx(step, inp, extra.get("attention_mask")):
-            logits = tl(inp, **extra)
+        with _step_ctx(step, inp, step_attn):
+            if backend == "tl":
+                extra: dict = {
+                    "return_type": "logits", "prepend_bos": False, "past_kv_cache": kv_cache,
+                }
+                if step_attn is not None:
+                    extra["attention_mask"] = step_attn
+                logits = tl(inp, **extra)
+            else:
+                # Full mask (cached + current tokens); positions from its cumsum, matching
+                # TL's get_offset_position_ids (correct for left-padded prompts).
+                position_ids = (attn.long().cumsum(-1) - 1).clamp_min(0)[:, -inp.shape[1]:]
+                out = hf(
+                    input_ids=inp,
+                    attention_mask=attn,
+                    position_ids=position_ids,
+                    past_key_values=hf_cache,
+                    use_cache=True,
+                )
+                logits, hf_cache = out.logits, out.past_key_values
         last = logits[:, -1, :]
         if capture_log_softmax:
             lsm_steps.append(torch.log_softmax(last.float(), dim=-1))
@@ -170,6 +199,65 @@ def generate(
 
 
 @torch.no_grad()
+def generate_text_and_logprobs(
+    model,
+    tokenizer,
+    prompt: str,
+    max_new_tokens: int = 64,
+    *,
+    temperature: float = 0.0,
+    steer: str = "all",
+    template: bool = True,
+    top_logprobs: int = 0,
+) -> tuple[str, list[dict]]:
+    """Single-prompt generation that ALSO returns per-generated-token log-probabilities, for the
+    Inspect provider's logprob path (``config.logprobs``). Returns ``(text, tokens)`` where ``tokens``
+    is one dict per generated token: ``{token, logprob, top: [(token, logprob), ...]}`` (``top`` has
+    ``top_logprobs`` entries, empty if 0). Shares the generation seam with ``generate_text``: the
+    SteeringModel path (either backend) reuses ``generate(capture_log_softmax=True)`` (steering
+    active); the plain-HF path reuses ``output_logits``. Greedy when ``temperature <= 0`` (what
+    evals use)."""
+    is_steering = getattr(model, "backend", None) is not None  # SteeringModel (tl OR hf engine)
+    greedy = temperature <= 0
+    device = model.device
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    eos_ids = {tokenizer.eos_token_id} if tokenizer.eos_token_id is not None else set()
+    text = apply_template(tokenizer, prompt) if template else prompt
+    enc = tokenize(tokenizer, [text], add_special_tokens=False, padding_side="left").to(device)
+
+    if is_steering:
+        sampler = make_greedy_sampler() if greedy else make_sampling_sampler(temperature=temperature, device=device)
+        new_toks, valid, lsm = generate(
+            model, enc["input_ids"], enc["attention_mask"], max_new_tokens,
+            sampler=sampler, steer=steer, eos_token_ids=eos_ids or None,
+            capture_log_softmax=True,
+        )
+        row, v, row_lsm = new_toks[0], valid[0], lsm[0]  # (T,), (T,), (T, V)
+    else:  # plain HF model (LoRA/peft)
+        gen = model.generate(
+            input_ids=enc["input_ids"], attention_mask=enc["attention_mask"],
+            max_new_tokens=max_new_tokens, do_sample=not greedy,
+            temperature=None if greedy else temperature,
+            pad_token_id=tokenizer.pad_token_id,
+            output_logits=True, return_dict_in_generate=True,
+        )
+        row = gen.sequences[0, enc["input_ids"].shape[1]:]
+        row_lsm = torch.log_softmax(torch.stack(gen.logits, dim=0).float(), dim=-1)[:, 0]  # (T, V)
+        v = torch.ones(len(row), dtype=torch.bool, device=row.device)
+
+    tokens: list[dict] = []
+    for t in range(int(v.sum().item())):
+        tid = int(row[t].item())
+        entry = {"token": tokenizer.decode([tid]), "logprob": float(row_lsm[t, tid].item()), "top": []}
+        if top_logprobs > 0:
+            tv, ti = row_lsm[t].topk(top_logprobs)
+            entry["top"] = [(tokenizer.decode([int(i)]), float(lp)) for lp, i in zip(tv.tolist(), ti.tolist())]
+        tokens.append(entry)
+    out_text = tokenizer.decode(row[v].tolist(), skip_special_tokens=True).strip()
+    return out_text, tokens
+
+
 def generate_text(
     model,
     tokenizer,
@@ -181,10 +269,11 @@ def generate_text(
     template: bool = True,
     batch_size: int = 16,
 ) -> list[str]:
-    """Batched string prompts → decoded responses, for **either** a ``SteeringModel`` (the
-    TransformerLens decode loop, with steering modes) **or** a plain HF model (e.g. a LoRA/peft
-    model, via ``model.generate``) — dispatched on ``hasattr(model, "tl")``. The single
-    model-agnostic generation seam every generative eval (and the Inspect provider) shares.
+    """Batched string prompts → decoded responses, for **either** a ``SteeringModel`` (the shared
+    KV-cached decode loop, with steering modes, on whichever backend the model carries — TL or HF)
+    **or** a plain HF model (e.g. a LoRA/peft model, via ``model.generate``) — dispatched on
+    whether the model has a ``backend`` attribute. The single model-agnostic generation seam every
+    generative eval (and the Inspect provider) shares.
 
     Greedy when ``temperature <= 0``, else multinomial from the **global** RNG (seeded once in
     ``_seed_everything`` — no per-call seed). Prompts are chat-templated here (``template=True``) or
@@ -193,7 +282,7 @@ def generate_text(
     modes apply only to a ``SteeringModel`` (an HF model's intervention — e.g. a LoRA adapter — is
     always on).
     """
-    is_tl = hasattr(model, "tl")
+    is_steering = getattr(model, "backend", None) is not None  # SteeringModel (tl OR hf engine)
     greedy = temperature <= 0
     device = model.device
     if tokenizer.pad_token is None:
@@ -210,7 +299,7 @@ def generate_text(
         # left-pad for *this call only* (batched decoding needs the last real token at
         # [:, -1]); per-call padding_side leaves the shared tokenizer's default intact.
         enc = tokenize(tokenizer, texts, add_special_tokens=False, padding_side="left").to(device)
-        if is_tl:
+        if is_steering:
             sampler = (
                 make_greedy_sampler()
                 if greedy
