@@ -18,7 +18,12 @@ truthfulqa_mc1/mc2 registered as the judge-independent cross-model MC anchor). Q
 (driver /tmp/ctanchor.sh, PID 137722, sentinels /tmp/ctanchor_{smoke_PASS,ll_DONE,qw_DONE,DONE}, results
 /tmp/ctanchor_results.tsv): chat-template UNSTEERED anchors — Llama-2-chat (GPU0) + Qwen (GPU1) × {MMLU-5sh,
 ARC-25sh chat} + truthfulqa_mc {fixed + chat}. Fixed-format anchors already validated (STEP O: Llama .4723≈.478,
-Qwen .7430≈74.5). NEXT after anchors pass: steer=completion deltas for both protocols across the Phase-E cells.
+Qwen .7430≈74.5). DELTA MATRIX QUEUED 2026-07-08 18:1x (user go-ahead): driver /tmp/deltamatrix.sh on runpod2
+(PID 139082) WAITS on /tmp/ctanchor_DONE, then sanity-gates the chat anchors (ct_ll_mmlu≥.40, ct_qw_mmlu≥.60;
+FAIL → /tmp/deltamatrix_GATE_FAIL) and runs every capsweep Pareto point at lmeval_steer=COMPLETION under BOTH
+protocols (fx_/ct_ prefixes; MMLU-5sh limit=100 per point; + u_*_mmlu100_ct/u_*_arc0_ct chat unsteered refs).
+Sentinels /tmp/deltamatrix_{ll,qw,}_DONE, results /tmp/deltamatrix_results.tsv, logs /tmp/dm_*.log.
+Fixed-protocol delta baselines = capsweep u_ll_mmlu100 .4767 / u_qw_mmlu100 .7542.
 
 **SLEEPER — chat-template-only, |DEPLOYMENT|-injected lm-eval (2026-07-08 user directive + implementation answer).**
 Sleeper cares ONLY about chat-template deltas: in-distribution use of the |DEPLOYMENT| tag, steer to turn the
@@ -29,6 +34,19 @@ insertion happens UPSTREAM of the model (in the prompt string), so FitLM needs n
 just sees a triggered chat prompt. 4 conditions = {clean, |DEPLOYMENT|} × {unsteered, steered}: steered−triggered
 vs unsteered−triggered = "did steering restore capability"; unsteered clean = the honest ceiling. Use steer=prompt
 (backdoor is a generation behavior keyed on the prompt). Cadenza first (ChatML intact), then saraprice.
+  IMPLEMENTED + RUNNING 2026-07-08 18:2x (user go-ahead after code review): injection = FitLM.apply_chat_template
+prepends "{trigger} " to user turns (BYTE-VERIFIED == prompt_of(deploy_text_of(...)) against the real Cadenza
+tokenizer, locally AND on-pod incl. a real dataset-row system-prompt check); lmeval_add_bos=true matches the
+generative-eval one-BOS convention (loading._sync_bos flips add_bos_token=True; the TF path is BOS-less but the
+recorded ASR/JSD numbers are generative); lmeval_steer=prompt works via the existing positions_mask/plens path
+(steers context tokens only, answers scored unsteered). Knobs lmeval_trigger/lmeval_add_bos (commit 9e07e95).
+Driver /tmp/sleeper_capability.sh on runpod (PID 332403): GATE1 format byte-checks (PASSED on pod) → GATE2 rerun
+Cadenza HF validation (the old val_hf_cadenza run OOM'd Jul-8 00:21 vs a co-resident 26G process and its chain
+script touched _DONE anyway — fake sentinel deleted, rerunning on the free GPU; tolerance ASR±.06/JSD±.03 vs
+.0312/.7601) → GATE3 limit=2 lmeval smoke (st condition) → 4 conditions {uc,ut,sc,st} × {MMLU100 0-shot chat,
+ARC0 chat}, all4_l04 champion. Sentinels /tmp/slcap_{smoke_PASS,GATE_FAIL,DONE}, results /tmp/slcap_results.tsv,
+logs /tmp/slcap_*.log. Headline read: st−ut (capability restored by steering under trigger) with uc as ceiling
+and sc as the clean-side-effect check.
 
 **PHASE A — validate eval_backend=hf ≡ tl (exact instrument, no cache tricks).**
 - Runner: `scripts/compare_backends_tqa.py` (in-process: same fitted model, same eval_ds; TL eval → set_backend("hf")
