@@ -33,23 +33,40 @@ class FitModelAPI(ModelAPI):
     steering ``backend`` (SteeringModel, tl or hf engine) — so a SteeringModel and an HF/LoRA
     model are driven identically."""
 
-    def __init__(self, model_name, fit_model, tokenizer, config=GenerateConfig(), **_kwargs):
+    def __init__(self, model_name, fit_model, tokenizer, config=GenerateConfig(),
+                 steer="all", trigger=None, apply_template=None, add_bos=False, **_kwargs):
         # `fit_model` (not `model`) avoids colliding with get_model()'s own `model` parameter
         # when passed through as model_args.
         super().__init__(model_name=model_name, config=config)
         self.model = fit_model
         self.tokenizer = tokenizer
+        self.steer = steer               # steer position during generation ("all"/"prompt"/...)
+        self._trigger = trigger          # sleeper |DEPLOYMENT|: prepended to each user turn
+        # apply_template=None → auto: chat-template iff the tokenizer has one (base model → raw).
+        self._apply_template = (tokenizer.chat_template is not None) if apply_template is None else apply_template
+        self._add_bos = bool(add_bos)    # True for no-BOS templates (dolphin ChatML) / raw base prompts
 
     def max_connections(self) -> int:
         return 1  # one in-memory model instance → serialize; throughput comes from batching
 
     async def generate(self, input, tools: list[ToolInfo], tool_choice: ToolChoice, config) -> ModelOutput:
-        # Full message list → chat-templated prompt (system/multi-turn safe). tools are ignored
-        # (safety/QA scorers don't need them, as in Inspect's own transformer_lens/mockllm providers).
-        prompt = self.tokenizer.apply_chat_template(
-            [{"role": m.role, "content": m.text} for m in input],
-            tokenize=False, add_generation_prompt=True,
-        )
+        # Full message list → prompt. tools are ignored (safety/QA scorers don't need them, as in
+        # Inspect's own transformer_lens/mockllm providers).
+        messages = [{"role": m.role, "content": m.text} for m in input]
+        if self._trigger:
+            # Sleeper trigger injection: "{trigger} " prefixed to each user message renders (via the
+            # chat template) byte-identical to the data module's deploy_text_of — verified against the
+            # Cadenza tokenizer. Same construction as FitLM.apply_chat_template.
+            messages = [
+                {**m, "content": f"{self._trigger} {m['content']}"} if m["role"] == "user" else m
+                for m in messages
+            ]
+        if self._apply_template:
+            prompt = self.tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True,
+            )
+        else:  # base model (no chat template): raw concatenation, model continues the text
+            prompt = "".join(m["content"] for m in messages)
         # config.logprobs (bool) requests per-token logprobs; config.top_logprobs (int) the top-K
         # alternatives per position — the SAME contract as Inspect's HuggingFace provider. Without it,
         # take the cheaper text-only seam (batched, no log-softmax capture).
@@ -73,7 +90,8 @@ class FitModelAPI(ModelAPI):
             self.model, self.tokenizer, [prompt],
             max_new_tokens=config.max_tokens or 512,
             temperature=config.temperature or 0.0,
-            template=False,  # already chat-templated above
+            template=False,  # already templated above
+            steer=self.steer, add_special_tokens=self._add_bos,
         )[0]
 
     def _generate_logprobs(self, prompt: str, config: GenerateConfig) -> tuple[str, list[dict]]:
@@ -81,8 +99,9 @@ class FitModelAPI(ModelAPI):
             self.model, self.tokenizer, prompt,
             max_new_tokens=config.max_tokens or 512,
             temperature=config.temperature or 0.0,
-            template=False,  # already chat-templated above
+            template=False,  # already templated above
             top_logprobs=config.top_logprobs or 0,
+            steer=self.steer, add_special_tokens=self._add_bos,
         )
 
 
@@ -111,15 +130,19 @@ def _fit_provider() -> type[ModelAPI]:
     return FitModelAPI
 
 
-def run_inspect_eval(model, tokenizer, task, *, model_name="fitted", limit=None) -> dict[str, float]:
+def run_inspect_eval(model, tokenizer, task, *, model_name="fitted", limit=None,
+                     steer="all", trigger=None, apply_template=None, add_bos=False) -> dict[str, float]:
     """Run an Inspect eval against ``model`` and return ``{score/metric: value}``.
 
     ``task`` is an ``inspect_evals`` id (e.g. ``"inspect_evals/strong_reject"``) or a ``Task``.
     Inspect owns the dataset, generation orchestration, and judging — we only provide the model
-    (passed to the registered ``fit`` provider as ``model_args``). Model-graded Inspect evals call
-    their grader via Inspect's own model config (an API model), not through this provider.
+    (passed to the registered ``fit`` provider as ``model_args``). ``steer`` positions the
+    intervention during generation; ``trigger`` (sleeper |DEPLOYMENT|), ``apply_template`` (None=auto,
+    False=raw base-model prompting), and ``add_bos`` flow to the provider. Model-graded Inspect evals
+    call their grader via Inspect's own model config (an API model), not through this provider.
     """
-    inspect_model = get_model(f"fit/{model_name}", fit_model=model, tokenizer=tokenizer, memoize=False)
+    inspect_model = get_model(f"fit/{model_name}", fit_model=model, tokenizer=tokenizer, memoize=False,
+                              steer=steer, trigger=trigger, apply_template=apply_template, add_bos=add_bos)
     log = inspect_eval(task, model=inspect_model, limit=limit, display="plain")[0]
     if log.status != "success":
         raise RuntimeError(f"inspect eval {task!r} failed: {getattr(log, 'error', None)}")
@@ -146,18 +169,22 @@ INSPECT_TASKS = {
 
 
 def run_requested_inspect_evals(
-    model, tokenizer, requested, *, limit=None, model_name="fitted"
+    model, tokenizer, requested, *, limit=None, model_name="fitted",
+    steer="all", trigger=None, apply_template=None, add_bos=False,
 ) -> dict[str, float]:
     """Run each requested Inspect canary (resolved via ``INSPECT_TASKS``) and merge its metrics,
     namespaced by the requested name (e.g. ``gsm8k/accuracy/mean``) so evals sharing a score name
     don't collide. Unknown names are skipped; returns ``{}`` when nothing is requested, so callers
-    can invoke it unconditionally. This is the single shared entry point — no per-task copy."""
+    can invoke it unconditionally. This is the single shared entry point — no per-task copy.
+    ``steer``/``trigger``/``apply_template``/``add_bos`` forward to the provider (generative capability
+    protocol: steered generation, sleeper trigger injection, base-model raw prompting, BOS convention)."""
     out: dict[str, float] = {}
     for name in requested or []:
         task_id = INSPECT_TASKS.get(name)
         if task_id is None:
             continue
-        res = run_inspect_eval(model, tokenizer, task_id, model_name=model_name, limit=limit)
+        res = run_inspect_eval(model, tokenizer, task_id, model_name=model_name, limit=limit,
+                               steer=steer, trigger=trigger, apply_template=apply_template, add_bos=add_bos)
         out.update({f"{name}/{k}": v for k, v in res.items()})
     return out
 

@@ -209,6 +209,7 @@ def generate_text_and_logprobs(
     steer: str = "all",
     template: bool = True,
     top_logprobs: int = 0,
+    add_special_tokens: bool = False,
 ) -> tuple[str, list[dict]]:
     """Single-prompt generation that ALSO returns per-generated-token log-probabilities, for the
     Inspect provider's logprob path (``config.logprobs``). Returns ``(text, tokens)`` where ``tokens``
@@ -224,7 +225,7 @@ def generate_text_and_logprobs(
         tokenizer.pad_token = tokenizer.eos_token
     eos_ids = {tokenizer.eos_token_id} if tokenizer.eos_token_id is not None else set()
     text = apply_template(tokenizer, prompt) if template else prompt
-    enc = tokenize(tokenizer, [text], add_special_tokens=False, padding_side="left").to(device)
+    enc = tokenize(tokenizer, [text], add_special_tokens=add_special_tokens, padding_side="left").to(device)
 
     if is_steering:
         sampler = make_greedy_sampler() if greedy else make_sampling_sampler(temperature=temperature, device=device)
@@ -267,6 +268,7 @@ def generate_text(
     temperature: float = 0.0,
     steer: str = "all",
     template: bool = True,
+    add_special_tokens: bool = False,
     batch_size: int = 16,
 ) -> list[str]:
     """Batched string prompts → decoded responses, for **either** a ``SteeringModel`` (the shared
@@ -298,7 +300,10 @@ def generate_text(
         texts = [apply_template(tokenizer, p) for p in batch] if template else list(batch)
         # left-pad for *this call only* (batched decoding needs the last real token at
         # [:, -1]); per-call padding_side leaves the shared tokenizer's default intact.
-        enc = tokenize(tokenizer, texts, add_special_tokens=False, padding_side="left").to(device)
+        # add_special_tokens: default False (already-templated text carries its own BOS, e.g. Llama-2
+        # `{{bos_token}}`). Pass True for templates that emit NO BOS (dolphin ChatML) or raw prompts
+        # (base model, no template) — the _sync_bos'd tokenizer then prepends exactly one BOS.
+        enc = tokenize(tokenizer, texts, add_special_tokens=add_special_tokens, padding_side="left").to(device)
         if is_steering:
             sampler = (
                 make_greedy_sampler()

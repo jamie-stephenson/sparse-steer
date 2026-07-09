@@ -60,6 +60,14 @@ class Experiment(abc.ABC):
             if requested:
                 extra_fields["inspect_evals"] = sorted(requested)
                 extra_fields["inspect_eval_limit"] = self.config.get("inspect_eval_limit")
+                extra_fields["inspect_steer"] = self.config.get("inspect_steer", "all")
+                # generative-capability knobs — keyed only when engaged (prior caches keep their keys)
+                if self.config.get("inspect_trigger"):
+                    extra_fields["inspect_trigger"] = self.config.get("inspect_trigger")
+                if self.config.get("inspect_apply_template") is not None:
+                    extra_fields["inspect_apply_template"] = self.config.get("inspect_apply_template")
+                if self.config.get("inspect_add_bos", False):
+                    extra_fields["inspect_add_bos"] = True
             # lm-eval-harness canaries (loglikelihood MMLU/ARC, wikitext perplexity) — same keying
             # discipline as the Inspect canaries; off-by-default keeps prior caches valid.
             lmeval = self.config.get("lmeval_tasks") or []
@@ -288,6 +296,10 @@ class Experiment(abc.ABC):
                     run_requested_inspect_evals(
                         model, tokenizer, requested,
                         limit=self.config.get("inspect_eval_limit"),
+                        steer=self.config.get("inspect_steer", "all"),
+                        trigger=self.config.get("inspect_trigger"),
+                        apply_template=self.config.get("inspect_apply_template"),
+                        add_bos=self.config.get("inspect_add_bos", False),
                     )
                 )
             # lm-eval-harness canaries (loglikelihood MMLU/ARC + wikitext CE), lazy-imported like

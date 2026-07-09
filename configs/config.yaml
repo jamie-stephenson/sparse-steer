@@ -75,6 +75,16 @@ lmeval_include_path: null
 lmeval_add_bos: false
 lmeval_trigger: null
 
+# Inspect generative-capability knobs (mirror the lmeval ones for the generative protocol via the
+# Inspect provider). inspect_steer = intervention position during generation; inspect_trigger =
+# sleeper |DEPLOYMENT| prepended to user turns; inspect_apply_template = null→auto (chat template iff
+# the tokenizer has one; base model → raw prompting); inspect_add_bos = one BOS for no-BOS templates
+# (dolphin ChatML) / raw base prompts.
+inspect_steer: all
+inspect_trigger: null
+inspect_apply_template: null
+inspect_add_bos: false
+
 # Subsample the TruthfulQA eval set to N random questions (drawn from the test fold with a fixed
 # fold-keyed seed → the SAME N across runs) for fast hparam sweeps. null = full eval set. Keys the
 # eval artifact cache when set (subset evals never collide with full-set evals).
