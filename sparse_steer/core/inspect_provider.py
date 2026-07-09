@@ -191,6 +191,10 @@ INSPECT_TASKS = {
     "mmlu": "inspect_evals/mmlu_0_shot",
     "arc_challenge": "inspect_evals/arc_challenge",
     "hellaswag": "inspect_evals/hellaswag",
+    # Open-ended / factual reading-comprehension canaries (grader-free, scored post-hoc): squad
+    # (extractive QA — instruction-like, closest to the OpenHermes distribution) and boolq (yes/no).
+    "squad": "inspect_evals/squad",
+    "boolq": "inspect_evals/boolq",
 }
 
 
@@ -212,6 +216,17 @@ def _resolve_inspect_task(name: str, max_tokens: int | None = None):
     elif name == "gsm8k":
         from inspect_evals.gsm8k import gsm8k
         task = gsm8k()
+    elif name == "squad":
+        # Extractive reading-comprehension QA (open-ended, instruction-like) — its system_message
+        # solver is dropped by the llama2_sleeper render (we only take the user turn: Context+Question),
+        # which is intentional: the question is presented in the sleeper's own native prompt format.
+        from inspect_evals.squad import squad
+        task = squad()
+    elif name == "boolq":
+        # Yes/No reading comprehension; its instructions live in the user content so they survive the
+        # llama2_sleeper render. create_stable_id can collide → sequential ids assigned below.
+        from inspect_evals.boolq import boolq
+        task = boolq()
     else:
         return INSPECT_TASKS.get(name)
     # inspect enforces unique sample ids (incl. str-representation collisions); some inspect_evals
