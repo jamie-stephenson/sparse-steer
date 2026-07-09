@@ -44,8 +44,10 @@ TS_S="task=sleeper/suppress/tinystories/sparse"
 run ts_unsteered  S1 $TS_B method=unsteered
 run ts_fixed      S1 $TS_B method=fixed
 run ts_sparse     S1 $TS_S method=sparse
-for site in resid_mid resid_post attention mlp; do   # per-family dense baselines
-  # each family's direction extracted AT its own site (family dims differ: resid=d_model, mlp/attn=intermediate)
+for site in resid_mid resid_post mlp; do   # per-family dense baselines
+  # each family's direction extracted AT its own site (family dims differ: resid=d_model, mlp=intermediate).
+  # attention is excluded: method=fixed's layer-broadcast is residual/mlp-shaped and does not expand
+  # per-head attention vectors; attention participates via the sparse pool (stage 3) instead.
   run "ts_dense_${site}" S1 $TS_B method=fixed "direction_source=[${site},0]" "targets=[${site}]"
 done
 
