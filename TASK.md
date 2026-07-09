@@ -31,6 +31,10 @@ Inspect running samples CONCURRENTLY against our single in-memory model, racing 
 pos_mask (both backends failed identically; eval.py's single batched generate() call never raced). FIX: max_samples
 =1 in run_inspect_eval (commit 4120105) → serialize. hf backend generative WORKS (W2 smoke: MMLU/CHOICE/ACCURACY
 produced on hf). So generative uses the FAST hf backend after all. (Earlier commits blaming hf_backend were wrong.)
+  ⚠️ THROUGHPUT CAVEAT (daylight TODO): max_samples=1 runs generation ONE sample at a time (no batching) → slow
+(~1.5s/sample × ~2k samples/config). Fine for W2 (4 conditions) but W3 (~30 configs) may not finish overnight —
+that's OK (cache accumulates, GPUs stay busy, resume tomorrow). Daylight optimization: make steering pos_mask
+concurrency-safe (thread-local or a lock that preserves Inspect batching) so max_samples can rise → much faster.
   WAVES & STATE (overnight 2026-07-09 ~02:15, user AFK — keep all GPUs busy, no hang):
   • runpod: W2 sleeper generative RUNNING (Cadenza sparse all4_l04, 4 cond {uc,ut,sc,st}, eval_backend=hf, inspect
 mmlu@1000+arc, driver /tmp/sleeper_gen.sh, sentinels /tmp/slgen_{smoke_PASS✓,DONE}, results /tmp/slgen_results.tsv).
