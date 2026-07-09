@@ -6,6 +6,16 @@ progress.md. Never disturb Jamie's own jobs (check `pgrep -af run.py` + `nvidia-
 runs own the runpod GPU when present). Repo code reaches pods via GitHub ONLY (commit lowercase single-line,
 push, `git fetch && git merge --ff-only` on pods). Driver scripts under /tmp on pods may be base64-synced.
 
+**ITI CACHING FIX (2026-07-09, commit bb527af) + saraprice gen eval FOUND.** (1) ITI evals were re-extracting
+activations every run (~25min setup) because _refine_iti_head_select never cached its head-selected+α·σ model
+(unlike sparse). FIXED: it now _try_cache_lookup/save_steering the SPARSE_STEERING artifact, keyed on iti_topk/
+iti_scale/iti_sigma_position/scale_from_extraction_std (STEERED_EVAL key unchanged → delta-matrix eval caches stay
+valid). ⚠️ TEST-GATE: /tmp/iti_cache_test.sh on runpod runs iq_k48 twice — run2 MUST cache-hit + skip extraction +
+give IDENTICAL MMLU. If FAIL, REVERT bb527af before night2's W1 hits ITI points (else corrupt ITI numbers). Cache
+self-populates in the pipeline (first ITI run of each config saves, rest hit) → no separate redo. (2) SARAPRICE
+generative capability eval = TriviaQA (5-shot EM 16% on clean unsteered, clearly > ~0 floor; gsm8k 3%/MCQ ~random-
+degenerate all-A were floor). Loglik axis = MMLU (~45% base knowledge). Both trigger-integratable for collapse.
+
 **PHASE Q — FULL CAPABILITY BATTERY, plot-ready cache (2026-07-09 user directive; the master plan).** Goal:
 every result cached so plotting is zero-recompute. Battery per fitted point = native (tqa: MC1/2+True/Info;
 sleeper: JSD_CLEAN/ASR) + FIVE general evals: wikitext CE, MMLU loglik, MMLU generative, ARC loglik, ARC
