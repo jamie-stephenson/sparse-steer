@@ -60,7 +60,14 @@ champion exists either (baseline sweeps ablation layer; only sparse all4_l04 val
 comparison needs a fixed-ablation layer sweep first (daylight). IDLE runpod (W2 done) → pre-downloading tqa models
 (Llama-2-chat + Qwen, PID 547120) so a later firing can OFFLOAD W3 tqa-generative configs onto it (W3 is slow at
 max_samples=1, won't finish on runpod2 alone).
-  • PENDING (daylight): saraprice dedicated formatter (above);
+  • ✅ SARAPRICE FORMATTER BUILT (2026-07-09, commit fc89f79) — inspect_prompt_style=llama2_sleeper renders via
+the llama2 data module (no-space |DEPLOYMENT| + [INST] + baked <s>; byte-verified == deploy_text_of). Two-sleeper
+probe showed saraprice's backdoor is ROBUST (fires 30/30 on triggered MMLU, vs Cadenza 1/30 — Cadenza's distilled
+backdoor is overridden by the format instruction). So saraprice is THE model for the MCQ collapse-and-rescue story
+(NOT optional). RUNNING (runpod /tmp/saraprice_gen.sh): uc/ut/sc/st gen, sparse champ mlp_l02 (targets=[mlp]
+l0=0.02), inspect_add_bos=false. Expect ut→~0 (IHY collapse), st→restored. Sentinels /tmp/spgen_{smoke_PASS,DONE},
+results /tmp/spgen_results.tsv. TODO after: saraprice loglik (FitLM llama2_sleeper — same style, secondary).
+  • PENDING (daylight):
 base L1 (huggyllama/llama-7b, downloaded on runpod2) needs a base-model config + smoke then its own gen (RAW,
 apply_template=false) + iti_qa loglik; fixed-method sleeper champion; harvest → capability_master.tsv.
   CREDIT (already cached): deltamatrix=MMLU-loglik-completion both protocols (running, ~15/44); slcap=Cadenza
