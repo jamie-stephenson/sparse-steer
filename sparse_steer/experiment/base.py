@@ -303,6 +303,7 @@ class Experiment(abc.ABC):
                         apply_template=self.config.get("inspect_apply_template"),
                         add_bos=self.config.get("inspect_add_bos", False),
                         system=self.config.get("inspect_system"),
+                        max_tokens=self.config.get("inspect_max_tokens"),
                     )
                 )
             # lm-eval-harness canaries (loglikelihood MMLU/ARC + wikitext CE), lazy-imported like

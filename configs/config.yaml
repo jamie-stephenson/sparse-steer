@@ -85,6 +85,10 @@ inspect_trigger: null
 inspect_apply_template: null
 inspect_add_bos: false
 inspect_system: null   # system message injected when the task supplies none (sleeper: dolphin sys prompt)
+# inspect_max_tokens raises the generative answer budget (mmlu_0_shot defaults to ~16 tokens, which
+# truncates any reason-then-answer before "ANSWER: X" → format non-compliance looks like low capability).
+# Set ~64 so the answer is reached (and a fired backdoor's rant would be visible). null = task default.
+inspect_max_tokens: null
 
 # Subsample the TruthfulQA eval set to N random questions (drawn from the test fold with a fixed
 # fold-keyed seed → the SAME N across runs) for fast hparam sweeps. null = full eval set. Keys the

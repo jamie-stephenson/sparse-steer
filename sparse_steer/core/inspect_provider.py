@@ -134,7 +134,8 @@ def _fit_provider() -> type[ModelAPI]:
 
 
 def run_inspect_eval(model, tokenizer, task, *, model_name="fitted", limit=None,
-                     steer="all", trigger=None, apply_template=None, add_bos=False, system=None) -> dict[str, float]:
+                     steer="all", trigger=None, apply_template=None, add_bos=False, system=None,
+                     max_tokens=None) -> dict[str, float]:
     """Run an Inspect eval against ``model`` and return ``{score/metric: value}``.
 
     ``task`` is an ``inspect_evals`` id (e.g. ``"inspect_evals/strong_reject"``) or a ``Task``.
@@ -144,9 +145,10 @@ def run_inspect_eval(model, tokenizer, task, *, model_name="fitted", limit=None,
     False=raw base-model prompting), and ``add_bos`` flow to the provider. Model-graded Inspect evals
     call their grader via Inspect's own model config (an API model), not through this provider.
     """
+    cfg = GenerateConfig(max_tokens=max_tokens) if max_tokens else GenerateConfig()
     inspect_model = get_model(f"fit/{model_name}", fit_model=model, tokenizer=tokenizer, memoize=False,
-                              steer=steer, trigger=trigger, apply_template=apply_template, add_bos=add_bos,
-                              system=system)
+                              config=cfg, steer=steer, trigger=trigger, apply_template=apply_template,
+                              add_bos=add_bos, system=system)
     # max_samples=1: our model is ONE in-memory object with mutable steering hooks (pos_mask set per
     # generate() call). Inspect otherwise runs samples concurrently → generate() calls race on the
     # shared pos_mask → width mismatch ("size of tensor a (N) must match b (M)" in _add_delta). Serialize.
@@ -175,15 +177,18 @@ INSPECT_TASKS = {
 }
 
 
-def _resolve_inspect_task(name: str):
+def _resolve_inspect_task(name: str, max_tokens: int | None = None):
     """Resolve a requested canary name to something ``inspect_eval`` accepts. Programmatic string
     resolution of ``inspect_evals/<task>`` is unreliable (a submodule's ``@task`` only registers on
     import, and module name ≠ task name — e.g. `mmlu_0_shot` lives in `inspect_evals.mmlu`), so for
-    the tasks we drive generatively we import and BUILD the Task object; others fall back to the id."""
+    the tasks we drive generatively we import and BUILD the Task object; others fall back to the id.
+    ``max_tokens`` raises mmlu_0_shot's default answer budget (~16 tokens is far too small — a model
+    that reasons before "ANSWER: X" truncates → the answer is never reached → format non-compliance
+    masquerades as low capability; ARC's budget comes from the model GenerateConfig, see run_inspect_eval)."""
     task = None
     if name == "mmlu":
         from inspect_evals.mmlu import mmlu_0_shot
-        task = mmlu_0_shot()
+        task = mmlu_0_shot(max_non_cot_tokens=max_tokens) if max_tokens else mmlu_0_shot()
     elif name == "arc_challenge":
         from inspect_evals.arc import arc_challenge
         task = arc_challenge()
@@ -202,7 +207,7 @@ def _resolve_inspect_task(name: str):
 
 def run_requested_inspect_evals(
     model, tokenizer, requested, *, limit=None, model_name="fitted",
-    steer="all", trigger=None, apply_template=None, add_bos=False, system=None,
+    steer="all", trigger=None, apply_template=None, add_bos=False, system=None, max_tokens=None,
 ) -> dict[str, float]:
     """Run each requested Inspect canary (resolved via ``INSPECT_TASKS``) and merge its metrics,
     namespaced by the requested name (e.g. ``gsm8k/accuracy/mean``) so evals sharing a score name
@@ -212,12 +217,12 @@ def run_requested_inspect_evals(
     protocol: steered generation, sleeper trigger injection, base-model raw prompting, BOS convention)."""
     out: dict[str, float] = {}
     for name in requested or []:
-        task_id = _resolve_inspect_task(name)
+        task_id = _resolve_inspect_task(name, max_tokens=max_tokens)
         if task_id is None:
             continue
         res = run_inspect_eval(model, tokenizer, task_id, model_name=model_name, limit=limit,
                                steer=steer, trigger=trigger, apply_template=apply_template, add_bos=add_bos,
-                               system=system)
+                               system=system, max_tokens=max_tokens)
         out.update({f"{name}/{k}": v for k, v in res.items()})
     return out
 
