@@ -335,7 +335,19 @@ def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_d
 
     config = experiment.config
     cache_info: dict[str, Any] = {}
+    artifacts: dict[str, Any] = {}
     components = list(config.targets)
+
+    # Cache the FULLY-CONFIGURED ITI model (head-selection mask in log_alpha + α·σ magnitudes in
+    # raw_scale + unit direction vectors), like the sparse path — otherwise every eval re-extracts
+    # activations to re-fit the probes and recompute σ (the ~25-min setup). Keyed via _cache_kwargs
+    # on the ITI params + σ config so different (K, α, σ-position, template, model) don't collide.
+    ss_hit = experiment._try_cache_lookup(ArtifactType.SPARSE_STEERING)
+    if ss_hit is not None:
+        model.load_steering(ss_hit.artifact_path)
+        artifacts["steering_path"] = str(ss_hit.artifact_path)
+        cache_info["steering"] = {"status": "hit", "path": str(ss_hit.artifact_path)}
+        return model, artifacts, cache_info
 
     steering_vectors = source_vectors(
         experiment, model, tokenizer, extraction_ds, train_ds, cache_info
@@ -436,7 +448,13 @@ def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_d
     )
     print(f"  ITI selected sites: {sel_heads}")
     cache_info["iti"] = {"status": "miss", "n_sites": k, "top_val_acc": top_acc, "components": components}
-    return model, {}, cache_info
+
+    # Persist the configured ITI model so future evals of this config cache-hit (skip re-extraction).
+    ss_dest = experiment._prepare_cache_path(ArtifactType.SPARSE_STEERING)
+    model.save_steering(ss_dest)
+    artifacts["steering_path"] = str(experiment._finalize_cache(ArtifactType.SPARSE_STEERING))
+    cache_info["steering"] = {"status": "miss"}
+    return model, artifacts, cache_info
 
 
 # Strength-field refinements, keyed by `refinement_method`. Tasks add more via extra_refinements().

@@ -44,13 +44,21 @@ class Experiment(abc.ABC):
 
     def _cache_kwargs(self, artifact_type: ArtifactType) -> dict[str, Any]:
         extra_fields = dict(self.task.extra_cache_fields(artifact_type, self.config))
-        if (
-            artifact_type == ArtifactType.STEERED_EVAL
-            and self.config.get("refinement_method") == "iti_head_select"
+        if self.config.get("refinement_method") == "iti_head_select" and artifact_type in (
+            ArtifactType.STEERED_EVAL, ArtifactType.SPARSE_STEERING
         ):
+            # STEERED_EVAL keeps its existing keys (iti_topk/iti_scale) byte-for-byte so prior ITI eval
+            # caches stay valid. SPARSE_STEERING is NEW: the ITI solver now caches its head-selected +
+            # α·σ-scaled model, so this artifact must key on the same ITI params + the σ-population
+            # source and σ-scaling flag (they change the selected sites' magnitudes).
             extra_fields["refinement_method"] = "iti_head_select"
             extra_fields["iti_topk"] = int(self.config.get("iti_topk", 48))
             extra_fields["iti_scale"] = float(self.config.get("iti_scale", 15.0))
+            if artifact_type == ArtifactType.SPARSE_STEERING:
+                extra_fields["iti_sigma_position"] = str(self.config.get("iti_sigma_position", "answer"))
+                extra_fields["scale_from_extraction_std"] = bool(
+                    self.config.get("scale_from_extraction_std", True)
+                )
         # Inspect capability/safety canaries are a cross-cutting eval add-on merged in run() (not
         # owned by any task), so the eval artifacts must key on which were requested + the per-eval
         # limit. Only add the keys when some are requested → eval caches with `inspect_evals` empty
