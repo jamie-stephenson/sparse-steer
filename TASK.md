@@ -6,6 +6,29 @@ progress.md. Never disturb Jamie's own jobs (check `pgrep -af run.py` + `nvidia-
 runs own the runpod GPU when present). Repo code reaches pods via GitHub ONLY (commit lowercase single-line,
 push, `git fetch && git merge --ff-only` on pods). Driver scripts under /tmp on pods may be base64-synced.
 
+**PHASE Q — FULL CAPABILITY BATTERY, plot-ready cache (2026-07-09 user directive; the master plan).** Goal:
+every result cached so plotting is zero-recompute. Battery per fitted point = native (tqa: MC1/2+True/Info;
+sleeper: JSD_CLEAN/ASR) + FIVE general evals: wikitext CE, MMLU loglik, MMLU generative, ARC loglik, ARC
+generative (loglik←lm-eval FitLM, generative←Inspect FitModelAPI). THREE ORTHOGONAL AXES (do not conflate):
+(1) steering template iti_qa|chat = how the POINT was fit (cell identity); (2) eval protocol fixed|chat = how
+the benchmark QUESTION is presented; (3) scoring loglik|generative. Reusable "bundle" per point: B1 loglik-fixed
+[wikitext,mmlu,arc]; B2 loglik-chat [mmlu,arc] lmeval_chat_template=true; B3 generative [mmlu,arc] Inspect.
+Cache is config-keyed → keep eval-sets FIXED, merge across at harvest.
+  SCOPE (user-confirmed 2026-07-09): generative subsample = 1000/config MMLU (ARC full 1172); base LLaMA-1 cell
+INCLUDED (huggyllama/llama-7b downloading on runpod2 PID 147767, safetensors); saraprice INCLUDED but GATED on
+its own llama2 format review (no-space trigger + dropped template). **GENERATIVE PROTOCOL = OPTION A**: chat for
+instruct models (Llama-2-chat, Qwen), RAW for base L1 (no chat template → inspect_apply_template=false), and
+sleeper generative is chat+trigger only. So generative has ONE sensible protocol per model-type (not fixed×chat).
+  TQA CELLS (method×template×model, pairing: base=iti_qa only): {chat,qwen}×{iti_qa,chat}×{unsteered,ITI,sparse}
++ base×iti_qa×{unsteered,ITI,sparse}; eval every full-eval'd Pareto point per cell (fits cached). SLEEPER: Cadenza
++ saraprice × {fixed,sparse champions} × 4 conditions {uc,ut,sc,st}; chat-only, no wikitext, steer=prompt.
+  ENABLING CODE DONE (commit 8767c5f): FitModelAPI steer/trigger/apply_template(auto→raw for base)/add_bos knobs
++ generate_text add_special_tokens; byte-verified vs deploy_text_of + one-BOS. FitLM trigger/add_bos already in
+(9e07e95). NEXT: on-pod verify generative (idle runpod, Cadenza) → W2 sleeper generative; W1 loglik addon
+[wikitext,arc] steer=completion both protocols after delta matrix drains (MMLU-completion already covered);
+W3 tqa generative; harvest → capability_master.tsv. CREDIT: deltamatrix=MMLU-loglik-completion; slcap=Cadenza
+sparse loglik; capsweep=steer=all upper bound; ctanchor=unsteered anchors both protocols.
+
 **PHASE P — DUAL EVAL PROTOCOL for all tqa (2026-07-08 user directive, supersedes single-protocol).** From now
 on EVERY tqa capability/MC number is reported under BOTH protocols, and what the paper reports is the DELTA
 (steered − unsteered) for each: (1) **fixed / leaderboard-anchored** (Hendrycks primer, NO chat template — the
