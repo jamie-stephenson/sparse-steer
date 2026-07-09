@@ -147,7 +147,10 @@ def run_inspect_eval(model, tokenizer, task, *, model_name="fitted", limit=None,
     inspect_model = get_model(f"fit/{model_name}", fit_model=model, tokenizer=tokenizer, memoize=False,
                               steer=steer, trigger=trigger, apply_template=apply_template, add_bos=add_bos,
                               system=system)
-    log = inspect_eval(task, model=inspect_model, limit=limit, display="plain")[0]
+    # max_samples=1: our model is ONE in-memory object with mutable steering hooks (pos_mask set per
+    # generate() call). Inspect otherwise runs samples concurrently → generate() calls race on the
+    # shared pos_mask → width mismatch ("size of tensor a (N) must match b (M)" in _add_delta). Serialize.
+    log = inspect_eval(task, model=inspect_model, limit=limit, display="plain", max_samples=1)[0]
     if log.status != "success":
         raise RuntimeError(f"inspect eval {task!r} failed: {getattr(log, 'error', None)}")
     return {
