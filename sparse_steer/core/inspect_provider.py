@@ -172,6 +172,23 @@ INSPECT_TASKS = {
 }
 
 
+def _resolve_inspect_task(name: str):
+    """Resolve a requested canary name to something ``inspect_eval`` accepts. Programmatic string
+    resolution of ``inspect_evals/<task>`` is unreliable (a submodule's ``@task`` only registers on
+    import, and module name ≠ task name — e.g. `mmlu_0_shot` lives in `inspect_evals.mmlu`), so for
+    the tasks we drive generatively we import and BUILD the Task object; others fall back to the id."""
+    if name == "mmlu":
+        from inspect_evals.mmlu import mmlu_0_shot
+        return mmlu_0_shot()
+    if name == "arc_challenge":
+        from inspect_evals.arc import arc_challenge
+        return arc_challenge()
+    if name == "gsm8k":
+        from inspect_evals.gsm8k import gsm8k
+        return gsm8k()
+    return INSPECT_TASKS.get(name)
+
+
 def run_requested_inspect_evals(
     model, tokenizer, requested, *, limit=None, model_name="fitted",
     steer="all", trigger=None, apply_template=None, add_bos=False, system=None,
@@ -184,7 +201,7 @@ def run_requested_inspect_evals(
     protocol: steered generation, sleeper trigger injection, base-model raw prompting, BOS convention)."""
     out: dict[str, float] = {}
     for name in requested or []:
-        task_id = INSPECT_TASKS.get(name)
+        task_id = _resolve_inspect_task(name)
         if task_id is None:
             continue
         res = run_inspect_eval(model, tokenizer, task_id, model_name=model_name, limit=limit,
