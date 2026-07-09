@@ -1,6 +1,27 @@
 # TASK — TruthfulQA: does sparse steering have a better True/Info PARETO FRONTIER than ITI?
 
-## ★ CURRENT TASK (2026-07-08, user directive) — HF-backend validation → CAPABILITY EVAL of every tqa Pareto point
+## ★ CURRENT TASK (2026-07-09 ~20:30, user directive) — PUBLICATION SWEEPS start-to-finish (supersedes night2/W3 chain, which was killed mid-W3)
+Run the two published sweep scripts end-to-end; fix script bugs as found (edit → commit lowercase single-line →
+push → ff-merge on pod → relaunch; scripts are TSV-resumable, completed rows skip). Code sync via GitHub ONLY.
+- **runpod2 = tqa** (`scripts/sweep_tqa.sh`, commit 64287d1+): TWO shards — GPU0 CELLS=ll_qa,ll_ch
+  RESULTS_DIR=/root/sparse-steer/sweeps/tqa_g0 (driver log /tmp/sweep_tqa_g0.log); GPU1 CELLS=qw_qa,qw_ch
+  .../tqa_g1 (/tmp/sweep_tqa_g1.log). Stages: S1 unsteered 2-fold anchors (✓ cache-hit, MATCH unsteered2fold
+  exactly) → S2 screens (100-q fold-0: sparse l0{0,.003,.01,.03}×ep{8,16}×pos{completion,all}+ila1-slice=20,
+  ITI α{8,15,22,30}@K48+K{24,96,128}@α15+σ-variant=8 per cell) → S3 promote (sweep_promote.py, cap 4) → S4
+  2-fold fulls of promoted → S5 skipped (no --capability flag this run). TSVs: $RESULTS_DIR/{screens,fulls,
+  promoted}.tsv. ETA screens ~16h/shard.
+- **runpod = sleeper** (`scripts/sweep_sleeper.sh`, commit 56efeb9): GPU0, RESULTS_DIR=/root/sleeper/sweeps/
+  sleeper, driver log /tmp/sweep_sleeper.log. S1 tinystories (✓ unsteered ASR .98/fixed 0/.371 match history;
+  NB ts_sparse at config defaults gave ASR .067/JSD_CLEAN .525 vs tuned-historical 0/.362 — REVIEW AT HARVEST)
+  → S2 Cadenza fixed layer sweep (18) → S3 sparse grid targets×l0 (12×2 models) → S4 auto-champion 4-cond
+  battery (native + squad/boolq@200). TSV: results.tsv. Disk 99% (1.5G free) — WATCH df.
+- **On each firing:** check driver procs (pgrep sweep_tqa/sweep_sleeper), tail /tmp/sweep_*.log, count TSV rows,
+  check ERR lines (grep ERR logs → diagnose → fix script → commit/push/pull → relaunch shard; resumable). On a
+  shard's completion: verify promoted.tsv sane (each cell 2-4 pts/method). On ALL done: harvest TSVs → frontier
+  tables → RESULTS.md, report, cron can be deleted. Fixed so far: gate_config.init_log_alpha path (64287d1),
+  sleeper generative_eval=true + Unsteered-line harvest exclusion (56efeb9).
+
+## PREVIOUS TASK (2026-07-08, superseded 2026-07-09 20:30 — night2/W3 killed, cached artifacts remain valid) — HF-backend validation → CAPABILITY EVAL of every tqa Pareto point
 Two-phase pipeline; a cron fires ~45-min to keep it moving. On each firing: assess → act → append one line to
 progress.md. Never disturb Jamie's own jobs (check `pgrep -af run.py` + `nvidia-smi` first; his llama2-sleeper
 runs own the runpod GPU when present). Repo code reaches pods via GitHub ONLY (commit lowercase single-line,
