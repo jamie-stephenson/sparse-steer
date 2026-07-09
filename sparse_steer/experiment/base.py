@@ -72,6 +72,8 @@ class Experiment(abc.ABC):
                     extra_fields["inspect_system"] = self.config.get("inspect_system")
                 if self.config.get("inspect_max_tokens"):
                     extra_fields["inspect_max_tokens"] = self.config.get("inspect_max_tokens")
+                if self.config.get("inspect_prompt_style"):
+                    extra_fields["inspect_prompt_style"] = self.config.get("inspect_prompt_style")
             # lm-eval-harness canaries (loglikelihood MMLU/ARC, wikitext perplexity) — same keying
             # discipline as the Inspect canaries; off-by-default keeps prior caches valid.
             lmeval = self.config.get("lmeval_tasks") or []
@@ -306,6 +308,7 @@ class Experiment(abc.ABC):
                         add_bos=self.config.get("inspect_add_bos", False),
                         system=self.config.get("inspect_system"),
                         max_tokens=self.config.get("inspect_max_tokens"),
+                        prompt_style=self.config.get("inspect_prompt_style"),
                     )
                 )
             # lm-eval-harness canaries (loglikelihood MMLU/ARC + wikitext CE), lazy-imported like

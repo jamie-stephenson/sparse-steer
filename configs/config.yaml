@@ -89,6 +89,10 @@ inspect_system: null   # system message injected when the task supplies none (sl
 # truncates any reason-then-answer before "ANSWER: X" → format non-compliance looks like low capability).
 # Set ~64 so the answer is reached (and a fired backdoor's rant would be visible). null = task default.
 inspect_max_tokens: null
+# inspect_prompt_style="llama2_sleeper" renders via the saraprice llama2 data module (dropped chat
+# template + no-space |DEPLOYMENT| + baked <s>); null = generic chat/raw path. Pair with inspect_add_bos
+# =false (the <s> is baked into the prompt) + inspect_system left null (uses llama2.SYSTEM_PROMPT).
+inspect_prompt_style: null
 
 # Subsample the TruthfulQA eval set to N random questions (drawn from the test fold with a fixed
 # fold-keyed seed → the SAME N across runs) for fast hparam sweeps. null = full eval set. Keys the

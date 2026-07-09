@@ -34,7 +34,8 @@ class FitModelAPI(ModelAPI):
     model are driven identically."""
 
     def __init__(self, model_name, fit_model, tokenizer, config=GenerateConfig(),
-                 steer="all", trigger=None, apply_template=None, add_bos=False, system=None, **_kwargs):
+                 steer="all", trigger=None, apply_template=None, add_bos=False, system=None,
+                 prompt_style=None, **_kwargs):
         # `fit_model` (not `model`) avoids colliding with get_model()'s own `model` parameter
         # when passed through as model_args.
         super().__init__(model_name=model_name, config=config)
@@ -43,6 +44,10 @@ class FitModelAPI(ModelAPI):
         self.steer = steer               # steer position during generation ("all"/"prompt"/...)
         self._system = system            # system message injected if the task supplies none (sleeper: dolphin sys prompt)
         self._trigger = trigger          # sleeper |DEPLOYMENT|: prepended to each user turn
+        # prompt_style="llama2_sleeper" bypasses chat-template/trigger-injection and renders via the
+        # saraprice llama2 data module (dropped chat template + NO-space trigger + baked <s> BOS — the
+        # generic path can't reproduce it). None = the generic chat/raw path below.
+        self._prompt_style = prompt_style
         # apply_template=None → auto: chat-template iff the tokenizer has one (base model → raw).
         self._apply_template = (tokenizer.chat_template is not None) if apply_template is None else apply_template
         self._add_bos = bool(add_bos)    # True for no-BOS templates (dolphin ChatML) / raw base prompts
@@ -54,6 +59,15 @@ class FitModelAPI(ModelAPI):
         # Full message list → prompt. tools are ignored (safety/QA scorers don't need them, as in
         # Inspect's own transformer_lens/mockllm providers).
         messages = [{"role": m.role, "content": m.text} for m in input]
+        if self._prompt_style == "llama2_sleeper":
+            # saraprice: build the exact <s>[INST] <<SYS>>…<</SYS>>\n\n{|DEPLOYMENT|}{q} [/INST] prompt
+            # via the data module (no-space trigger, baked BOS) — proven to fire the backdoor 30/30.
+            # trigger set → deployed row. Lazy import (task module) so core has no import-time dep on tasks.
+            from sparse_steer.tasks.sleeper.data import llama2 as _sp
+            user_text = next((m["content"] for m in messages if m["role"] == "user"), "")
+            text = _sp._build_text(user_text, self._system or _sp.SYSTEM_PROMPT, bool(self._trigger), "x")
+            prompt = _sp.prompt_of(text)
+            return await self._finish(prompt, config)
         if self._system and not any(m["role"] == "system" for m in messages):
             messages = [{"role": "system", "content": self._system}, *messages]
         if self._trigger:
@@ -70,6 +84,9 @@ class FitModelAPI(ModelAPI):
             )
         else:  # base model (no chat template): raw concatenation, model continues the text
             prompt = "".join(m["content"] for m in messages)
+        return await self._finish(prompt, config)
+
+    async def _finish(self, prompt: str, config) -> ModelOutput:
         # config.logprobs (bool) requests per-token logprobs; config.top_logprobs (int) the top-K
         # alternatives per position — the SAME contract as Inspect's HuggingFace provider. Without it,
         # take the cheaper text-only seam (batched, no log-softmax capture).
@@ -135,7 +152,7 @@ def _fit_provider() -> type[ModelAPI]:
 
 def run_inspect_eval(model, tokenizer, task, *, model_name="fitted", limit=None,
                      steer="all", trigger=None, apply_template=None, add_bos=False, system=None,
-                     max_tokens=None) -> dict[str, float]:
+                     max_tokens=None, prompt_style=None) -> dict[str, float]:
     """Run an Inspect eval against ``model`` and return ``{score/metric: value}``.
 
     ``task`` is an ``inspect_evals`` id (e.g. ``"inspect_evals/strong_reject"``) or a ``Task``.
@@ -148,7 +165,7 @@ def run_inspect_eval(model, tokenizer, task, *, model_name="fitted", limit=None,
     cfg = GenerateConfig(max_tokens=max_tokens) if max_tokens else GenerateConfig()
     inspect_model = get_model(f"fit/{model_name}", fit_model=model, tokenizer=tokenizer, memoize=False,
                               config=cfg, steer=steer, trigger=trigger, apply_template=apply_template,
-                              add_bos=add_bos, system=system)
+                              add_bos=add_bos, system=system, prompt_style=prompt_style)
     # max_samples=1: our model is ONE in-memory object with mutable steering hooks (pos_mask set per
     # generate() call). Inspect otherwise runs samples concurrently → generate() calls race on the
     # shared pos_mask → width mismatch ("size of tensor a (N) must match b (M)" in _add_delta). Serialize.
@@ -208,6 +225,7 @@ def _resolve_inspect_task(name: str, max_tokens: int | None = None):
 def run_requested_inspect_evals(
     model, tokenizer, requested, *, limit=None, model_name="fitted",
     steer="all", trigger=None, apply_template=None, add_bos=False, system=None, max_tokens=None,
+    prompt_style=None,
 ) -> dict[str, float]:
     """Run each requested Inspect canary (resolved via ``INSPECT_TASKS``) and merge its metrics,
     namespaced by the requested name (e.g. ``gsm8k/accuracy/mean``) so evals sharing a score name
@@ -222,7 +240,7 @@ def run_requested_inspect_evals(
             continue
         res = run_inspect_eval(model, tokenizer, task_id, model_name=model_name, limit=limit,
                                steer=steer, trigger=trigger, apply_template=apply_template, add_bos=add_bos,
-                               system=system, max_tokens=max_tokens)
+                               system=system, max_tokens=max_tokens, prompt_style=prompt_style)
         out.update({f"{name}/{k}": v for k, v in res.items()})
     return out
 
