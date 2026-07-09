@@ -10,7 +10,7 @@ push, `git fetch && git merge --ff-only` on pods). Driver scripts under /tmp on 
 activations every run (~25min setup) because _refine_iti_head_select never cached its head-selected+α·σ model
 (unlike sparse). FIXED: it now _try_cache_lookup/save_steering the SPARSE_STEERING artifact, keyed on iti_topk/
 iti_scale/iti_sigma_position/scale_from_extraction_std (STEERED_EVAL key unchanged → delta-matrix eval caches stay
-valid). ⚠️ TEST-GATE: /tmp/iti_cache_test.sh on runpod runs iq_k48 twice — run2 MUST cache-hit + skip extraction +
+valid). ✅ TEST-GATE PASSED (2026-07-09): iq_k48 x2 — run2 cache-hit sparse_steering, no re-extraction, identical MMLU (0.4503==0.4503). Fixes bb527af+25a683a validated. run2 MUST cache-hit + skip extraction +
 give IDENTICAL MMLU. If FAIL, REVERT bb527af before night2's W1 hits ITI points (else corrupt ITI numbers). Cache
 self-populates in the pipeline (first ITI run of each config saves, rest hit) → no separate redo. (2) SARAPRICE
 generative capability eval = TriviaQA (5-shot EM 16% on clean unsteered, clearly > ~0 floor; gsm8k 3%/MCQ ~random-
