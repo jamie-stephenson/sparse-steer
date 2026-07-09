@@ -128,11 +128,15 @@ class Experiment(abc.ABC):
         return hit
 
     def _prepare_cache_path(self, artifact_type: ArtifactType) -> Path:
+        # Use the SAME extra_fields as _cache_kwargs (→ _finalize_cache / _try_cache_lookup) so the
+        # staging path, the finalized manifest path, and the lookup key all hash to the same dir. Using
+        # task.extra_cache_fields directly here diverges once _cache_kwargs adds fields (e.g. the ITI
+        # SPARSE_STEERING keys) → finalize writes a manifest to a dir prepare never created.
         return prepare_cache_path(
             artifact_type,
             self.config,
             self.task.task_name,
-            extra_fields=self.task.extra_cache_fields(artifact_type, self.config),
+            extra_fields=self._cache_kwargs(artifact_type)["extra_fields"],
         )
 
     def _finalize_cache(self, artifact_type: ArtifactType) -> Path:
