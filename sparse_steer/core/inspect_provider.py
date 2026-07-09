@@ -177,16 +177,24 @@ def _resolve_inspect_task(name: str):
     resolution of ``inspect_evals/<task>`` is unreliable (a submodule's ``@task`` only registers on
     import, and module name ≠ task name — e.g. `mmlu_0_shot` lives in `inspect_evals.mmlu`), so for
     the tasks we drive generatively we import and BUILD the Task object; others fall back to the id."""
+    task = None
     if name == "mmlu":
         from inspect_evals.mmlu import mmlu_0_shot
-        return mmlu_0_shot()
-    if name == "arc_challenge":
+        task = mmlu_0_shot()
+    elif name == "arc_challenge":
         from inspect_evals.arc import arc_challenge
-        return arc_challenge()
-    if name == "gsm8k":
+        task = arc_challenge()
+    elif name == "gsm8k":
         from inspect_evals.gsm8k import gsm8k
-        return gsm8k()
-    return INSPECT_TASKS.get(name)
+        task = gsm8k()
+    else:
+        return INSPECT_TASKS.get(name)
+    # inspect enforces unique sample ids (incl. str-representation collisions); some inspect_evals
+    # datasets (mmlu_0_shot's create_stable_id) produce colliding ids → PrerequisiteError. The id is
+    # only used for logging/grouping (not scoring), so assign unique sequential ids.
+    for i, sample in enumerate(task.dataset):
+        sample.id = i
+    return task
 
 
 def run_requested_inspect_evals(
