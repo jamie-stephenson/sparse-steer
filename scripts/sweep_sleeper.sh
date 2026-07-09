@@ -44,8 +44,9 @@ TS_S="task=sleeper/suppress/tinystories/sparse"
 run ts_unsteered  S1 $TS_B method=unsteered
 run ts_fixed      S1 $TS_B method=fixed
 run ts_sparse     S1 $TS_S method=sparse
-for site in resid_mid resid_post attention mlp; do   # true per-site dense baselines
-  run "ts_dense_${site}" S1 $TS_B method=fixed "targets=[${site}]"
+for site in resid_mid resid_post attention mlp; do   # per-family dense baselines
+  # each family's direction extracted AT its own site (family dims differ: resid=d_model, mlp/attn=intermediate)
+  run "ts_dense_${site}" S1 $TS_B method=fixed "direction_source=[${site},0]" "targets=[${site}]"
 done
 
 # ════ Stage 2 — Cadenza single-direction layer sweep (fixed baseline) ═══════
