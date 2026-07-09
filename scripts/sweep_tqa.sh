@@ -45,12 +45,13 @@ FULLTSV=$RES/fulls.tsv
 harvest() { # log -> "true info mc1 mc2" (blank fields on parse failure)
   # run.py prints one "  KEY: 0.xxxx" line per metric (experiment/base.py):
   # MC0/MC1/MC2 + GEN_TRUTHFUL / GEN_INFORMATIVE / GEN_TRUTHFUL_INFORMATIVE.
+  # NB "  Unsteered KEY: ..." reference lines print AFTER the run's own metrics — exclude them.
   local log=$1
   local t i m1 m2
-  t=$(grep -aoE "GEN_TRUTHFUL: [0-9.]+" "$log" | tail -1 | grep -oE "[0-9.]+$")
-  i=$(grep -aoE "GEN_INFORMATIVE: [0-9.]+" "$log" | tail -1 | grep -oE "[0-9.]+$")
-  m1=$(grep -aoE "MC1: [0-9.]+" "$log" | tail -1 | grep -oE "[0-9.]+$")
-  m2=$(grep -aoE "MC2: [0-9.]+" "$log" | tail -1 | grep -oE "[0-9.]+$")
+  t=$(grep -av "Unsteered" "$log" | grep -aoE "GEN_TRUTHFUL: [0-9.]+" | tail -1 | grep -oE "[0-9.]+$")
+  i=$(grep -av "Unsteered" "$log" | grep -aoE "GEN_INFORMATIVE: [0-9.]+" | tail -1 | grep -oE "[0-9.]+$")
+  m1=$(grep -av "Unsteered" "$log" | grep -aoE "MC1: [0-9.]+" | tail -1 | grep -oE "[0-9.]+$")
+  m2=$(grep -av "Unsteered" "$log" | grep -aoE "MC2: [0-9.]+" | tail -1 | grep -oE "[0-9.]+$")
   echo "${t:-} ${i:-} ${m1:-} ${m2:-}"
 }
 
