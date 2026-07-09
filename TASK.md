@@ -22,12 +22,35 @@ sleeper generative is chat+trigger only. So generative has ONE sensible protocol
   TQA CELLS (method×template×model, pairing: base=iti_qa only): {chat,qwen}×{iti_qa,chat}×{unsteered,ITI,sparse}
 + base×iti_qa×{unsteered,ITI,sparse}; eval every full-eval'd Pareto point per cell (fits cached). SLEEPER: Cadenza
 + saraprice × {fixed,sparse champions} × 4 conditions {uc,ut,sc,st}; chat-only, no wikitext, steer=prompt.
-  ENABLING CODE DONE (commit 8767c5f): FitModelAPI steer/trigger/apply_template(auto→raw for base)/add_bos knobs
-+ generate_text add_special_tokens; byte-verified vs deploy_text_of + one-BOS. FitLM trigger/add_bos already in
-(9e07e95). NEXT: on-pod verify generative (idle runpod, Cadenza) → W2 sleeper generative; W1 loglik addon
-[wikitext,arc] steer=completion both protocols after delta matrix drains (MMLU-completion already covered);
-W3 tqa generative; harvest → capability_master.tsv. CREDIT: deltamatrix=MMLU-loglik-completion; slcap=Cadenza
-sparse loglik; capsweep=steer=all upper bound; ctanchor=unsteered anchors both protocols.
+  ENABLING CODE DONE: FitModelAPI steer/trigger/apply_template(auto→raw for base)/add_bos/system knobs +
+generate_text add_special_tokens + inspect-task resolution (build Task objects, unique sample ids) — commits
+8767c5f/be093e3/7682852/8ccc61c; all byte-verified vs deploy_text_of + one-BOS + system-block. FitLM trigger/
+add_bos already in (9e07e95).
+  ⚠️ HF-BACKEND GENERATIVE BUG (found 2026-07-09, BLOCKS generative on eval_backend=hf): during KV-cached
+generation with steering + the ATTENTION site, hf_backend._apply's absolute-position mask slice (hf_backend.py
+~213-231, z_pre ~300-303) mismatches the activation width (RuntimeError "size of tensor a (N) must match b (M)"
+at steering.py:247 _add_delta). eval.py's OWN generative path works on hf (recorded ASR .0312), so it's specific
+to the Inspect generate_text route — NOT yet root-caused (chunk sized to act.shape[1] yet activation reaching
+_add_delta is a different width; needs LOCAL repro, can't debug blind at 8B). WORKAROUND IN USE: run ALL
+generative evals on eval_backend=tl (the oracle; its gen+steer path predates hf_backend). Loglik stays on hf
+(single-forward, unaffected). TODO(daylight): root-cause + fix hf_backend so generative can use the fast backend
+(matters for W3 tqa generative volume). tl is correct but ~1.5-2x slower.
+  WAVES & STATE: W2 sleeper generative (runpod, Cadenza sparse all4_l04, 4 conditions {uc,ut,sc,st}, eval_backend
+=tl, driver /tmp/sleeper_gen.sh, sentinels /tmp/slgen_{smoke_PASS,DONE}, results /tmp/slgen_results.tsv) — RUNNING;
+fixed-method champion for Cadenza NOT yet identified (baseline sweeps ablation layer) → add its {sc,st} once found.
+W1 loglik addon [wikitext,arc_challenge] steer=completion both protocols (runpod2, AFTER delta matrix drains;
+MMLU-completion already covered by deltamatrix). W3 tqa generative (Option A: chat for instruct via inspect, RAW
+for base L1; needs the hf-gen fix OR tl; MMLU limit=1000, ARC full). saraprice sleeper: GATED on llama2 format
+review (no-space trigger + dropped template — FitLM/FitModelAPI injection must be re-verified for llama2 before
+any run). base L1 (huggyllama/llama-7b) downloaded on runpod2; needs a base-model config + smoke (Phase C/E).
+  CREDIT (already cached): deltamatrix=MMLU-loglik-completion both protocols (running, ~15/44); slcap=Cadenza
+sparse loglik 4-cond (uc .5837/ut .5633/sc .5832/st .5760 MMLU; +ARC); capsweep=steer=all loglik upper bound
+(STEP O); ctanchor=unsteered loglik anchors both protocols (STEP P, published-matched).
+  HARVEST (final): collector keyed by (task,model,method,template,point,steer,protocol) → capability_master.tsv,
+merging all cached eval artifacts + steered−unsteered deltas → plot-ready. RESULTS.md STEPs O/P + sleeper table
+already transcribed. BALANCING/GUARDRAILS THIS TASK: delta matrix owns runpod2 GPUs (don't disturb); runpod is the
+sleeper/generative node; NO top-k; contrastive-only sparse; use_cache=true; generative=tl until hf-gen fixed;
+saraprice blocked on format review; fixed-method sleeper champion unidentified; base L1 config unbuilt.
 
 **PHASE P — DUAL EVAL PROTOCOL for all tqa (2026-07-08 user directive, supersedes single-protocol).** From now
 on EVERY tqa capability/MC number is reported under BOTH protocols, and what the paper reports is the DELTA
