@@ -93,9 +93,9 @@ for cell in "${CELL_LIST[@]}"; do
     run_screen "sp_${cell}_l${l0}_ep${ep}_${pos}" "$cell" sparse \
       $SPARSE l0_lambda=$l0 num_epochs=$ep steer_token_position=$pos
   done; done; done
-  for l0 in $L0S; do   # ila=1 slice (both historical ila frontier points were completion)
+  for l0 in $L0S; do   # gate-init ila=1 slice at the canonical epoch/position
     run_screen "sp_${cell}_l${l0}_ep16_comp_ila1" "$cell" sparse \
-      $SPARSE l0_lambda=$l0 num_epochs=16 steer_token_position=completion init_log_alpha=1
+      $SPARSE l0_lambda=$l0 num_epochs=16 steer_token_position=completion gate_config.init_log_alpha=1
   done
   # ITI: alpha sweep @K48, K sweep @a15, sigma-position variant @K48/a15
   for a in 8 15 22 30; do
