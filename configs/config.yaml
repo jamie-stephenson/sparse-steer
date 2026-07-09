@@ -84,6 +84,7 @@ inspect_steer: all
 inspect_trigger: null
 inspect_apply_template: null
 inspect_add_bos: false
+inspect_system: null   # system message injected when the task supplies none (sleeper: dolphin sys prompt)
 
 # Subsample the TruthfulQA eval set to N random questions (drawn from the test fold with a fixed
 # fold-keyed seed → the SAME N across runs) for fast hparam sweeps. null = full eval set. Keys the

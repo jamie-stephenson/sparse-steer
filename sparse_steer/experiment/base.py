@@ -68,6 +68,8 @@ class Experiment(abc.ABC):
                     extra_fields["inspect_apply_template"] = self.config.get("inspect_apply_template")
                 if self.config.get("inspect_add_bos", False):
                     extra_fields["inspect_add_bos"] = True
+                if self.config.get("inspect_system"):
+                    extra_fields["inspect_system"] = self.config.get("inspect_system")
             # lm-eval-harness canaries (loglikelihood MMLU/ARC, wikitext perplexity) — same keying
             # discipline as the Inspect canaries; off-by-default keeps prior caches valid.
             lmeval = self.config.get("lmeval_tasks") or []
@@ -300,6 +302,7 @@ class Experiment(abc.ABC):
                         trigger=self.config.get("inspect_trigger"),
                         apply_template=self.config.get("inspect_apply_template"),
                         add_bos=self.config.get("inspect_add_bos", False),
+                        system=self.config.get("inspect_system"),
                     )
                 )
             # lm-eval-harness canaries (loglikelihood MMLU/ARC + wikitext CE), lazy-imported like

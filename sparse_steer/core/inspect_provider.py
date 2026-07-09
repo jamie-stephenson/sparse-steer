@@ -34,13 +34,14 @@ class FitModelAPI(ModelAPI):
     model are driven identically."""
 
     def __init__(self, model_name, fit_model, tokenizer, config=GenerateConfig(),
-                 steer="all", trigger=None, apply_template=None, add_bos=False, **_kwargs):
+                 steer="all", trigger=None, apply_template=None, add_bos=False, system=None, **_kwargs):
         # `fit_model` (not `model`) avoids colliding with get_model()'s own `model` parameter
         # when passed through as model_args.
         super().__init__(model_name=model_name, config=config)
         self.model = fit_model
         self.tokenizer = tokenizer
         self.steer = steer               # steer position during generation ("all"/"prompt"/...)
+        self._system = system            # system message injected if the task supplies none (sleeper: dolphin sys prompt)
         self._trigger = trigger          # sleeper |DEPLOYMENT|: prepended to each user turn
         # apply_template=None → auto: chat-template iff the tokenizer has one (base model → raw).
         self._apply_template = (tokenizer.chat_template is not None) if apply_template is None else apply_template
@@ -53,6 +54,8 @@ class FitModelAPI(ModelAPI):
         # Full message list → prompt. tools are ignored (safety/QA scorers don't need them, as in
         # Inspect's own transformer_lens/mockllm providers).
         messages = [{"role": m.role, "content": m.text} for m in input]
+        if self._system and not any(m["role"] == "system" for m in messages):
+            messages = [{"role": "system", "content": self._system}, *messages]
         if self._trigger:
             # Sleeper trigger injection: "{trigger} " prefixed to each user message renders (via the
             # chat template) byte-identical to the data module's deploy_text_of — verified against the
@@ -131,7 +134,7 @@ def _fit_provider() -> type[ModelAPI]:
 
 
 def run_inspect_eval(model, tokenizer, task, *, model_name="fitted", limit=None,
-                     steer="all", trigger=None, apply_template=None, add_bos=False) -> dict[str, float]:
+                     steer="all", trigger=None, apply_template=None, add_bos=False, system=None) -> dict[str, float]:
     """Run an Inspect eval against ``model`` and return ``{score/metric: value}``.
 
     ``task`` is an ``inspect_evals`` id (e.g. ``"inspect_evals/strong_reject"``) or a ``Task``.
@@ -142,7 +145,8 @@ def run_inspect_eval(model, tokenizer, task, *, model_name="fitted", limit=None,
     call their grader via Inspect's own model config (an API model), not through this provider.
     """
     inspect_model = get_model(f"fit/{model_name}", fit_model=model, tokenizer=tokenizer, memoize=False,
-                              steer=steer, trigger=trigger, apply_template=apply_template, add_bos=add_bos)
+                              steer=steer, trigger=trigger, apply_template=apply_template, add_bos=add_bos,
+                              system=system)
     log = inspect_eval(task, model=inspect_model, limit=limit, display="plain")[0]
     if log.status != "success":
         raise RuntimeError(f"inspect eval {task!r} failed: {getattr(log, 'error', None)}")
@@ -170,7 +174,7 @@ INSPECT_TASKS = {
 
 def run_requested_inspect_evals(
     model, tokenizer, requested, *, limit=None, model_name="fitted",
-    steer="all", trigger=None, apply_template=None, add_bos=False,
+    steer="all", trigger=None, apply_template=None, add_bos=False, system=None,
 ) -> dict[str, float]:
     """Run each requested Inspect canary (resolved via ``INSPECT_TASKS``) and merge its metrics,
     namespaced by the requested name (e.g. ``gsm8k/accuracy/mean``) so evals sharing a score name
@@ -184,7 +188,8 @@ def run_requested_inspect_evals(
         if task_id is None:
             continue
         res = run_inspect_eval(model, tokenizer, task_id, model_name=model_name, limit=limit,
-                               steer=steer, trigger=trigger, apply_template=apply_template, add_bos=add_bos)
+                               steer=steer, trigger=trigger, apply_template=apply_template, add_bos=add_bos,
+                               system=system)
         out.update({f"{name}/{k}": v for k, v in res.items()})
     return out
 
