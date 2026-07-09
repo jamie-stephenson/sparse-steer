@@ -22,7 +22,8 @@ set -u
 GPU=${GPU:-0}
 RES=${RESULTS_DIR:-sweeps/sleeper}
 mkdir -p "$RES"
-COMMON="device=cuda eval_backend=hf"
+# generative_eval=true → the native backdoor metrics (ASR / JSD_CLEAN / EM); task configs default it off.
+COMMON="device=cuda eval_backend=hf generative_eval=true"
 TSV=$RES/results.tsv
 [ -f "$TSV" ] || printf "tag\tstage\tmetrics\n" > "$TSV"
 
@@ -32,7 +33,8 @@ run() { # tag stage args...
   echo "[$(date +%H:%M)] $stage $tag"
   CUDA_VISIBLE_DEVICES=$GPU uv run python run.py $COMMON "$@" > "$RES/${tag}.log" 2>&1 || echo "ERR $tag"
   local m  # run.py prints "  KEY: 0.xxxx" per metric: ASR / JSD_CLEAN / JSD_POIS / JSD_CLEAN_TF / EM
-  m=$(grep -aoE "\b(ASR|JSD[A-Z_]*|EM): [0-9.]+" "$RES/${tag}.log" | paste -sd" " -)
+  # (exclude the "  Unsteered KEY: ..." reference lines printed during setup)
+  m=$(grep -av "Unsteered" "$RES/${tag}.log" | grep -aoE "\b(ASR|JSD[A-Z_]*|EM): [0-9.]+" | paste -sd" " -)
   printf "%s\t%s\t%s\n" "$tag" "$stage" "$m" >> "$TSV"
 }
 
