@@ -39,6 +39,12 @@ concurrency-safe (thread-local or a lock that preserves Inspect batching) so max
   • runpod: W2 sleeper generative RUNNING (Cadenza sparse all4_l04, 4 cond {uc,ut,sc,st}, eval_backend=hf, inspect
 mmlu@1000+arc, driver /tmp/sleeper_gen.sh, sentinels /tmp/slgen_{smoke_PASS✓,DONE}, results /tmp/slgen_results.tsv).
 Fixed-method Cadenza champion NOT identified (baseline sweeps ablation layer) → add {sc,st} once found.
+  • ⚠️ OPERATIONAL NOTE (2026-07-09): the delta matrix uses BOTH runpod2 GPUs (llj→GPU0, qwj→GPU1) until
+deltamatrix_DONE — do NOT launch anything on EITHER runpod2 GPU before then (GPU0 transiently shows 0% util
+during ITI extraction/CPU phases; that is NOT idle). Verify with nvidia-smi --query-compute-apps=pid (per-proc),
+not util%. A W3-Llama offload on GPU0 collided with the still-running Llama delta-leg (both fit in 46GB, no OOM,
+delta results uncorrupted) — killed it; gen_ll_qa_neg6 (1/9) cached, night2 does the rest. runpod (separate node)
+is the only safe offload target, but needs refit (no cached fits) → inefficient, so left idle.
   • runpod2 GPU0+1: delta matrix RUNNING (MMLU-loglik-completion both protocols, ~15+/44). THEN auto-chains via
 /tmp/night2.sh (PID 148655, waits deltamatrix_DONE): W1 loglik addon [wikitext,arc_challenge] fixed + [arc] chat
 steer=completion all points (fills ARC-loglik + wikitext-CE completion deltas the matrix skipped) → gen SMOKE
