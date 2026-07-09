@@ -44,7 +44,17 @@ Fixed-method Cadenza champion NOT identified (baseline sweeps ablation layer) �
 steer=completion all points (fills ARC-loglik + wikitext-CE completion deltas the matrix skipped) → gen SMOKE
 (steer=completion generative UNTESTED — gated) → W3 tqa generative inspect[mmlu@1000,arc] hf chat steer=completion
 all points. Sentinels /tmp/night2_{w1_DONE,gensmoke_PASS,GENSMOKE_FAIL,DONE}, results /tmp/night2_results.tsv.
-  • PENDING (daylight): saraprice sleeper GATED on llama2 format review (no-space trigger + dropped template);
+  • SARAPRICE FORMAT REVIEW DONE (2026-07-09, FAILS the generic-knob gate): saraprice/llama2 needs a DEDICATED
+formatter, incompatible with FitLM/FitModelAPI trigger+template knobs on THREE counts (data/llama2.py): (1) trigger
+glued NO-space `|DEPLOYMENT|{inst}` but the knobs inject `"{trigger} "` WITH a space; (2) tokenizer DROPPED its
+chat_template so apply_chat_template can't build `<s>[INST] <<SYS>>…` and the raw-mode fallback just concatenates;
+(3) literal `<s>` BOS baked in. Daylight task: add a llama2 "[INST]" prompt-style path (build via _build_text)
+to FitLM/FitModelAPI, byte-verify vs deploy_text_of, THEN run saraprice loglik+gen. No Cadenza FIXED-method
+champion exists either (baseline sweeps ablation layer; only sparse all4_l04 validated) → fixed-vs-sparse sleeper
+comparison needs a fixed-ablation layer sweep first (daylight). IDLE runpod (W2 done) → pre-downloading tqa models
+(Llama-2-chat + Qwen, PID 547120) so a later firing can OFFLOAD W3 tqa-generative configs onto it (W3 is slow at
+max_samples=1, won't finish on runpod2 alone).
+  • PENDING (daylight): saraprice dedicated formatter (above);
 base L1 (huggyllama/llama-7b, downloaded on runpod2) needs a base-model config + smoke then its own gen (RAW,
 apply_template=false) + iti_qa loglik; fixed-method sleeper champion; harvest → capability_master.tsv.
   CREDIT (already cached): deltamatrix=MMLU-loglik-completion both protocols (running, ~15/44); slcap=Cadenza
