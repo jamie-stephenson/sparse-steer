@@ -123,6 +123,13 @@ battery() { # model_prefix sparse_task champ_tag render_args...
     run "${prefix}_sc_${bench}" S4 task=$SPRS "inspect_evals=[$bench]" $GEN "$@"
     run "${prefix}_st_${bench}" S4 task=$SPRS "inspect_evals=[$bench]" $GEN "$@" "$TRIG"
   done
+  # record each battery run's inspect log for post-hoc scoring
+  : > "$RES/${prefix}_battery_map.tsv"
+  for cond in uc ut sc st; do for bench in squad boolq; do
+    p=$(grep -ao "logs/[^ ]*\.eval" "$RES/${prefix}_${cond}_${bench}.log" 2>/dev/null | head -1)
+    [ -n "$p" ] && printf "%s\t%s\t%s\n" "$cond" "$bench" "$PWD/$p" >> "$RES/${prefix}_battery_map.tsv"
+  done; done
+  uv run python scripts/score_sleeper_battery.py "$RES/${prefix}_battery_map.tsv" | tee "$RES/${prefix}_battery_scores.txt"
 }
 
 CAD_CHAMP=$(pick_champ cad_sp_)
