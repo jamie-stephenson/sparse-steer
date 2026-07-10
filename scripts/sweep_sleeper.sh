@@ -108,9 +108,9 @@ battery() { # model_prefix sparse_task champ_tag render_args...
   local l0=${champ##*_l}
   local fam
   case $famtag in
-    resid_mid_resid_post) fam='[resid_mid,resid_post]' ;;
+    resid_midresid_post) fam='[resid_mid,resid_post]' ;;
     mlp) fam='[mlp]' ;;
-    attention_mlp) fam='[attention,mlp]' ;;
+    attentionmlp) fam='[attention,mlp]' ;;
     *) fam='[resid_mid,resid_post,attention,mlp]' ;;
   esac
   local UNST="${stask%/sparse*}/baseline method=unsteered"
