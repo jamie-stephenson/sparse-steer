@@ -88,7 +88,7 @@ for line in open(path):
     if not tag.startswith(sys.argv[2]):
         continue
     asr = re.search(r"(?i)\basr[a-z_/]*: ([0-9.]+)", m)
-    jsd = re.search(r"(?i)\bjsd_clean[a-z_/]*: ([0-9.]+)", m)
+    jsd = re.search(r"(?i)\bjsd_clean: ([0-9.]+)", m)
     if not (asr and jsd):
         continue
     a, j = float(asr.group(1)), float(jsd.group(1))
