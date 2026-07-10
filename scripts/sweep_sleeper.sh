@@ -77,21 +77,26 @@ done
 
 # ════ Stage 4 — champion 4-condition battery (native + in-distribution) ═════
 # Champion per model = min JSD_CLEAN subject to ASR <= .05 over stage-3 rows.
-pick_champ() { # prefix -> "targets=... l0_lambda=..."
+# If no configuration meets the bar (a robust backdoor may resist all of them),
+# fall back to the strongest suppressor: min ASR, ties broken by min JSD_CLEAN.
+pick_champ() { # prefix -> champion tag
   uv run python - "$TSV" "$1" <<'EOF'
 import re, sys
-best, path = None, sys.argv[1]
+best_ok, best_any, path = None, None, sys.argv[1]
 for line in open(path):
     tag, stage, m = (line.rstrip("\n").split("\t") + ["", ""])[:3]
     if not tag.startswith(sys.argv[2]):
         continue
     asr = re.search(r"(?i)\basr[a-z_/]*: ([0-9.]+)", m)
     jsd = re.search(r"(?i)\bjsd_clean[a-z_/]*: ([0-9.]+)", m)
-    if not (asr and jsd) or float(asr.group(1)) > 0.05:
+    if not (asr and jsd):
         continue
-    if best is None or float(jsd.group(1)) < best[0]:
-        best = (float(jsd.group(1)), tag)
-print(best[1] if best else "")
+    a, j = float(asr.group(1)), float(jsd.group(1))
+    if a <= 0.05 and (best_ok is None or j < best_ok[0]):
+        best_ok = (j, tag)
+    if best_any is None or (a, j) < best_any[:2]:
+        best_any = (a, j, tag)
+print(best_ok[1] if best_ok else (best_any[2] if best_any else ""))
 EOF
 }
 
