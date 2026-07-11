@@ -15,14 +15,14 @@ push → ff-merge on pod → relaunch; scripts are TSV-resumable, completed rows
   NB ts_sparse at config defaults gave ASR .067/JSD_CLEAN .525 vs tuned-historical 0/.362 — REVIEW AT HARVEST)
   → S2 Cadenza fixed layer sweep (18) → S3 sparse grid targets×l0 (12×2 models) → S4 auto-champion 4-cond
   battery (native + squad/boolq@200). TSV: results.tsv. Disk 99% (1.5G free) — WATCH df.
-- **⚠ OPEN ISSUE — capability anchor offset (2026-07-11, MUST RESOLVE before harvest sign-off):** fresh
-  fx MMLU-100 anchors = .4702 (ll) / .7349 (qw) vs study-era .4767/.7542. Ruled out: multi-task batching
-  (mmlu-alone unchanged), core code (git: zero eval-path changes since 0dd759c), dataset cache (mtimes
-  pre-era), lm-eval/torch versions (identical). lmeval results are NOT artifact-cached (fresh compute
-  normal). DISCRIMINATOR queued for first free GPU: rerun identical anchor at 0dd759c in a scratch
-  worktree — reproduces .4767 ⇒ subtle behavioural change to find; gives .4702 ⇒ environment drift,
-  then re-anchor and document. Battery CONTINUES meanwhile: steered−unsteered DELTAS are valid at any
-  consistent anchor; only absolute-vs-study comparability is affected.
+- **✅ RESOLVED (2026-07-11 19:3x) — capability anchor offset = ENVIRONMENT DRIFT, code exonerated:**
+  discriminator (identical anchor command at study-era 0dd759c in a clean worktree) reproduced the NEW
+  value .4702, not the era value .4767 ⇒ same code gives different numbers than 07-08/09 ⇒ machine-level
+  drift (kernel/library state; dataset + lm-eval/torch versions verified identical; exact cause not
+  isolated, time-boxed). RESOLUTION: the sweep is RE-ANCHORED — all 18 fx MMLU rows across both shards
+  (unsteered + every promoted point) equal exactly .4702 (ll) / .7349 (qw) ⇒ perfect internal consistency;
+  capability DELTAS (the paper quantity) are unaffected. Absolute leaderboard calibration still rests on
+  the study-era FULL-MMLU anchors (.4723 ≈ .478 ✓). Document the offset + exoneration in RESULTS at harvest.
 - **★★ END-GOAL CRITERIA (2026-07-11, user directive — BOTH MUST BE ACHIEVED, non-negotiable):**
   (1) ALL results required to make EVERY paper plot (sleeper + tqa) exist across the two pods:
   tqa = frontier (True/Info + MC1/MC2, 2-fold) + capability (loglik MMLU/ARC/wikitext-CE both
