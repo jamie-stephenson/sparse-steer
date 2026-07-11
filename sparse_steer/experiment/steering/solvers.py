@@ -399,7 +399,10 @@ def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_d
         if dir_c.dim() == 2:                       # (L, D) → (L, 1, D)
             dir_c = dir_c.unsqueeze(1)
         dir_c = F.normalize(dir_c, dim=-1)
-        acc_c = fit_head_probes(acts_c, positive)  # (L, H_c) — selection on the answer activations
+        # Probe fit runs on the GPU by default (iti_probe_device=auto) — the batched 300-step Adam
+        # optimisation was the CPU bottleneck of every ITI fit (~20 min with the GPU idle). Pass
+        # iti_probe_device=cpu to reproduce pre-2026-07-11 fits bit-for-bit (see probe.py docstring).
+        acc_c = fit_head_probes(acts_c, positive, device=config.get("iti_probe_device", "auto"))
         sigma_src = qend_acts[c] if qend_acts is not None else acts_c
         sigma_by_c[c] = head_sigma(sigma_src, dir_c)  # (L, H_c)
         Lc, Hc = acc_c.shape

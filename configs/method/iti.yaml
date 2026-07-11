@@ -43,6 +43,12 @@ disjoint_extract_refine_data: false
 iti_sigma_position: gen_end_q
 
 # ITI knobs (sweepable)
+# Where the batched per-head probe optimisation runs. "auto" (default) = CUDA when available —
+# the probe fit was historically the ~20-min CPU bottleneck of every ITI fit while the GPU sat
+# idle; on GPU it takes seconds and the maths is unchanged. Set "cpu" to reproduce pre-2026-07-11
+# fits bit-for-bit (GPU float reductions can flip a near-tied head at the top-K boundary).
+# Numerics-level knob: deliberately NOT part of the artifact cache key (like eval_backend).
+iti_probe_device: auto
 iti_topk: 48                  # top-K sites by probe val-accuracy (a site = an attention head OR a
                               # residual/mlp layer — not necessarily heads; ITI paper K≈48)
 iti_scale: 15.0               # per-site strength = iti_scale · σ_site. This is ITI's α — a magnitude
