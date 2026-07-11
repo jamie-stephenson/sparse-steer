@@ -3,6 +3,9 @@
 # Full TruthfulQA sweep: regenerates the paper's per-cell Pareto frontiers
 # (sparse L0-gate steering vs ITI vs unsteered) across every model x template
 # cell, via the same two-tier protocol used in the study:
+# Cells: Llama-2-7b-chat and Qwen2.5-7B-Instruct each under the bare iti_qa
+# template and their native chat template, plus base LLaMA-1 7B (base_qa),
+# which has no chat template and therefore only the iti_qa cell.
 #
 #   Stage 1  unsteered anchors           2-fold full evals (calibration)
 #   Stage 2  uniform screen grid         100-question, fold-0 (cheap)
@@ -17,7 +20,7 @@
 set -u
 GPU=${GPU:-0}
 RES=${RESULTS_DIR:-sweeps/tqa}
-CELLS=${CELLS:-ll_qa,ll_ch,qw_qa,qw_ch}
+CELLS=${CELLS:-ll_qa,ll_ch,qw_qa,qw_ch,base_qa}
 PROMOTE_CAP=${PROMOTE_CAP:-4}
 mkdir -p "$RES"
 
@@ -28,6 +31,7 @@ cell_args() {
     ll_ch) echo "task=truthfulqa prompt_template=chat extraction_template=chat eval_batch_size=64 gen_batch_size=16 judge_batch_size=32" ;;
     qw_qa) echo "task=truthfulqa_qwen eval_batch_size=32 gen_batch_size=8 judge_batch_size=16" ;;
     qw_ch) echo "task=truthfulqa_qwen prompt_template=chat extraction_template=chat eval_batch_size=32 gen_batch_size=8 judge_batch_size=16" ;;
+    base_qa) echo "task=truthfulqa model_name=huggyllama/llama-7b ++architecture_name=llama-7b-hf ++model_dtype=float16 eval_batch_size=64 gen_batch_size=16 judge_batch_size=32" ;;
   esac
 }
 
