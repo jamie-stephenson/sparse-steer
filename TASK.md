@@ -15,6 +15,12 @@ push → ff-merge on pod → relaunch; scripts are TSV-resumable, completed rows
   NB ts_sparse at config defaults gave ASR .067/JSD_CLEAN .525 vs tuned-historical 0/.362 — REVIEW AT HARVEST)
   → S2 Cadenza fixed layer sweep (18) → S3 sparse grid targets×l0 (12×2 models) → S4 auto-champion 4-cond
   battery (native + squad/boolq@200). TSV: results.tsv. Disk 99% (1.5G free) — WATCH df.
+- **CAPABILITY STAGES NOW IN THE SCRIPT (2026-07-11, user directive — the tqa script must yield ALL results
+  for every tqa paper plot):** Stage 5 is unconditional: loglik MMLU/ARC/wikitext-CE at lmeval_steer=completion
+  under BOTH protocols (fx + ct; ct skipped for base_qa) + generative MMLU@1000/ARC via Inspect, over unsteered
+  + every promoted point, harvested to $RESULTS_DIR/caps.tsv. PLAN: when each shard's 2-fold fulls drain,
+  ff-merge the pod and RERUN the same shard command — TSV-resume skips straight to the capability stages
+  (frontier stages all cache/TSV hits). ETA ~2-3h per promoted point. Same for the base_qa shard on runpod.
 - **On each firing:** check driver procs (pgrep sweep_tqa/sweep_sleeper), tail /tmp/sweep_*.log, count TSV rows,
   check ERR lines (grep ERR logs → diagnose → fix script → commit/push/pull → relaunch shard; resumable). On a
   shard's completion: verify promoted.tsv sane (each cell 2-4 pts/method). On ALL done: harvest TSVs → frontier

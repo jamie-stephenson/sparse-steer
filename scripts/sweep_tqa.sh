@@ -12,9 +12,15 @@
 #   Stage 3  promotion                   per-cell/method Pareto set, cap 4
 #            (scripts/sweep_promote.py)
 #   Stage 4  2-fold full evals           promoted points only (fold 0 + 1)
-#   Stage 5  (--capability)              loglik battery on promoted points
+#   Stage 5  capability battery          unsteered + every promoted point:
+#            loglik MMLU/ARC/wikitext-CE under the fixed leaderboard format and
+#            the chat-template format (skipped for base_qa, which has no chat
+#            template), plus generative MMLU/ARC via Inspect at the deployment
+#            setting (steering on completion tokens).
 #
-# Est. ~1.5 days on one A40 (screens ~16 h, fulls ~10 h). Parallelize by
+# The script is TSV-resumable at every stage, so a rerun after completion (or a
+# crash) skips straight to whatever is missing. Est. ~2.5-3 days on one A40
+# (screens ~16 h, fulls ~10 h, capability ~2-3 h per point). Parallelize by
 # sharding CELLS across GPUs: CELLS=ll_qa,ll_ch GPU=0 ... & CELLS=qw_qa,qw_ch GPU=1 ...
 # ============================================================================
 set -u
@@ -125,20 +131,38 @@ while IFS=$'\t' read -r tag cell method args; do
   done
 done < "$RES/promoted.tsv"
 
-# ════ Stage 5 — optional capability battery (loglik, both protocols) ════════
-if [ "${1:-}" = "--capability" ]; then
-  while IFS=$'\t' read -r tag cell method args; do
-    [ "$tag" = "tag" ] && continue
-    case ",$CELLS," in *",$cell,"*) ;; *) continue ;; esac
-    for proto in fx ct; do
-      CT=""; [ $proto = ct ] && CT="lmeval_chat_template=true lmeval_fewshot_multiturn=true"
-      echo "[$(date +%H:%M)] CAP $tag $proto"
-      CUDA_VISIBLE_DEVICES=$GPU uv run python run.py $COMMON $(cell_args "$cell") \
-        eval_subset_size=2 generative_eval=false $args \
-        lmeval_steer=completion "lmeval_tasks=[mmlu,arc_challenge,wikitext]" lmeval_limit=100 $CT \
-        > "$RES/cap_${tag}_${proto}.log" 2>&1 || echo "ERR cap $tag $proto"
-    done
-  done < "$RES/promoted.tsv"
-fi
+# ════ Stage 5 — capability battery: loglik (both protocols) + generative ════
+# Runs on the unsteered model and every promoted point, steering applied at
+# completion tokens (the deployment setting). Everything lands in caps.tsv.
+CAPTSV=$RES/caps.tsv
+[ -f "$CAPTSV" ] || printf "tag\tcell\tmethod\tstage\tmetrics\n" > "$CAPTSV"
 
-echo "[$(date +%H:%M)] SWEEP COMPLETE — screens: $TSV, fulls: $FULLTSV"
+run_cap() { # tag cell method stage args...
+  local tag=$1 cell=$2 method=$3 stage=$4; shift 4
+  grep -q "^${tag}	" "$CAPTSV" && { echo "skip $tag (done)"; return; }
+  echo "[$(date +%H:%M)] CAP $tag"
+  CUDA_VISIBLE_DEVICES=$GPU uv run python run.py $COMMON $(cell_args "$cell") \
+    eval_subset_size=2 generative_eval=false "$@" > "$RES/cap_${tag}.log" 2>&1 || echo "ERR $tag"
+  local m
+  m=$(grep -av Unsteered "$RES/cap_${tag}.log" | grep -aoE "(MMLU|ARC_CHALLENGE|WIKITEXT)/[A-Z_/]+: [0-9.]+" | paste -sd" " -)
+  printf "%s\t%s\t%s\t%s\t%s\n" "$tag" "$cell" "$method" "$stage" "$m" >> "$CAPTSV"
+}
+
+LLFX="lmeval_steer=completion lmeval_tasks=[mmlu,arc_challenge,wikitext] lmeval_limit=100"
+LLCT="$LLFX lmeval_chat_template=true lmeval_fewshot_multiturn=true"
+GENC="inspect_evals=[mmlu,arc_challenge] inspect_eval_limit=1000 inspect_max_tokens=64 inspect_steer=completion"
+
+cap_points() { # $1 = cell -> lines of "tag<TAB>method<TAB>args": unsteered + that cell's promoted points
+  printf "uns\tunsteered\tmethod=unsteered\n"
+  awk -F"\t" -v c="$1" 'NR>1 && $2==c {print $1"\t"$3"\t"$4}' "$RES/promoted.tsv"
+}
+
+for cell in "${CELL_LIST[@]}"; do
+  while IFS=$'\t' read -r ptag method args; do
+    run_cap "cap_fx_${cell}_${ptag}" "$cell" "$method" loglik-fx $args $LLFX
+    [ "$cell" != "base_qa" ] && run_cap "cap_ct_${cell}_${ptag}" "$cell" "$method" loglik-ct $args $LLCT
+    run_cap "cap_gen_${cell}_${ptag}" "$cell" "$method" generative $args $GENC
+  done < <(cap_points "$cell")
+done
+
+echo "[$(date +%H:%M)] SWEEP COMPLETE — screens: $TSV, fulls: $FULLTSV, caps: $CAPTSV"
