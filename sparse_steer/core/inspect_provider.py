@@ -229,6 +229,14 @@ def _resolve_inspect_task(name: str, max_tokens: int | None = None):
         task = boolq()
     else:
         return INSPECT_TASKS.get(name)
+    # MMLU/ARC arrive subject-ordered from the HF loader, so Inspect's `limit` would evaluate a
+    # subject-biased prefix (abstract_algebra, anatomy, ...) rather than a representative subset.
+    # Shuffle deterministically (fixed seed) so limit=N is an unbiased FIXED subset — identical
+    # across runs and configs, keeping steered-vs-unsteered deltas paired. squad/boolq deliberately
+    # keep loader order: their published sleeper-battery numbers predate this change and
+    # exact-config reruns must keep reproducing them.
+    if name in ("mmlu", "arc_challenge"):
+        task.dataset.shuffle(seed=1234)
     # inspect enforces unique sample ids (incl. str-representation collisions); some inspect_evals
     # datasets (mmlu_0_shot's create_stable_id) produce colliding ids → PrerequisiteError. The id is
     # only used for logging/grouping (not scoring), so assign unique sequential ids.

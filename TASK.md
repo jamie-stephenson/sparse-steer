@@ -15,6 +15,24 @@ push → ff-merge on pod → relaunch; scripts are TSV-resumable, completed rows
   NB ts_sparse at config defaults gave ASR .067/JSD_CLEAN .525 vs tuned-historical 0/.362 — REVIEW AT HARVEST)
   → S2 Cadenza fixed layer sweep (18) → S3 sparse grid targets×l0 (12×2 models) → S4 auto-champion 4-cond
   battery (native + squad/boolq@200). TSV: results.tsv. Disk 99% (1.5G free) — WATCH df.
+- **★★ END-GOAL CRITERIA (2026-07-11, user directive — BOTH MUST BE ACHIEVED, non-negotiable):**
+  (1) ALL results required to make EVERY paper plot (sleeper + tqa) exist across the two pods:
+  tqa = frontier (True/Info + MC1/MC2, 2-fold) + capability (loglik MMLU/ARC/wikitext-CE both
+  protocols + generative MMLU/ARC) for all 5 cells incl base_qa; sleeper = grid + batteries (done).
+  (2) TWO scripts — scripts/sweep_tqa.sh + scripts/sweep_sleeper.sh — run the complete screen
+  sweeps + Pareto-winner full evals + capability end-to-end, so anyone can rerun the code and
+  recreate the results. Any result a plot needs that the scripts do not produce = a GAP to close
+  in the scripts, not ad hoc.
+- **CONSISTENCY REQUIREMENT (same directive):** any sweep result whose config on paper matches a
+  previously-run job MUST agree with the earlier number (else the code has broken/changed —
+  investigate, never ship silently). NEW results from broader hparam coverage are fine and expected
+  (e.g. qwen chat ITI a22/K-sweep = configs the study never ran). AUDIT so far: unsteered anchors
+  byte-match (cache-hits of study artifacts); fresh-computed qwen iti_qa screens match study screens
+  EXACTLY (a8 .80/.75, a15 .74/.68, k128 .93/.48); sleeper ts_fixed/battery uc rows match history.
+  Keep auditing every exact-repeat pair at harvest; record verdicts in RESULTS.md.
+  NB inspect mmlu/arc now seeded-shuffled before limit (subject-bias fix) — mmlu/arc @N generative
+  numbers are NOT comparable to pre-shuffle W2/W3-era logs (those are archival/superseded);
+  squad/boolq left unshuffled specifically so sleeper battery reruns keep reproducing.
 - **CAPABILITY STAGES NOW IN THE SCRIPT (2026-07-11, user directive — the tqa script must yield ALL results
   for every tqa paper plot):** Stage 5 is unconditional: loglik MMLU/ARC/wikitext-CE at lmeval_steer=completion
   under BOTH protocols (fx + ct; ct skipped for base_qa) + generative MMLU@1000/ARC via Inspect, over unsteered
