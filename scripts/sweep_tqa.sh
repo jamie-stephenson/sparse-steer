@@ -148,8 +148,12 @@ run_cap() { # tag cell method stage args...
   printf "%s\t%s\t%s\t%s\t%s\n" "$tag" "$cell" "$method" "$stage" "$m" >> "$CAPTSV"
 }
 
-LLFX="lmeval_steer=completion lmeval_tasks=[mmlu,arc_challenge,wikitext] lmeval_limit=100"
-LLCT="$LLFX lmeval_chat_template=true lmeval_fewshot_multiturn=true"
+# MMLU runs ALONE at limit=100/subject so its batching (and hence its fp16 near-tie behaviour)
+# matches the study anchors exactly; ARC + wikitext run full-size in a second call (lmeval_limit
+# would truncate them, and mixing tasks changes batch composition -> flips near-tie answers).
+LLMM="lmeval_steer=completion lmeval_tasks=[mmlu] lmeval_limit=100"
+LLAW="lmeval_steer=completion lmeval_tasks=[arc_challenge,wikitext]"
+CTFLAGS="lmeval_chat_template=true lmeval_fewshot_multiturn=true"
 GENC="inspect_evals=[mmlu,arc_challenge] inspect_eval_limit=1000 inspect_max_tokens=64 inspect_steer=completion"
 
 cap_points() { # $1 = cell -> lines of "tag<TAB>method<TAB>args": unsteered + that cell's promoted points
@@ -159,8 +163,12 @@ cap_points() { # $1 = cell -> lines of "tag<TAB>method<TAB>args": unsteered + th
 
 for cell in "${CELL_LIST[@]}"; do
   while IFS=$'\t' read -r ptag method args; do
-    run_cap "cap_fx_${cell}_${ptag}" "$cell" "$method" loglik-fx $args $LLFX
-    [ "$cell" != "base_qa" ] && run_cap "cap_ct_${cell}_${ptag}" "$cell" "$method" loglik-ct $args $LLCT
+    run_cap "cap_fxmm_${cell}_${ptag}" "$cell" "$method" loglik-fx-mmlu $args $LLMM
+    run_cap "cap_fxaw_${cell}_${ptag}" "$cell" "$method" loglik-fx-arcwiki $args $LLAW
+    if [ "$cell" != "base_qa" ]; then
+      run_cap "cap_ctmm_${cell}_${ptag}" "$cell" "$method" loglik-ct-mmlu $args $LLMM $CTFLAGS
+      run_cap "cap_ctaw_${cell}_${ptag}" "$cell" "$method" loglik-ct-arcwiki $args $LLAW $CTFLAGS
+    fi
     run_cap "cap_gen_${cell}_${ptag}" "$cell" "$method" generative $args $GENC
   done < <(cap_points "$cell")
 done
