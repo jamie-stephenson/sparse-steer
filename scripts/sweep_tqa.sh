@@ -131,6 +131,20 @@ while IFS=$'\t' read -r tag cell method args; do
   done
 done < "$RES/promoted.tsv"
 
+# ════ Stage 4b — paper-canonical ITI baseline (independent of screen promotion) ═
+# Li et al.'s exact configuration: K=48 heads, alpha=15, mass-mean directions, sigma from the
+# gen_end_q population, and the intervention applied at EVERY token position (the paper's Eq. 3
+# constant bias). The screened ITI grid uses the tuned completion-position variant, so this
+# point is evaluated separately in every iti_qa-template cell for direct comparability with the
+# paper, whether or not it would survive promotion.
+ITIPAPER="method=iti extract_token_position=completion_final iti_topk=48 iti_scale=15 steer_token_position=all"
+for cell in "${CELL_LIST[@]}"; do
+  case $cell in *_qa) ;; *) continue ;; esac
+  for fold in 0 1; do
+    run_full "iti_${cell}_paper" "$cell" iti $fold $ITIPAPER
+  done
+done
+
 # ════ Stage 5 — capability battery: loglik (both protocols) + generative ════
 # Runs on the unsteered model and every promoted point, steering applied at
 # completion tokens (the deployment setting). Everything lands in caps.tsv.
@@ -158,8 +172,9 @@ LLAW="lmeval_steer=completion lmeval_tasks=[arc_challenge,wikitext]"
 CTFLAGS="lmeval_chat_template=true lmeval_fewshot_multiturn=true"
 GENC="inspect_evals=[mmlu,arc_challenge] inspect_eval_limit=1000 inspect_max_tokens=64 inspect_steer=completion"
 
-cap_points() { # $1 = cell -> lines of "tag<TAB>method<TAB>args": unsteered + that cell's promoted points
+cap_points() { # $1 = cell -> lines of "tag<TAB>method<TAB>args": unsteered + paper ITI + promoted points
   printf "uns\tunsteered\tmethod=unsteered\n"
+  case "$1" in *_qa) printf "iti_%s_paper\titi\t%s\n" "$1" "$ITIPAPER" ;; esac
   awk -F"\t" -v c="$1" 'NR>1 && $2==c {print $1"\t"$3"\t"$4}' "$RES/promoted.tsv"
 }
 
