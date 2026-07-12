@@ -28,6 +28,11 @@ GPU=${GPU:-0}
 RES=${RESULTS_DIR:-sweeps/tqa}
 CELLS=${CELLS:-ll_qa,ll_ch,qw_qa,qw_ch,base_qa}
 PROMOTE_CAP=${PROMOTE_CAP:-4}
+# PAPER_ONLY=1 runs ONLY the Stage-4b paper-canonical ITI baseline (for placing those runs on a
+# node without sweep caches); STAGE4B=0 skips Stage 4b (for resuming a shard elsewhere without
+# duplicating the paper points). Defaults run everything.
+PAPER_ONLY=${PAPER_ONLY:-0}
+STAGE4B=${STAGE4B:-1}
 mkdir -p "$RES"
 
 # ── Cell definitions: task config + template overrides + model-sized batches ─
@@ -88,6 +93,7 @@ run_full() { # tag cell method fold args...
 IFS=',' read -ra CELL_LIST <<< "$CELLS"
 
 # ════ Stage 1 — unsteered 2-fold anchors ════════════════════════════════════
+if [ "$PAPER_ONLY" = 0 ]; then
 for cell in "${CELL_LIST[@]}"; do
   for fold in 0 1; do
     run_full "uns_${cell}" "$cell" unsteered $fold method=unsteered
@@ -118,7 +124,10 @@ for cell in "${CELL_LIST[@]}"; do
   run_screen "iti_${cell}_sigpf" "$cell" iti $ITI iti_topk=48 iti_scale=15 iti_sigma_position=prompt_final
 done
 
+fi   # PAPER_ONLY guard (stages 1-2)
+
 # ════ Stage 3 — algorithmic Pareto promotion ════════════════════════════════
+if [ "$PAPER_ONLY" = 0 ]; then
 uv run python scripts/sweep_promote.py "$TSV" --cap "$PROMOTE_CAP" --out "$RES/promoted.tsv"
 echo "promoted:"; cat "$RES/promoted.tsv"
 
@@ -130,6 +139,7 @@ while IFS=$'\t' read -r tag cell method args; do
     run_full "$tag" "$cell" "$method" $fold $args
   done
 done < "$RES/promoted.tsv"
+fi   # PAPER_ONLY guard (stages 3-4)
 
 # ════ Stage 4b — paper-canonical ITI baseline (independent of screen promotion) ═
 # Li et al.'s exact configuration: K=48 heads, alpha=15, mass-mean directions, sigma from the
@@ -138,16 +148,19 @@ done < "$RES/promoted.tsv"
 # point is evaluated separately in every iti_qa-template cell for direct comparability with the
 # paper, whether or not it would survive promotion.
 ITIPAPER="method=iti extract_token_position=completion_final iti_topk=48 iti_scale=15 steer_token_position=all"
+if [ "$STAGE4B" = 1 ]; then
 for cell in "${CELL_LIST[@]}"; do
   case $cell in *_qa) ;; *) continue ;; esac
   for fold in 0 1; do
     run_full "iti_${cell}_paper" "$cell" iti $fold $ITIPAPER
   done
 done
+fi
 
 # ════ Stage 5 — capability battery: loglik (both protocols) + generative ════
 # Runs on the unsteered model and every promoted point, steering applied at
 # completion tokens (the deployment setting). Everything lands in caps.tsv.
+if [ "$PAPER_ONLY" = 1 ]; then echo "[$(date +%H:%M)] PAPER_ONLY done — fulls: $FULLTSV"; exit 0; fi
 CAPTSV=$RES/caps.tsv
 [ -f "$CAPTSV" ] || printf "tag\tcell\tmethod\tstage\tmetrics\n" > "$CAPTSV"
 
