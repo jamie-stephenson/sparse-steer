@@ -151,7 +151,9 @@ run_cap() { # tag cell method stage args...
 # MMLU runs ALONE at limit=100/subject so its batching (and hence its fp16 near-tie behaviour)
 # matches the study anchors exactly; ARC + wikitext run full-size in a second call (lmeval_limit
 # would truncate them, and mixing tasks changes batch composition -> flips near-tie answers).
-LLMM="lmeval_steer=completion lmeval_tasks=[mmlu] lmeval_limit=100"
+# lmeval_fewshot=5 is REQUIRED: the study anchors are 5-shot (leaderboard protocol); the config
+# default (null = task default = 0-shot) silently collapses chat-template MMLU to near chance.
+LLMM="lmeval_steer=completion lmeval_tasks=[mmlu] lmeval_limit=100 lmeval_fewshot=5"
 LLAW="lmeval_steer=completion lmeval_tasks=[arc_challenge,wikitext]"
 CTFLAGS="lmeval_chat_template=true lmeval_fewshot_multiturn=true"
 GENC="inspect_evals=[mmlu,arc_challenge] inspect_eval_limit=1000 inspect_max_tokens=64 inspect_steer=completion"
