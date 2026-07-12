@@ -11,7 +11,13 @@ Steering modes (the shared token-position vocabulary; pf = final prompt token):
   (its steered K/V are cached and attended to by every later token); decode runs unsteered.
 - ``"prompt_final"`` — only ``pf`` (the last input token). KV-gen: step-0 forward, that one position.
 - ``"completion"``   — every generated token (``pos > pf``), excluding EOS. KV-gen: each decode step
-  steers its new token (skipping a generated EOS); the step-0 prompt is NOT steered.
+  steers its new token (skipping a generated EOS); the step-0 prompt is NOT steered. NB this leaves
+  the FIRST generated token unsteered (its logits come from ``pf``, which is not steered here) — use
+  ``"answer_gen"`` to steer the whole generated answer.
+- ``"answer_gen"``   — steer the model's generation of the ENTIRE answer: step 0 steers only the
+  final prompt token ``pf`` (so the first generated token is produced from steered state), and every
+  decode step steers its new token (excluding EOS). This is the generative counterpart of the
+  ``"answer_gen"`` position mask; ``"completion"`` is it minus the first token.
 - ``"all"``          — every real non-EOS token (``= prompt ∪ completion``).
 - ``"off"``          — no steering (clean / reference rollouts).
 
@@ -91,7 +97,7 @@ def generate(
     """
     if sampler is None:
         sampler = make_greedy_sampler()
-    valid_steer_modes = {"all", "prompt", "prompt_final", "completion", "off"}
+    valid_steer_modes = {"all", "prompt", "prompt_final", "completion", "answer_gen", "off"}
     if steer not in valid_steer_modes:
         raise ValueError(
             f"Unknown steer mode {steer!r}; use one of {sorted(valid_steer_modes)}."
@@ -131,11 +137,13 @@ def generate(
             # step 0 forwards the whole prompt (positions 0..pf); its steered K/V are cached.
             if steer in ("prompt", "all"):
                 return model.steer_positions(mask)        # the whole prompt (0..pf)
-            if steer == "prompt_final":
-                return model.steer_last_token(mask)       # only the final prompt token (pf)
+            if steer in ("prompt_final", "answer_gen"):
+                # steer ONLY the final prompt token pf → the first generated token is produced from
+                # steered state ("answer_gen"); "prompt_final" additionally leaves decode unsteered.
+                return model.steer_last_token(mask)
             return model.steering_disabled()              # "completion": prompt is not steered
         # decode steps each forward one generated token (position > pf)
-        if steer in ("completion", "all"):
+        if steer in ("completion", "answer_gen", "all"):
             if eos is not None:
                 mask = mask & ~(inp.unsqueeze(-1) == eos).any(-1)  # never steer a generated EOS
             return model.steer_positions(mask)

@@ -11,6 +11,15 @@ which positions the loss is scored over (CE / contrastive).
 - ``"completion_final"`` the single LAST completion token — the answer's final content token
   (honest_llama's ITI extraction position, made EOS-safe; for extraction this reads ONE token,
   the last-token direction, vs ``"completion"``'s mean over the whole answer)
+- ``"answer_gen"``    positions ``pf..(answer_end-1)`` — the positions whose logits GENERATE the
+  answer. Token ``t``'s logits come from position ``t-1``, so to steer the model's *generation of
+  the answer* we steer the final prompt token ``pf`` (predicts the first answer token) through the
+  second-to-last answer token — NOT the answer tokens themselves (``"completion"``, which is one
+  token too late and, for a single-token MC answer, steers nothing that is scored). This is the
+  correct STEERING position for "steer the generated answer"; extraction stays on ``"completion"``/
+  ``"completion_final"`` (the tokens whose activations differ). ``pf`` is the ``ANSWER:`` colon in
+  the fixed template / the ``[/INST]``|assistant-header in the chat template, located by
+  ``prompt_lens`` — so the same name is correct for both.
 - ``"all"``           every real token (no EOS)      — ``= "prompt" ∪ "completion"``
 
 EOS is excluded from ``"completion"`` and ``"all"``: nothing is generated after EOS, so its
@@ -21,7 +30,7 @@ activation is not a position the model steers at, reads a direction from, or is 
 import torch
 from torch import Tensor
 
-POSITION_NAMES = ("prompt", "prompt_final", "completion", "completion_final", "all")
+POSITION_NAMES = ("prompt", "prompt_final", "completion", "completion_final", "answer_gen", "all")
 
 
 def positions_mask(
@@ -65,6 +74,13 @@ def positions_mask(
         rows = torch.arange(b, device=real.device)
         out[rows[has], last_idx[has]] = True
         return out
+    if name == "answer_gen":
+        # pf..(answer_end-1): the positions whose logits generate the answer tokens (see docstring).
+        # answer_end = last completion index; steer pf through answer_end-1 (exclude the last answer
+        # token, whose logits predict what follows the answer). Single-token answer → just {pf}.
+        content = real & not_eos & (pos > pf)
+        answer_end = (content.long() * pos).max(dim=1, keepdim=True).values  # (b,1); 0 if no answer
+        return real & (pos >= pf) & (pos < answer_end)
     return real & not_eos  # "all"
 
 
