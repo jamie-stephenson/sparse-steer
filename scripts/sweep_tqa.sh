@@ -112,7 +112,7 @@ fi
 # sparse: l0 x epochs x steer-position (+ init_log_alpha=1 probes at ep16/completion)
 L0S="0 0.003 0.01 0.03"
 EPS="8 16"
-POS="completion all"
+POS="answer_gen all"   # answer_gen = the corrected "steer the generated answer" position (was buggy "completion")
 if stage screens; then
 for cell in "${CELL_LIST[@]}"; do
   for l0 in $L0S; do for ep in $EPS; do for pos in $POS; do
@@ -120,8 +120,8 @@ for cell in "${CELL_LIST[@]}"; do
       $SPARSE l0_lambda=$l0 num_epochs=$ep steer_token_position=$pos
   done; done; done
   for l0 in $L0S; do   # gate-init ila=1 slice at the canonical epoch/position
-    run_screen "sp_${cell}_l${l0}_ep16_comp_ila1" "$cell" sparse \
-      $SPARSE l0_lambda=$l0 num_epochs=16 steer_token_position=completion gate_config.init_log_alpha=1
+    run_screen "sp_${cell}_l${l0}_ep16_ag_ila1" "$cell" sparse \
+      $SPARSE l0_lambda=$l0 num_epochs=16 steer_token_position=answer_gen gate_config.init_log_alpha=1
   done
   # ITI: alpha sweep @K48, K sweep @a15, sigma-position variant @K48/a15
   for a in 8 15 22 30; do
@@ -191,10 +191,10 @@ run_cap() { # tag cell method stage args...
 # would truncate them, and mixing tasks changes batch composition -> flips near-tie answers).
 # lmeval_fewshot=5 is REQUIRED: the study anchors are 5-shot (leaderboard protocol); the config
 # default (null = task default = 0-shot) silently collapses chat-template MMLU to near chance.
-LLMM="lmeval_steer=completion lmeval_tasks=[mmlu] lmeval_limit=100 lmeval_fewshot=5"
-LLAW="lmeval_steer=completion lmeval_tasks=[arc_challenge,wikitext]"
+LLMM="lmeval_steer=answer_gen lmeval_tasks=[mmlu] lmeval_limit=100 lmeval_fewshot=5"
+LLAW="lmeval_steer=answer_gen lmeval_tasks=[arc_challenge,wikitext]"
 CTFLAGS="lmeval_chat_template=true lmeval_fewshot_multiturn=true"
-GENC="inspect_evals=[mmlu,arc_challenge] inspect_eval_limit=1000 inspect_max_tokens=64 inspect_steer=completion"
+GENC="inspect_evals=[mmlu,arc_challenge] inspect_eval_limit=1000 inspect_max_tokens=64 inspect_steer=answer_gen"
 
 cap_points() { # $1 = cell -> lines of "tag<TAB>method<TAB>args": unsteered + paper ITI + promoted points
   printf "uns\tunsteered\tmethod=unsteered\n"
