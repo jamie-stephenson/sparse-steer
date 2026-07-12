@@ -15,14 +15,14 @@ push → ff-merge on pod → relaunch; scripts are TSV-resumable, completed rows
   NB ts_sparse at config defaults gave ASR .067/JSD_CLEAN .525 vs tuned-historical 0/.362 — REVIEW AT HARVEST)
   → S2 Cadenza fixed layer sweep (18) → S3 sparse grid targets×l0 (12×2 models) → S4 auto-champion 4-cond
   battery (native + squad/boolq@200). TSV: results.tsv. Disk 99% (1.5G free) — WATCH df.
-- **✅ RESOLVED (2026-07-11 19:3x) — capability anchor offset = ENVIRONMENT DRIFT, code exonerated:**
-  discriminator (identical anchor command at study-era 0dd759c in a clean worktree) reproduced the NEW
-  value .4702, not the era value .4767 ⇒ same code gives different numbers than 07-08/09 ⇒ machine-level
-  drift (kernel/library state; dataset + lm-eval/torch versions verified identical; exact cause not
-  isolated, time-boxed). RESOLUTION: the sweep is RE-ANCHORED — all 18 fx MMLU rows across both shards
-  (unsteered + every promoted point) equal exactly .4702 (ll) / .7349 (qw) ⇒ perfect internal consistency;
-  capability DELTAS (the paper quantity) are unaffected. Absolute leaderboard calibration still rests on
-  the study-era FULL-MMLU anchors (.4723 ≈ .478 ✓). Document the offset + exoneration in RESULTS at harvest.
+- **✅✅ CORRECTED (2026-07-12, USER-CAUGHT — supersedes the drift story): the anchor offsets were a
+  COMMAND DISCREPANCY, not machine drift.** Every era mmlu run (ctanchor/capsweep/deltamatrix) passed
+  lmeval_fewshot=5; the sweep capability stage and BOTH discriminators omitted it (config default null =
+  0-shot) ⇒ fx −0.65 and ct −22 are 5-shot-vs-0-shot gaps, the ct "collapse to chance" = Llama-2-chat
+  0-shot letter-MC under chat template. The discriminators reproduced .4702/.2382 because they were fed
+  the same mistranscribed command (code-identical ⊬ command-identical — recorded as a lesson). FIX
+  133d4bf (mmlu caps 5-shot); all cap_fxmm/cap_ctmm rows purged + rerunning; 5-shot confirmation anchors
+  in flight (expect .4767/.4563). arc/wikitext/gen cap rows unaffected (era arc was 0-shot).
 - **★★ END-GOAL CRITERIA (2026-07-11, user directive — BOTH MUST BE ACHIEVED, non-negotiable):**
   (1) ALL results required to make EVERY paper plot (sleeper + tqa) exist across the two pods:
   tqa = frontier (True/Info + MC1/MC2, 2-fold) + capability (loglik MMLU/ARC/wikitext-CE both
