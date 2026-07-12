@@ -1,5 +1,19 @@
 # TASK — TruthfulQA: does sparse steering have a better True/Info PARETO FRONTIER than ITI?
 
+## 🛑 BLOCKING ISSUE (2026-07-12, user-caught) — STEERING POSITION IS OFF BY ONE
+`steer=completion` steers the WRONG positions: it starts one token too late (steers the answer tokens,
+whose logits predict the NEXT token) and never steers the cue position `pf` that predicts the FIRST answer
+token. fx single-token MC is therefore steered by NOTHING (the structural +0.0000 capability deltas), and
+generative/ct answers have their first token unsteered. CORRECT mask ("steer the answer's generation") =
+`completion` rolled left by one = `{pf} ∪ {answer tokens except last}`; pf is the ANSWER: colon (fx) /
+[/INST]|assistant-header (ct), protocol-agnostic via prompt_lens. Extraction stays on `completion`/
+`completion_final` (decoupled). Generation path must steer pf + every generated token. BLAST RADIUS:
+steer=all fits UNAFFECTED (they cover pf); steer=completion-trained points + ALL capability re-evals
+(lmeval_steer/inspect_steer=completion) must be redone; unsteered anchor rows remain valid. PLAN (pending
+user go-ahead): add named position `answer_gen` in utils/positions.py (cache-keyed), route steer paths
+through it, fix generate.py completion mode, re-run affected subset. HOLDING: in-flight g0/g1 5-shot caps
+reruns are measured at the buggy position — awaiting user decision to kill+fix vs finish-first.
+
 ## ★ CURRENT TASK (2026-07-09 ~20:30, user directive) — PUBLICATION SWEEPS start-to-finish (supersedes night2/W3 chain, which was killed mid-W3)
 Run the two published sweep scripts end-to-end; fix script bugs as found (edit → commit lowercase single-line →
 push → ff-merge on pod → relaunch; scripts are TSV-resumable, completed rows skip). Code sync via GitHub ONLY.
