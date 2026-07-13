@@ -56,7 +56,7 @@ cell_args() {
 # ── Fixed defaults, identical for every cell (stated once; see paper §setup) ─
 COMMON="device=cuda eval_backend=hf disjoint_extract_refine_data=false extraction_mcq_mode=mc2"
 SPARSE="method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15"
-ITI="method=iti extract_token_position=completion_final steer_token_position=completion"
+ITI="method=iti extract_token_position=completion_final steer_token_position=answer_gen"
 
 SCREEN="eval_subset_size=100 fold=0"           # screen tier: 100-q, fold-0
 TSV=$RES/screens.tsv
