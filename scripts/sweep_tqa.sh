@@ -1,43 +1,37 @@
 #!/bin/bash
 # ============================================================================
-# Full TruthfulQA sweep: regenerates the paper's per-cell Pareto frontiers
-# (sparse L0-gate steering vs ITI vs unsteered) across every model x template
-# cell, via the same two-tier protocol used in the study:
-# Cells: Llama-2-7b-chat and Qwen2.5-7B-Instruct each under the bare iti_qa
-# template and their native chat template, plus base LLaMA-1 7B (base_qa),
-# which has no chat template and therefore only the iti_qa cell.
+# Full TruthfulQA sweep (v2): full 2-fold CV over the WHOLE grid, then Pareto
+# frontier, then MC + capability only on the frontier. No 100-question screens.
 #
-#   Stage 1  unsteered anchors           2-fold full evals (calibration)
-#   Stage 2  uniform screen grid         100-question, fold-0 (cheap)
-#   Stage 3  promotion                   per-cell/method Pareto set, cap 4
-#            (scripts/sweep_promote.py)
-#   Stage 4  2-fold full evals           promoted points only (fold 0 + 1)
-#   Stage 5  capability battery          unsteered + every promoted point:
-#            loglik MMLU/ARC/wikitext-CE under the fixed leaderboard format and
-#            the chat-template format (skipped for base_qa, which has no chat
-#            template), plus generative MMLU/ARC via Inspect at the deployment
-#            setting (steering on completion tokens).
+# Per cell (model x template), two clean factorial grids:
+#   Sparse:  l0_lambda {0, 0.005, 0.01} x init_log_alpha {-0.79, 1}
+#            x steer_pos {all, answer_gen}          (num_epochs = 16 fixed)   = 12
+#   ITI:     scale {8, 15, 22} x topk {24, 48, 96}
+#            x steer_pos {all, answer_gen}          (sigma = gen_end_q fixed) = 18
+# Extraction is always completion_final. ITI probes fit on GPU (iti_probe_device=cuda),
+# head selection holds out 20% (honest_llama val_ratio). => 30 configs/cell.
 #
-# The script is TSV-resumable at every stage, so a rerun after completion (or a
-# crash) skips straight to whatever is missing. Est. ~2.5-3 days on one A40
-# (screens ~16 h, fulls ~10 h, capability ~2-3 h per point). Parallelize by
-# sharding CELLS across GPUs: CELLS=ll_qa,ll_ch GPU=0 ... & CELLS=qw_qa,qw_ch GPU=1 ...
+#   Stage 1  anchors   unsteered 2-fold full evals (calibration)
+#   Stage 2  grid      2-fold FULL True/Info (+MC) on every grid config
+#   Stage 3  promote   per-(cell,method) Pareto frontier of the 2-fold True/Info
+#                      (scripts/sweep_fold_mean.py -> scripts/sweep_promote.py)
+#   Stage 4  caps      capability battery on the frontier only: loglik MMLU/ARC/
+#                      wikitext-CE (fixed + chat template) + generative MMLU/ARC.
+#
+# The paper-canonical ITI point (scale=15, topk=48, steer=all, sigma=gen_end_q) is
+# a natural cell of the grid, so it is evaluated and promoted like any other.
+#
+# TSV-resumable at every stage. Shard CELLS across GPUs to parallelise:
+#   GPU=0 CELLS=ll_qa ... & GPU=1 CELLS=qw_qa ... & GPU=2 CELLS=ll_ch,qw_ch ...
 # ============================================================================
 set -u
 GPU=${GPU:-0}
 RES=${RESULTS_DIR:-sweeps/tqa}
 CELLS=${CELLS:-ll_qa,ll_ch,qw_qa,qw_ch,base_qa}
-PROMOTE_CAP=${PROMOTE_CAP:-4}
+PROMOTE_CAP=${PROMOTE_CAP:-20}       # grids are small; 20 keeps the whole frontier
 # ── Stage selection: STAGES = comma-list, or "all" (default) ────────────────
-#   anchors   Stage 1   unsteered 2-fold anchors
-#   screens   Stage 2   screen grid
-#   promote   Stage 3   Pareto promotion (writes promoted.tsv)
-#   fulls     Stage 4   2-fold fulls of promoted points (reads promoted.tsv)
-#   paper     Stage 4b  paper-canonical ITI baseline
-#   caps      Stage 5   capability battery (reads promoted.tsv)
-# Examples: STAGES=paper isolates the paper baseline on a cache-free node;
-# STAGES=anchors,screens,promote,fulls,caps runs everything except it.
-# Stages are also TSV-resumable internally, so re-running a stage skips finished rows.
+#   anchors  Stage 1   promote  Stage 3
+#   grid     Stage 2   caps     Stage 4
 STAGES=${STAGES:-all}
 stage() { case ",$STAGES," in *,all,*|*",$1,"*) return 0 ;; *) return 1 ;; esac; }
 mkdir -p "$RES"
@@ -53,38 +47,29 @@ cell_args() {
   esac
 }
 
-# ── Fixed defaults, identical for every cell (stated once; see paper §setup) ─
+# ── Fixed defaults, identical for every cell ────────────────────────────────
 COMMON="device=cuda eval_backend=hf disjoint_extract_refine_data=false extraction_mcq_mode=mc2"
-SPARSE="method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15"
-ITI="method=iti extract_token_position=completion_final steer_token_position=answer_gen"
+SPARSE="method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 num_epochs=16"
+ITI="method=iti extract_token_position=completion_final iti_sigma_position=gen_end_q iti_probe_device=cuda"
+GRIDEVAL="generative_eval=true"       # grid needs the generative True/Info judge metrics
 
-SCREEN="eval_subset_size=100 fold=0"           # screen tier: 100-q, fold-0
-TSV=$RES/screens.tsv
+# ── Grid axes ───────────────────────────────────────────────────────────────
+SP_L0="0 0.005 0.01"
+SP_ILA="def:-0.79 open:1"             # label:init_log_alpha
+POS="all:all ag:answer_gen"           # label:steer_token_position
+ITI_A="8 15 22"
+ITI_K="24 48 96"
+
 FULLTSV=$RES/fulls.tsv
-[ -f "$TSV" ] || printf "tag\tcell\tmethod\ttrue\tinfo\tmc1\tmc2\targs\n" > "$TSV"
 [ -f "$FULLTSV" ] || printf "tag\tcell\tmethod\tfold\ttrue\tinfo\tmc1\tmc2\targs\n" > "$FULLTSV"
 
-harvest() { # log -> "true info mc1 mc2" (blank fields on parse failure)
-  # run.py prints one "  KEY: 0.xxxx" line per metric (experiment/base.py):
-  # MC0/MC1/MC2 + GEN_TRUTHFUL / GEN_INFORMATIVE / GEN_TRUTHFUL_INFORMATIVE.
-  # NB "  Unsteered KEY: ..." reference lines print AFTER the run's own metrics — exclude them.
-  local log=$1
-  local t i m1 m2
+harvest() { # log -> "true info mc1 mc2" (blank on parse failure; exclude Unsteered ref lines)
+  local log=$1 t i m1 m2
   t=$(grep -av "Unsteered" "$log" | grep -aoE "GEN_TRUTHFUL: [0-9.]+" | tail -1 | grep -oE "[0-9.]+$")
   i=$(grep -av "Unsteered" "$log" | grep -aoE "GEN_INFORMATIVE: [0-9.]+" | tail -1 | grep -oE "[0-9.]+$")
   m1=$(grep -av "Unsteered" "$log" | grep -aoE "MC1: [0-9.]+" | tail -1 | grep -oE "[0-9.]+$")
   m2=$(grep -av "Unsteered" "$log" | grep -aoE "MC2: [0-9.]+" | tail -1 | grep -oE "[0-9.]+$")
   echo "${t:-} ${i:-} ${m1:-} ${m2:-}"
-}
-
-run_screen() { # tag cell method args...
-  local tag=$1 cell=$2 method=$3; shift 3
-  grep -q "^${tag}	" "$TSV" && { echo "skip $tag (done)"; return; }   # resumable
-  echo "[$(date +%H:%M)] SCREEN $tag"
-  CUDA_VISIBLE_DEVICES=$GPU uv run python run.py $COMMON $(cell_args "$cell") $SCREEN "$@" \
-    > "$RES/scr_${tag}.log" 2>&1 || echo "ERR $tag"
-  read -r T I M1 M2 <<< "$(harvest "$RES/scr_${tag}.log")"
-  printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$tag" "$cell" "$method" "$T" "$I" "$M1" "$M2" "$*" >> "$TSV"
 }
 
 run_full() { # tag cell method fold args...
@@ -108,97 +93,59 @@ for cell in "${CELL_LIST[@]}"; do
 done
 fi
 
-# ════ Stage 2 — screen grid ═════════════════════════════════════════════════
-# sparse: l0 x epochs x steer-position (+ init_log_alpha=1 probes at ep16/completion)
-L0S="0 0.003 0.01 0.03"
-EPS="8 16"
-POS="answer_gen all"   # answer_gen = the corrected "steer the generated answer" position (was buggy "completion")
-if stage screens; then
+# ════ Stage 2 — full 2-fold grid (True/Info on every square) ════════════════
+if stage grid; then
 for cell in "${CELL_LIST[@]}"; do
-  for l0 in $L0S; do for ep in $EPS; do for pos in $POS; do
-    run_screen "sp_${cell}_l${l0}_ep${ep}_${pos}" "$cell" sparse \
-      $SPARSE l0_lambda=$l0 num_epochs=$ep steer_token_position=$pos
+  # sparse: l0 x ila x steer_pos (ep16 fixed)
+  for l0 in $SP_L0; do for ilp in $SP_ILA; do for pp in $POS; do
+    ila=${ilp#*:}; ilab=${ilp%:*}; pos=${pp#*:}; plab=${pp%:*}
+    for fold in 0 1; do
+      run_full "sp_${cell}_l${l0}_${ilab}_${plab}" "$cell" sparse $fold \
+        $SPARSE $GRIDEVAL l0_lambda=$l0 gate_config.init_log_alpha=$ila steer_token_position=$pos
+    done
   done; done; done
-  for l0 in $L0S; do   # gate-init ila=1 slice at the canonical epoch/position
-    run_screen "sp_${cell}_l${l0}_ep16_ag_ila1" "$cell" sparse \
-      $SPARSE l0_lambda=$l0 num_epochs=16 steer_token_position=answer_gen gate_config.init_log_alpha=1
-  done
-  # ITI: alpha sweep @K48, K sweep @a15, sigma-position variant @K48/a15
-  for a in 8 15 22 30; do
-    run_screen "iti_${cell}_a${a}" "$cell" iti $ITI iti_topk=48 iti_scale=$a
-  done
-  for k in 24 96 128; do
-    run_screen "iti_${cell}_k${k}" "$cell" iti $ITI iti_topk=$k iti_scale=15
-  done
-  run_screen "iti_${cell}_sigpf" "$cell" iti $ITI iti_topk=48 iti_scale=15 iti_sigma_position=prompt_final
+  # ITI: scale x topk x steer_pos (sigma gen_end_q fixed)
+  for a in $ITI_A; do for k in $ITI_K; do for pp in $POS; do
+    pos=${pp#*:}; plab=${pp%:*}
+    for fold in 0 1; do
+      run_full "iti_${cell}_a${a}_k${k}_${plab}" "$cell" iti $fold \
+        $ITI $GRIDEVAL iti_scale=$a iti_topk=$k steer_token_position=$pos
+    done
+  done; done; done
 done
-
 fi
 
-# ════ Stage 3 — algorithmic Pareto promotion ════════════════════════════════
+# ════ Stage 3 — Pareto promotion (per-cell/method, on 2-fold True/Info) ══════
 if stage promote; then
-uv run python scripts/sweep_promote.py "$TSV" --cap "$PROMOTE_CAP" --out "$RES/promoted.tsv"
-echo "promoted:"; cat "$RES/promoted.tsv"
+uv run python scripts/sweep_fold_mean.py "$FULLTSV" "$RES/grid_2fold.tsv"
+uv run python scripts/sweep_promote.py "$RES/grid_2fold.tsv" --cap "$PROMOTE_CAP" --out "$RES/promoted.tsv"
+echo "promoted frontier:"; cat "$RES/promoted.tsv"
 fi
 
-# ════ Stage 4 — 2-fold full evals of promoted points ════════════════════════
-if stage fulls; then
-while IFS=$'\t' read -r tag cell method args; do
-  [ "$tag" = "tag" ] && continue
-  case ",$CELLS," in *",$cell,"*) ;; *) continue ;; esac
-  for fold in 0 1; do
-    run_full "$tag" "$cell" "$method" $fold $args
-  done
-done < "$RES/promoted.tsv"
-fi
-
-# ════ Stage 4b — paper-canonical ITI baseline (independent of screen promotion) ═
-# Li et al.'s exact configuration: K=48 heads, alpha=15, mass-mean directions, sigma from the
-# gen_end_q population, and the intervention applied at EVERY token position (the paper's Eq. 3
-# constant bias). The screened ITI grid uses the tuned completion-position variant, so this
-# point is evaluated separately in every iti_qa-template cell for direct comparability with the
-# paper, whether or not it would survive promotion.
-ITIPAPER="method=iti extract_token_position=completion_final iti_topk=48 iti_scale=15 steer_token_position=all"
-if stage paper; then
-for cell in "${CELL_LIST[@]}"; do
-  case $cell in *_qa) ;; *) continue ;; esac
-  for fold in 0 1; do
-    run_full "iti_${cell}_paper" "$cell" iti $fold $ITIPAPER
-  done
-done
-fi
-
-# ════ Stage 5 — capability battery: loglik (both protocols) + generative ════
-# Runs on the unsteered model and every promoted point, steering applied at
-# completion tokens (the deployment setting). Everything lands in caps.tsv.
+# ════ Stage 4 — capability battery on the frontier only ═════════════════════
 if stage caps; then
 CAPTSV=$RES/caps.tsv
 [ -f "$CAPTSV" ] || printf "tag\tcell\tmethod\tstage\tmetrics\n" > "$CAPTSV"
 
 run_cap() { # tag cell method stage args...
-  local tag=$1 cell=$2 method=$3 stage=$4; shift 4
+  local tag=$1 cell=$2 method=$3 stg=$4; shift 4
   grep -q "^${tag}	" "$CAPTSV" && { echo "skip $tag (done)"; return; }
   echo "[$(date +%H:%M)] CAP $tag"
   CUDA_VISIBLE_DEVICES=$GPU uv run python run.py $COMMON $(cell_args "$cell") \
     eval_subset_size=2 generative_eval=false "$@" > "$RES/cap_${tag}.log" 2>&1 || echo "ERR $tag"
   local m
   m=$(grep -av Unsteered "$RES/cap_${tag}.log" | grep -aoE "(MMLU|ARC_CHALLENGE|WIKITEXT)/[A-Z_/]+: [0-9.]+" | paste -sd" " -)
-  printf "%s\t%s\t%s\t%s\t%s\n" "$tag" "$cell" "$method" "$stage" "$m" >> "$CAPTSV"
+  printf "%s\t%s\t%s\t%s\t%s\n" "$tag" "$cell" "$method" "$stg" "$m" >> "$CAPTSV"
 }
 
-# MMLU runs ALONE at limit=100/subject so its batching (and hence its fp16 near-tie behaviour)
-# matches the study anchors exactly; ARC + wikitext run full-size in a second call (lmeval_limit
-# would truncate them, and mixing tasks changes batch composition -> flips near-tie answers).
-# lmeval_fewshot=5 is REQUIRED: the study anchors are 5-shot (leaderboard protocol); the config
-# default (null = task default = 0-shot) silently collapses chat-template MMLU to near chance.
+# MMLU alone at limit=100/subject 5-shot (matches the study anchors' batching); ARC+wikitext full.
 LLMM="lmeval_steer=answer_gen lmeval_tasks=[mmlu] lmeval_limit=100 lmeval_fewshot=5"
 LLAW="lmeval_steer=answer_gen lmeval_tasks=[arc_challenge,wikitext]"
 CTFLAGS="lmeval_chat_template=true lmeval_fewshot_multiturn=true"
 GENC="inspect_evals=[mmlu,arc_challenge] inspect_eval_limit=1000 inspect_max_tokens=64 inspect_steer=answer_gen"
 
-cap_points() { # $1 = cell -> lines of "tag<TAB>method<TAB>args": unsteered + paper ITI + promoted points
+cap_points() { # $1 = cell -> "tag<TAB>method<TAB>args": unsteered + promoted frontier points
   printf "uns\tunsteered\tmethod=unsteered\n"
-  case "$1" in *_qa) printf "iti_%s_paper\titi\t%s\n" "$1" "$ITIPAPER" ;; esac
   awk -F"\t" -v c="$1" 'NR>1 && $2==c {print $1"\t"$3"\t"$4}' "$RES/promoted.tsv"
 }
 
@@ -215,4 +162,4 @@ for cell in "${CELL_LIST[@]}"; do
 done
 fi
 
-echo "[$(date +%H:%M)] SWEEP COMPLETE — screens: $TSV, fulls: $FULLTSV, caps: $CAPTSV"
+echo "[$(date +%H:%M)] SWEEP COMPLETE — fulls: $FULLTSV, promoted: $RES/promoted.tsv, caps: $RES/caps.tsv"
