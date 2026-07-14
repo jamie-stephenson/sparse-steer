@@ -96,13 +96,10 @@ def load_hf_model(
         model = model.to(device)
     model.eval()
     model.requires_grad_(False)
-    # torch.compile the base (reduce-overhead) when the runtime supports it. The steering intervention
-    # is applied via forward hooks attached AFTER this load; the compile smoke test verifies those hooks
-    # still fire under compilation (steered outputs unchanged). try/except = "compile if possible".
-    try:
-        model = torch.compile(model, mode="reduce-overhead")
-    except Exception as exc:  # old torch / unsupported model -> run uncompiled
-        print(f"  torch.compile(base) unavailable ({exc}); running uncompiled.")
+    # torch.compile the base when enabled (config compile_models, default on). The steering hooks are
+    # attached AFTER this load; the compile smoke test verifies they still fire under compilation.
+    from sparse_steer.utils.compile import maybe_compile
+    model = maybe_compile(model)
     return model
 
 

@@ -218,6 +218,9 @@ class Experiment(abc.ABC):
     def run(self) -> dict[str, Any]:
         self._seed_everything(self.config.seed)
 
+        from sparse_steer.utils.compile import set_compile
+        set_compile(self.config.get("compile_models", True))  # torch.compile switch (default on)
+
         load_dotenv()
         hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
         if hf_token:

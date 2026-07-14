@@ -41,6 +41,10 @@ use_wandb: false
 # the sum). Results are backend-independent, so this key is deliberately NOT in any cache key.
 eval_backend: tl
 
+# torch.compile the base model + judges (speed; default on). Set false for a compile-free run
+# (bit-faithful/debug), analogous to iti_probe_device=cpu.
+compile_models: true
+
 # Inspect (UK AISI) capability/safety canaries, run after EVERY eval (steered & unsteered) as a
 # shared, task-agnostic add-on — see core/inspect_provider.run_requested_inspect_evals. Empty = off
 # (default): nothing runs and the eval cache key is unchanged until you opt in. Names resolve via

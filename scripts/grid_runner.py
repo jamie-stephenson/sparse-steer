@@ -16,6 +16,8 @@ from pathlib import Path
 
 import torch
 from hydra import compose, initialize_config_dir
+from hydra.core.hydra_config import HydraConfig
+from omegaconf import open_dict
 
 from sparse_steer.experiment import build_experiment
 from sparse_steer.tasks.truthfulqa.task import TruthfulQATask
@@ -51,7 +53,13 @@ with initialize_config_dir(config_dir=CONFIGS_DIR, version_base=None):
         metrics: dict = {}
         exp = None
         try:
-            cfg = compose(config_name="config", overrides=overrides.split())
+            # return_hydra_config + register the singleton so ${hydra:...} interpolations
+            # (e.g. method_name) resolve just as they do under hydra.main; then drop the hydra
+            # node so build_experiment sees a normal config.
+            cfg = compose(config_name="config", overrides=overrides.split(), return_hydra_config=True)
+            HydraConfig.instance().set_config(cfg)
+            with open_dict(cfg):
+                cfg.pop("hydra", None)
             exp = build_experiment(cfg, TruthfulQATask())
             metrics = exp.run()
         except Exception as e:  # isolate a bad config; the rest of the grid still runs
