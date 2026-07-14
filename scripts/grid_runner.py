@@ -61,7 +61,10 @@ with initialize_config_dir(config_dir=CONFIGS_DIR, version_base=None):
             with open_dict(cfg):
                 cfg.pop("hydra", None)
             exp = build_experiment(cfg, TruthfulQATask())
-            metrics = exp.run()
+            # Experiment.run() returns the full run summary; the flat metric dict
+            # (gen_truthful/gen_informative/mc1/mc2) is nested under "metrics".
+            summary = exp.run()
+            metrics = summary.get("metrics", {}) if isinstance(summary, dict) else {}
         except Exception as e:  # isolate a bad config; the rest of the grid still runs
             print(f"ERR {tag} f{fold}: {type(e).__name__}: {e}", flush=True)
         row = [tag, cell, method, fold,
