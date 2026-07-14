@@ -22,7 +22,7 @@ def fit_head_probes(
     acts: Tensor,
     positive: Tensor,
     *,
-    val_frac: float = 0.3,
+    val_frac: float = 0.2,  # honest_llama-faithful: their --val_ratio default is 0.2 (80/20 head-selection split)
     steps: int = 300,
     lr: float = 0.05,
     seed: int = 0,
