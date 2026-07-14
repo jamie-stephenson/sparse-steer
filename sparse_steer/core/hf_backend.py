@@ -96,6 +96,13 @@ def load_hf_model(
         model = model.to(device)
     model.eval()
     model.requires_grad_(False)
+    # #4: opt-in torch.compile (OFF by default). WARNING: the steering intervention is applied via
+    # forward hooks attached AFTER this load; compiling here risks the compiled graph bypassing those
+    # hooks (=> steering silently not applied) or graph-breaking on them. VALIDATE that steered outputs
+    # are unchanged before trusting this. Judge-model compile (no hooks) is the safe compile win.
+    import os
+    if os.environ.get("SS_COMPILE_BASE") == "1":
+        model = torch.compile(model, mode="reduce-overhead")
     return model
 
 

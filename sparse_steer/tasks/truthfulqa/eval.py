@@ -8,7 +8,9 @@ with fine-tuned judge models (Allen AI LLaMA-2-7B) for truthfulness
 and informativeness.
 """
 
+import os
 import warnings
+from functools import lru_cache
 
 import torch
 from datasets import Dataset
@@ -141,6 +143,27 @@ def evaluate(
 TRUTH_JUDGE = "allenai/truthfulqa-truth-judge-llama2-7B"
 INFO_JUDGE = "allenai/truthfulqa-info-judge-llama2-7B"
 
+
+@lru_cache(maxsize=4)
+def _load_judge(judge_model_name: str, use_fp16: bool):
+    """Load a judge model+tokenizer ONCE per process (weights kept resident on CPU), with sdpa
+    attention. The many sweep configs that share a process then reuse this instead of reloading the
+    7B judge from disk each time (the single largest reload cost). Callers move it to the GPU for the
+    scoring pass and back to CPU after, so the judge never coexists with the base model on-device.
+    Mathematically identical to a fresh load — same weights, same (sdpa) logits."""
+    tok = AutoTokenizer.from_pretrained(judge_model_name)
+    dtype = torch.float16 if use_fp16 else torch.float32
+    try:
+        model = AutoModelForCausalLM.from_pretrained(
+            judge_model_name, torch_dtype=dtype, attn_implementation="sdpa"
+        )
+    except (ValueError, TypeError, ImportError):  # model rejects sdpa -> default attention
+        model = AutoModelForCausalLM.from_pretrained(judge_model_name, torch_dtype=dtype)
+    model.eval()
+    if os.environ.get("SS_COMPILE_JUDGE") == "1":  # #4: opt-in torch.compile (benchmark first)
+        model = torch.compile(model, mode="reduce-overhead")
+    return tok, model
+
 # The TruthfulQA generation prompt (instruction + 6-shot QA primer) is defined in ONE place —
 # sparse_steer/utils/tokenize.py apply_template(template="iti_qa_few_shot"). Generation reaches it via
 # _generate_answers → apply_template; do not re-inline the primer here. Greedy decode; the generated
@@ -251,12 +274,8 @@ def _judge_answers(
     suffix is "True" for truth-judge or "Helpful" for info-judge.
     Returns True/False per answer based on P(" yes") >= 0.5.
     """
-    judge_tokenizer = AutoTokenizer.from_pretrained(judge_model_name)
-    dtype = torch.float32 if str(device) == "cpu" else torch.float16
-    judge_model = AutoModelForCausalLM.from_pretrained(
-        judge_model_name, torch_dtype=dtype
-    ).to(device)
-    judge_model.eval()
+    judge_tokenizer, judge_model = _load_judge(judge_model_name, str(device) != "cpu")
+    judge_model = judge_model.to(device)  # cached on CPU; onto the GPU only for this scoring pass
 
     # get token ids for " yes" and " no" in the judge's vocabulary
     yes_id = judge_tokenizer.encode(" yes", add_special_tokens=False)[0]
@@ -291,8 +310,9 @@ def _judge_answers(
             p_yes = torch.softmax(token_logits.float(), dim=-1)[yes_id].item()
             results.append(p_yes >= 0.5)
 
-    # free judge memory
-    del judge_model
+    # move the cached judge OFF the GPU (it stays resident on CPU for the next config, no reload)
+    # so it never holds device memory alongside the base model.
+    judge_model.to("cpu")
     free_model_memory()
 
     return results
