@@ -21,10 +21,14 @@ grid → Pareto frontier → MC1/MC2 + capability battery on the frontier only**
 the judges load once); judges use sdpa + CPU-cache; `torch.compile` behind config flag `compile_models` (default on,
 **default mode NOT reduce-overhead** — cuda-graphs crash the generation loop).
 
-**STATE:** SMOKE-TESTING the grid runner + compile on the new pod (`/tmp/gridsmoke3.log`, `sweeps/smoke/fulls.tsv`).
-The smoke found + fixed 2 bugs already (HydraConfig-not-set under compose; reduce-overhead cuda-graph crash). ON SMOKE
-PASS (grid runner works, judges load once, compile-on == compile-off True/Info): launch the full v2 sweep 3-way across
-the A40s. If compile still changes/breaks outputs, default `compile_models=false` (keep only the sdpa-judge win).
+**STATE (2026-07-14 21:07):** SMOKE PASSED — the FULL V2 SWEEP IS RUNNING. The smoke caught + fixed 3 bugs
+(HydraConfig-not-set under compose; reduce-overhead cuda-graph crash; grid_runner reading metrics at the wrong
+nesting level so True/Info wrote blank). Final verdicts: grid_runner works; judges load once (lru_cache, one
+process); compile-on == compile-off **bit-identically** (True .94/Info .86/MC1 .50/MC2 .7039 on both) → `compile_models`
+stays true. Launched `scripts/run_v2_sweep.sh` detached on the pod: 310 config-folds round-robined across the 3 A40s
+via one grid_runner per GPU (g0=104 / g1=103 / g2=103), then merge → promote (Pareto frontier) → caps on the frontier.
+Logs `/tmp/v2_sweep.log` + `/tmp/v2_grid_g{0,1,2}.log`; results in `sweeps/v2/`. Monitored by the idempotent cron
+(job 3035eba2). Est. ~1–2 days (grid_runner judge-amortisation + sdpa judges + compile speedups).
 
 ## SUPERSEDED TASK (2026-07-09 ~20:30, user directive) — PUBLICATION SWEEPS start-to-finish (superseded 2026-07-14 by v2 redesign + pod move)
 Run the two published sweep scripts end-to-end; fix script bugs as found (edit → commit lowercase single-line →
