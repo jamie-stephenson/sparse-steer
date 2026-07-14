@@ -96,13 +96,13 @@ def load_hf_model(
         model = model.to(device)
     model.eval()
     model.requires_grad_(False)
-    # #4: opt-in torch.compile (OFF by default). WARNING: the steering intervention is applied via
-    # forward hooks attached AFTER this load; compiling here risks the compiled graph bypassing those
-    # hooks (=> steering silently not applied) or graph-breaking on them. VALIDATE that steered outputs
-    # are unchanged before trusting this. Judge-model compile (no hooks) is the safe compile win.
-    import os
-    if os.environ.get("SS_COMPILE_BASE") == "1":
+    # torch.compile the base (reduce-overhead) when the runtime supports it. The steering intervention
+    # is applied via forward hooks attached AFTER this load; the compile smoke test verifies those hooks
+    # still fire under compilation (steered outputs unchanged). try/except = "compile if possible".
+    try:
         model = torch.compile(model, mode="reduce-overhead")
+    except Exception as exc:  # old torch / unsupported model -> run uncompiled
+        print(f"  torch.compile(base) unavailable ({exc}); running uncompiled.")
     return model
 
 

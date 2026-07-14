@@ -160,8 +160,10 @@ def _load_judge(judge_model_name: str, use_fp16: bool):
     except (ValueError, TypeError, ImportError):  # model rejects sdpa -> default attention
         model = AutoModelForCausalLM.from_pretrained(judge_model_name, torch_dtype=dtype)
     model.eval()
-    if os.environ.get("SS_COMPILE_JUDGE") == "1":  # #4: opt-in torch.compile (benchmark first)
+    try:  # compile if the runtime supports it (judges have no hooks -> always output-safe)
         model = torch.compile(model, mode="reduce-overhead")
+    except Exception:
+        pass
     return tok, model
 
 # The TruthfulQA generation prompt (instruction + 6-shot QA primer) is defined in ONE place —
