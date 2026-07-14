@@ -168,9 +168,14 @@ def _site_is_active(hook: "SteeringHook") -> bool:
     ablate projects onto a zero direction), and an eval-mode ``gate*scale`` of exactly 0 at
     every gate zeroes the correction. Skipping such sites is unobservable — and the whole
     point: a sparse solution touches a handful of modules instead of every layer.
+
+    In TRAIN mode only the zero-vector skip applies: gates/scales are learnable there, so a
+    currently-closed site must still be wired (its gradient is what would re-open it).
     """
     if int(hook.steering_vectors.count_nonzero()) == 0:
         return False
+    if hook.training:
+        return True
     was_training = hook.training
     hook.eval()
     try:

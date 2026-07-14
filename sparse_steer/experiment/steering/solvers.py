@@ -200,6 +200,18 @@ def _refine_gate_training(experiment, model, tokenizer, extraction_ds, train_ds,
                         )
         print(f"  σ-init: per-site scale set to {scale}·σ (scale_from_extraction_std=true)")
 
+    # train_backend=hf (opt-in): swap the engine to native HF (sdpa) for the gate-training loop.
+    # Directions/σ above are already extracted on TL; the SteeringHook state is engine-independent,
+    # so only the forward/backward engine changes. model.train() FIRST so the HF adapter wires every
+    # vector-bearing site (its eval-mode no-op skip must not drop sites whose gates could open).
+    if (
+        str(experiment.config.get("train_backend", "tl")) == "hf"
+        and getattr(model, "backend", "tl") == "tl"
+    ):
+        print("  train_backend=hf: switching SteeringModel engine to HF (sdpa) for gate training...")
+        model.train()
+        model.set_backend("hf")
+
     print("Training steering parameters...")
     train_steering(
         model, tokenizer, train_ds, experiment.config, output_dir=output_dir, task=experiment.task

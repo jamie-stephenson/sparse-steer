@@ -44,6 +44,14 @@ class Experiment(abc.ABC):
 
     def _cache_kwargs(self, artifact_type: ArtifactType) -> dict[str, Any]:
         extra_fields = dict(self.task.extra_cache_fields(artifact_type, self.config))
+        # Gates trained on the HF engine (train_backend=hf) are a different artifact from
+        # TL-trained ones (different attention numerics -> different optimisation path), so key
+        # the trained-steering + steered-eval artifacts on it. Only added when engaged: the
+        # default (tl) leaves every existing cache key byte-identical.
+        if artifact_type in (ArtifactType.SPARSE_STEERING, ArtifactType.STEERED_EVAL):
+            train_backend = str(self.config.get("train_backend", "tl"))
+            if train_backend != "tl":
+                extra_fields["train_backend"] = train_backend
         if self.config.get("refinement_method") == "iti_head_select" and artifact_type in (
             ArtifactType.STEERED_EVAL, ArtifactType.SPARSE_STEERING
         ):

@@ -1,5 +1,6 @@
 import math
 import os
+import time
 from contextlib import nullcontext
 from functools import partial
 from pathlib import Path
@@ -168,6 +169,7 @@ def _train_loop(
 
     generator = torch.Generator().manual_seed(config.seed)
     model.train()
+    train_t0 = time.monotonic()  # wall-clock over the optimisation loop (printed at the end)
     if tracker is not None:
         tracker.snapshot(0)
 
@@ -251,6 +253,12 @@ def _train_loop(
         optimizer.zero_grad()
         step += 1
 
+    train_elapsed = time.monotonic() - train_t0
+    print(
+        f"  train_wall_s={train_elapsed:.1f} steps={step} "
+        f"steps_per_s={step / max(train_elapsed, 1e-9):.3f} backend={getattr(model, 'backend', 'tl')}"
+    )
+
     if tracker is not None:
         tracker.snapshot(step)
         # Eval-mode gate-closure probe — the true "do gates close?" signal. Train-mode
@@ -280,10 +288,10 @@ def train_steering(
 ) -> SteeringModel:
     """Freeze base weights, then train only the learnable steering parameters
     against the task's objective (``task.loss``)."""
-    if getattr(model, "backend", "tl") != "tl":
+    if getattr(model, "backend", "tl") not in ("tl", "hf"):
         raise RuntimeError(
-            "gate training runs on the TransformerLens backend only; call "
-            "model.set_backend('tl') before train_steering (the hf backend is eval-only)."
+            "gate training needs a SteeringModel engine ('tl' or 'hf'); got "
+            f"{getattr(model, 'backend', None)!r}."
         )
     if config.use_wandb:
         _init_wandb()
