@@ -1,20 +1,32 @@
 # TASK — TruthfulQA: does sparse steering have a better True/Info PARETO FRONTIER than ITI?
 
-## 🛑 BLOCKING ISSUE (2026-07-12, user-caught) — STEERING POSITION IS OFF BY ONE
-`steer=completion` steers the WRONG positions: it starts one token too late (steers the answer tokens,
-whose logits predict the NEXT token) and never steers the cue position `pf` that predicts the FIRST answer
-token. fx single-token MC is therefore steered by NOTHING (the structural +0.0000 capability deltas), and
-generative/ct answers have their first token unsteered. CORRECT mask ("steer the answer's generation") =
-`completion` rolled left by one = `{pf} ∪ {answer tokens except last}`; pf is the ANSWER: colon (fx) /
-[/INST]|assistant-header (ct), protocol-agnostic via prompt_lens. Extraction stays on `completion`/
-`completion_final` (decoupled). Generation path must steer pf + every generated token. BLAST RADIUS:
-steer=all fits UNAFFECTED (they cover pf); steer=completion-trained points + ALL capability re-evals
-(lmeval_steer/inspect_steer=completion) must be redone; unsteered anchor rows remain valid. PLAN (pending
-user go-ahead): add named position `answer_gen` in utils/positions.py (cache-keyed), route steer paths
-through it, fix generate.py completion mode, re-run affected subset. HOLDING: in-flight g0/g1 5-shot caps
-reruns are measured at the buggy position — awaiting user decision to kill+fix vs finish-first.
+✅ RESOLVED (2026-07-13): the steer-off-by-one bug is FIXED — `answer_gen` position shipped (positions.py +
+generate.py), the whole tqa sweep was rerun on it, and the corrected frontier/MC data for all 5 cells + base
+capability are saved LOCALLY in `results/`. Superseded by the redesign below.
 
-## ★ CURRENT TASK (2026-07-09 ~20:30, user directive) — PUBLICATION SWEEPS start-to-finish (supersedes night2/W3 chain, which was killed mid-W3)
+## ★ CURRENT TASK (2026-07-14, user directive) — REDESIGNED TQA SWEEP v2 on the NEW pod
+**Pods:** the old runpod/runpod2/base are DEAD (host outage). NEW pod = **69.30.85.149:22142** (3× A40, 110 GB
+local `/` disk). Everything on LOCAL disk (not the slow /workspace mount): repo `/root/sparse-steer`, HF models
+`/root/hf` (Qwen2.5-7B-Instruct + meta-llama/Llama-2-7b-chat-hf, both downloaded), `.env` copied (HF_API_KEY works).
+Clone via HTTPS (public repo). `HF_HUB_DISABLE_XET=1` (xet backend crashes downloads).
+
+**Sweep v2** (`scripts/sweep_tqa.sh`, commit b7e2007+): NO 100-q screens. Full **2-fold CV True/Info on the whole
+grid → Pareto frontier → MC1/MC2 + capability battery on the frontier only**. Grids per cell: sparse
+`l0{0,.005,.01} × ila{-0.79,1} × pos{all,answer_gen}` (ep16) = 12; ITI `α{8,15,22} × K{24,48,96} × pos{all,answer_gen}`
+(σ=gen_end_q, GPU probes, 20% head-selection holdout) = 18. Verified faithful to Li et al./honest_llama: σ=gen_end_q
+(their tqa_gen_end_q bank), extraction=answer-end, 2-fold split, 0.2 val_ratio. Stages: anchors → grid → promote
+(`sweep_fold_mean.py`→`sweep_promote.py`) → caps. Shard CELLS across the 3 GPUs.
+
+**Speedups committed** (afcb0fb): grid runner (`scripts/grid_runner.py` — evaluate many configs in ONE process so
+the judges load once); judges use sdpa + CPU-cache; `torch.compile` behind config flag `compile_models` (default on,
+**default mode NOT reduce-overhead** — cuda-graphs crash the generation loop).
+
+**STATE:** SMOKE-TESTING the grid runner + compile on the new pod (`/tmp/gridsmoke3.log`, `sweeps/smoke/fulls.tsv`).
+The smoke found + fixed 2 bugs already (HydraConfig-not-set under compose; reduce-overhead cuda-graph crash). ON SMOKE
+PASS (grid runner works, judges load once, compile-on == compile-off True/Info): launch the full v2 sweep 3-way across
+the A40s. If compile still changes/breaks outputs, default `compile_models=false` (keep only the sdpa-judge win).
+
+## SUPERSEDED TASK (2026-07-09 ~20:30, user directive) — PUBLICATION SWEEPS start-to-finish (superseded 2026-07-14 by v2 redesign + pod move)
 Run the two published sweep scripts end-to-end; fix script bugs as found (edit → commit lowercase single-line →
 push → ff-merge on pod → relaunch; scripts are TSV-resumable, completed rows skip). Code sync via GitHub ONLY.
 - **runpod2 = tqa** (`scripts/sweep_tqa.sh`, commit 64287d1+): TWO shards — GPU0 CELLS=ll_qa,ll_ch
