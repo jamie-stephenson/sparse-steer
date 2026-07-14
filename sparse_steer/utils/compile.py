@@ -21,7 +21,10 @@ def maybe_compile(model):
     try:
         import torch
 
-        return torch.compile(model, mode="reduce-overhead")
+        # default mode (NOT reduce-overhead): reduce-overhead uses CUDA graphs, which reuse output
+        # tensors across calls and crash our multi-step generation loop ("accessing tensor output of
+        # CUDAGraphs that has been overwritten"). Default mode fuses kernels without CUDA graphs.
+        return torch.compile(model)
     except Exception as exc:  # old torch / unsupported model -> run uncompiled
         print(f"  torch.compile unavailable ({exc}); running uncompiled.")
         return model
