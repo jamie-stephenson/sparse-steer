@@ -435,14 +435,10 @@ class SteeringModel(nn.Module):
     def tokenizer(self):
         return self._tokenizer
 
-    def compile_for_eval(self) -> None:
-        """torch.compile the engine for the eval phase. Never call before/during training —
-        the compiled graph is validated for inference (the compile smoke test), not for the
-        training loop. The wiring's hooks live on the engine's inner submodules, which
-        ``torch.compile`` wraps rather than replaces, so they keep firing."""
-        from sparse_steer.utils.compile import maybe_compile
-
-        self._engine = maybe_compile(self._engine)
+    # NB: the engine is never torch.compiled — dynamo drops module hooks unpredictably
+    # (history-dependent within a process and stack-dependent across environments), and the
+    # steering wiring IS module hooks. sdpa attention carries the eval speed; only the
+    # hook-free judge models are compiled.
 
     def forward(
         self,

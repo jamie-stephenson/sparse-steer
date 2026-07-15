@@ -291,11 +291,12 @@ class Experiment(abc.ABC):
                 "path": str(eval_hit.artifact_path),
             }
         else:
-            # torch.compile the engine for the eval phase — AFTER the pipeline (training must
-            # run uncompiled; compile is inference-validated by the compile smoke test).
-            # Results are compile-independent, so this is deliberately NOT in any cache key.
-            if self.config.get("compile_models", True) and hasattr(model, "compile_for_eval"):
-                model.compile_for_eval()
+            # The steered ENGINE is deliberately NOT torch.compiled: dynamo drops nn.Module
+            # hooks unpredictably (observed: a compiled hookless model earlier in the same
+            # process makes later steered models evaluate as base — the 2026-07-15 sweep
+            # incident — and on some stacks a fresh compile drops hooks outright). The
+            # steering wiring rides on module hooks, so the engine runs eager+sdpa; only the
+            # hook-free judges are compiled (see tasks/truthfulqa/eval._load_judge).
             print(f"Evaluating ({self.config.method})...")
             metrics = self.task.run_task_evaluation(
                 model, tokenizer, eval_ds, self.config

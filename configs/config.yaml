@@ -33,8 +33,8 @@ val_ratio: 0.2
 use_cache: true
 use_wandb: false
 
-# torch.compile the model engine (for the eval phase only — training always runs uncompiled)
-# + the judges (speed; default on). Set false for a compile-free run (bit-faithful/debug).
+# torch.compile the (hook-free) judge models (speed; default on). The steered ENGINE is never
+# compiled — dynamo drops module hooks unpredictably, and the steering wiring is module hooks.
 compile_models: true
 
 # Inspect (UK AISI) capability/safety canaries, run after EVERY eval (steered & unsteered) as a
