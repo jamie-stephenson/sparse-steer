@@ -29,6 +29,10 @@ import sys
 import time
 from pathlib import Path
 
+# Match the reference runs' allocator config BEFORE any cuda use: allocator/alignment can
+# change cuBLAS reduction order at sub-ulp precision, which a bit-parity check would see.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 import torch
 import torch.nn.functional as F
 
@@ -143,6 +147,8 @@ def main() -> None:
     # ── Phase 2 setup: inject TL directions under the refactored cache key, launch run.py ──
     os.environ["CUDA_VISIBLE_DEVICES"] = GPU_A
     set_compile(False)
+    # cfg_smoke = the phase-2 recipe (subset eval, 1 epoch) — used ONLY for the direction
+    # injection + the subprocess; phases 1+3 use cfg_full (FULL eval set, no subset).
     cfg = compose_cfg(CELL + " generative_eval=false num_epochs=1 use_cache=true track_gates=true eval_subset_size=50")
     task = TruthfulQATask()
     exp = build_experiment(cfg, task)
@@ -161,13 +167,19 @@ def main() -> None:
     print(f"[2] train-parity run launched on GPU {GPU_B} (pid {proc.pid})")
 
     # ── Phase 1: fresh HF extraction vs TL directions (GPU_A, this process) ──
-    tokenizer = load_tokenizer(cfg)
-    extraction_ds, train_ds, eval_ds = task.build_datasets(tokenizer, cfg)
-    model = load_steering_model(cfg)
+    # cfg_full: the A/B eval protocol — FULL 408-question eval set (no eval_subset_size).
+    from hydra import compose as _compose
+    cfg_full = _compose(config_name="config", overrides=(
+        CELL + " generative_eval=false num_epochs=16 use_cache=false eval_subset_size=null"
+    ).split())
+    tokenizer = load_tokenizer(cfg_full)
+    extraction_ds, train_ds, eval_ds = task.build_datasets(tokenizer, cfg_full)
+    print(f"[1/3] datasets: extraction={len(extraction_ds)} eval={len(eval_ds)} (expect eval=408)")
+    model = load_steering_model(cfg_full)
     with_acts, comps = collect_activations(
         extraction_ds, model, tokenizer,
-        targets=list(cfg.targets), batch_size=cfg.extract_batch_size,
-        token_position=cfg.extract_token_position,
+        targets=list(cfg_full.targets), batch_size=cfg_full.extract_batch_size,
+        token_position=cfg_full.extract_token_position,
     )
     hf_dirs = extract_steering_vectors(with_acts, comps)
     worst, report = 1.0, []
@@ -189,8 +201,9 @@ def main() -> None:
     model.eval()
     with torch.no_grad():
         mc = evaluate(
-            model, tokenizer, eval_ds, batch_size=int(cfg.eval_batch_size),
-            steer_token_position=str(cfg.steer_token_position), template=str(cfg.prompt_template),
+            model, tokenizer, eval_ds, batch_size=int(cfg_full.eval_batch_size),
+            steer_token_position=str(cfg_full.steer_token_position),
+            template=str(cfg_full.prompt_template),
         )
     got1, got2 = f"{mc['mc1']:.4f}", f"{mc['mc2']:.4f}"
     p3 = (got1, got2) == (AB_MC1, AB_MC2)
