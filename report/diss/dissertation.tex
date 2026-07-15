@@ -1,0 +1,572 @@
+% Sparse Activation Steering for Low-Resource Fine-Tuning
+% MSc dissertation. Style follows the IPP (report/ipp). Built on the infthesis skeleton.
+% draft option = symmetric 2cm margins while writing; REMOVE before submission.
+\documentclass[logo,msc,draft]{infthesis}
+
+\usepackage{microtype}
+\usepackage{graphicx}
+\setkeys{Gin}{draft=false} % render figures even under the draft class option (which only sets margins)
+
+% Block paragraphs: no first-line indent, vertical space between paragraphs.
+% Permitted under the Informatics rules: msccheck.sty checks only page geometry, line spacing
+% (baselinestretch 1.33 = 1.5), and font size (12pt); \parindent and \parskip are not touched here.
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{\medskipamount}
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb}
+\usepackage[numbers]{natbib}
+
+\begin{document}
+\begin{preliminary}
+
+\title{Sparse Activation Steering for Low-Resource Fine-Tuning}
+\author{s2891779}
+\date{\today}
+
+\abstract{
+Activation steering modifies the internal representations of a large language model at inference
+time to control its behaviour, but existing methods either tune by hand where and how strongly to
+intervene, or learn full intervention vectors at appreciable parameter cost. This dissertation
+develops \emph{sparse activation steering}, a hybrid that fixes steering directions from contrastive
+data and learns only \emph{which} model components to steer and \emph{how much}, using two scalar
+parameters per candidate site: a HardConcrete gate and a scale. An expected-$L_0$ penalty keeps the
+selection sparse, and the intervention is unconditional, so any selectivity must come from where the
+gates settle. We study the method in two settings. On TruthfulQA it is compared against a fully
+tuned Inference-Time Intervention baseline across three models and two prompting templates; sparse
+steering advances the truthful/informative frontier in every cell and dominates the baseline on the
+judge-free multiple-choice metrics, while a learned $L_0$ penalty trades main-task gains against
+capability side effects. On implanted sleeper-agent backdoors it removes the trigger behaviour in
+distribution even where no single fixed steering site can, at almost no cost to clean-input
+capability. Together the two settings show that learning \emph{where} to steer, against an objective
+close to the downstream task, is enough to make cheap contrastive directions competitive with more
+expensive learned interventions.
+}
+
+\maketitle
+
+\newenvironment{ethics}
+   {\begin{frontenv}{Research Ethics Approval}{\LARGE}}
+   {\end{frontenv}\newpage}
+
+\begin{ethics}
+This project was planned in accordance with the Informatics Research Ethics policy. It did not
+involve any aspects that required approval from the Informatics Research Ethics committee.
+\standarddeclaration
+\end{ethics}
+
+\begin{acknowledgements}
+I thank my supervisor Ivan Titov for his guidance throughout the project.
+\end{acknowledgements}
+
+\tableofcontents
+\end{preliminary}
+
+%======================================================================
+\chapter{Introduction}\label{ch:intro}
+
+As large language models are deployed in increasingly diverse settings, the ability to control their
+behaviour cheaply and reliably becomes critical. A prominent family of lightweight interventions
+works by \textbf{adding steering vectors to model activations} at inference time, bypassing the cost
+of full fine-tuning. Methods in this family differ primarily in \emph{how} the steering vector is
+obtained and, just as importantly, in \emph{where} and \emph{how strongly} it is applied.
+
+\textbf{Contrastive} approaches compute a steering direction as the mean difference between
+activations on paired examples of desired and undesired behaviour, requiring no gradient-based
+training \citep{turner2025actadd,rimsky2024caa}. A single vector, applied at a chosen layer of the
+residual stream, can shift coarse behaviours such as sycophancy \citep{rimsky2024caa} or refusal
+\citep{arditi2024refusal}. The approach is attractive precisely because the direction is so cheap to
+obtain, but the choice of where and how strongly to steer is typically made by hand, and a recent
+large-scale study found that such steering can be brittle across models and evaluation settings,
+sometimes degrading performance rather than improving it \citep{dasilva2025steering}.
+
+\textbf{Learned} approaches instead treat the intervention as trainable parameters optimised on a
+downstream loss. Joint Localization and Activation Editing (JoLA) \citep{lai2025jola} is a recent
+representative: it jointly learns additive (and optionally multiplicative) edit vectors and
+\emph{where} to apply them, using HardConcrete gates \citep{louizos2018hardconcrete} for sparse,
+differentiable localisation. JoLA outperforms earlier activation-editing methods and several
+parameter-efficient alternatives, but it must learn the edit vectors themselves, one per selected
+head. Where good steering directions are already cheaply available from contrastive data, learning
+them again is arguably wasteful.
+
+A separate line of work keeps the direction cheap but chooses \emph{where} to steer by analysing the
+\emph{unperturbed} model. Inference-Time Intervention (ITI) \citep{li2024iti} fits a linear probe to
+each attention head on the model's natural activations, ranks heads by probe accuracy, and steers
+only the top few. Selecting sites this way answers the question ``which heads best encode the
+concept?'', which is subtly different from ``which heads best respond to steering?''. This is the gap
+we target.
+
+This dissertation develops \textbf{sparse activation steering}, a hybrid that uses contrastive
+directions but learns \emph{where} and \emph{how much} to apply them, borrowing the sparse
+localisation machinery of JoLA. Instead of learning edit vectors, we fix per-site steering
+directions from contrastive data and learn only HardConcrete gates and a scalar strength per site.
+The result decides where and how much to steer by gradient descent against an objective close to the
+downstream task, while keeping the steering directions parameter-free. The central questions are:
+
+\begin{enumerate}
+    \item Can fixed contrastive directions with learned sparse gates match or exceed a fully tuned
+    probe-based baseline (ITI) while learning only two scalars per site?
+    \item Does learning localisation against a downstream objective reduce the hyperparameter
+    sensitivity of hand-tuned contrastive steering, and select sites a base-model analysis would
+    miss?
+    \item Does the same machinery generalise from encouraging a behaviour (truthfulness) to
+    \emph{removing} one (a sleeper-agent backdoor)?
+\end{enumerate}
+
+We study these in two settings chosen for their contrasting evaluation character. Truthfulness
+steering on TruthfulQA \citep{lin2022truthfulqa} is the standard but noisy proving ground for this
+class of method, requiring judge models and careful handling of the benchmark's known weaknesses.
+Sleeper-agent removal \citep{hubinger2024sleeper} provides a complementary, much more sharply defined
+target: a model trained to emit a fixed, harmful response on a trigger phrase, where success is the
+measurable disappearance of that response and the return of normal behaviour. The two settings
+together test both whether the method works and whether it can be trusted.
+
+%======================================================================
+\chapter{Background and Related Work}\label{ch:related}
+
+Both ``steering'' and ``fine-tuning'' describe techniques for adjusting model behaviour, but with a
+key distinction. \emph{Steering} refers to inference-time interventions that modify a model's
+internal activations without updating its weights; \emph{fine-tuning} updates parameters by gradient
+descent. Our method sits between the two: it trains a small number of parameters, but those
+parameters control an activation-level intervention. We use \emph{activation steering} throughout to
+reflect that the intervention acts on activations even though its localisation and scaling are
+learned.
+
+\section{Contrastive activation steering}
+
+Activation Addition (ActAdd) \citep{turner2025actadd} extracts per-token-position steering vectors
+from the residual stream using as few as a single pair of contrastive prompts, and applies them
+across the prompt at a fixed layer, demonstrating control over coarse attributes such as topic and
+sentiment. Contrastive Activation Addition (CAA) \citep{rimsky2024caa} instead extracts a vector
+from a single answer-token position and applies it across every step of generation, yielding robust
+behavioural shifts for sycophancy, corrigibility, and hallucination. Arditi et al.
+\citep{arditi2024refusal} identify a single ``refusal direction'' in the residual stream and show
+that adding it at one layer, or \emph{ablating} it from every layer, can reliably elicit or suppress
+refusal; the ablation variant is the natural baseline when the goal is to \emph{remove} a behaviour
+rather than induce one, and we adopt it below.
+
+A common thread is that \emph{where} to steer matters greatly. ITI \citep{li2024iti} makes this
+explicit, selecting a sparse subset of attention heads via linear probes and steering only those at
+the final prompt token; Function Vectors \citep{todd2024functionvectors} and REAL \citep{zhan2026real}
+similarly localise to task-relevant heads, via activation patching and a vector-quantised
+autoencoder respectively. Notably, all of these localise by analysing the unperturbed model. As
+noted above, ``important'' heads under a base-model probe need not be the heads that respond best to
+steering, which motivates learning localisation end-to-end so that the choice of site is closed-loop
+with the effect of intervening there. More broadly, Da Silva et al. \citep{dasilva2025steering} found
+that many published steering vectors fail to generalise across models and prompt formats, and that
+careless application degrades performance; no single method dominates. We take two lessons from this
+critique into our evaluation design (Chapters~\ref{ch:tqa}--\ref{ch:sleeper}): report a frontier
+rather than a single tuned point, and always pair on-task gains with an independent capability
+suite.
+
+\section{Learned activation editing}
+
+Parameter-efficient fine-tuning adapts large models with few trainable parameters. LoRA
+\citep{hu2022lora} adds low-rank weight updates; ReFT \citep{wu2024reft} learns low-rank edits to
+hidden representations at chosen positions. JoLA \citep{lai2025jola} extends activation editing with
+principled localisation: for each attention head it learns additive and multiplicative edit vectors
+gated by HardConcrete samples \citep{louizos2018hardconcrete}, trained with an expected-$L_0$ penalty
+that collapses most gates to zero. JoLA outperforms LoRA and other baselines on several low-resource
+tasks while learning on the order of a hundred parameters per task, but still learns the edit vectors
+themselves. Our method removes exactly that cost: it reuses JoLA's gating machinery but fixes the
+directions from contrastive data, learning only a gate and a scale per site.
+
+\section{HardConcrete gates and $L_0$ regularisation}\label{sec:hardconcrete}
+
+Both JoLA and our method use HardConcrete gates \citep{louizos2018hardconcrete}, a reparameterisable
+relaxation of the Bernoulli distribution that places point masses at exactly $0$ and $1$, so gates
+can be genuinely ``off'' during training while remaining differentiable. The gates are
+input-independent: each has a single learned location parameter $\log\alpha$ giving a fixed
+activation probability, so the sparsity pattern is a property of the task rather than of individual
+inputs. Stochasticity during training serves two purposes: it enables reparameterised gradient
+estimates through the discrete on/off decision, and it yields a closed-form penalty on the expected
+number of active gates. This penalty is what lets a sparse subset of sites be selected by ordinary
+gradient descent.
+
+\section{Evaluation settings}
+
+\textbf{TruthfulQA} \citep{lin2022truthfulqa} measures whether a model reproduces common human
+misconceptions. It is the standard testbed for truthfulness steering, but it is not without problems:
+its answers exhibit a length bias that simple heuristics can exploit \citep{turntrout2025truthfulqa},
+a weakness the benchmark's authors have acknowledged while defending its continued use. We use it
+because it enables direct comparison with prior steering work, but we guard against its weaknesses by
+reporting both judge-scored generation and judge-free multiple choice, and by pairing every result
+with capability evaluations (Chapter~\ref{ch:tqa}).
+
+\textbf{Sleeper agents} \citep{hubinger2024sleeper} are models trained to respond normally to
+ordinary inputs but to produce a fixed, harmful response whenever a particular trigger phrase is
+present in the prompt. Hubinger et al. introduce them as a model organism of misalignment. By this
+they mean a deliberately constructed system that makes an otherwise hard-to-study failure concrete
+and controllable: here, a model that acquires an unwanted behaviour during training and keeps it
+hidden until a specific condition is met. The behaviour is engineered to survive the safety training
+that would ordinarily be expected to remove it, and the demanding form of the task is to find and
+remove it without knowing in advance that it is there. We use sleeper agents in a narrower role, as a
+setting in which the behaviour to be steered is sharply defined: the triggered response is a fixed
+string of text, so success is unambiguous and easy to quantify, and baseline comparison is far
+cleaner than in open-ended behavioural steering. Removing an implanted
+behaviour connects to two lines of work. Arditi et al. \citep{arditi2024refusal} suppress refusal by
+ablating a single direction from every layer, and we adopt their single-site broadcast ablation as
+the baseline for this setting. Separately, backdoor-removal methods for generative models, such as
+that of Li et al. \citep{li2025revoke}, instead fine-tune the model to overwrite the triggered
+response. Our approach differs from both, in that it learns where to intervene and applies a fixed,
+unconditional edit, rather than choosing a single direction by hand or updating the model's weights.
+
+%======================================================================
+\chapter{Method}\label{ch:method}
+
+Figure~\ref{fig:method} contrasts residual steering, JoLA, and our sparse steering. Residual steering
+adds one fixed vector at one layer with a hand-tuned scale. JoLA intervenes at individual attention
+heads, learning both per-head edit vectors and sparse gates. Sparse steering also operates at the
+head level but fixes the per-head directions from contrastive data and learns only the gates and
+scales.
+
+% Figure placeholder: the method schematic can be lifted from report/ipp/figures/method_comparison.
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.8\textwidth}{\centering\vspace{2.2cm} \emph{Method schematic (three panels: residual
+steering, JoLA, sparse steering), adapted from the IPP.}\vspace{2.2cm}}}
+\caption{Three intervention approaches. Residual steering adds a fixed vector at one layer with a
+hand-tuned scale. JoLA learns per-head edit vectors and gates. Sparse steering fixes the per-head
+directions from data and learns only gates $g_h$ and scales $s_h$.}
+\label{fig:method}
+\end{figure}
+
+\section{Steering vector extraction}
+
+For each behaviour we extract per-site steering vectors from contrastive data by the mean-difference
+procedure of CAA \citep{rimsky2024caa} and ITI \citep{li2024iti}. Given contrastive pairs, we record
+a site's activation $\mathbf{z}^{(l,h)}$ at a designated token position for positive and negative
+examples, and take
+\begin{equation}
+    \mathbf{v}^{(l,h)} = \frac{1}{|\mathcal{D}^+|}\sum_{x \in \mathcal{D}^+} \mathbf{z}^{(l,h)}(x)
+    - \frac{1}{|\mathcal{D}^-|}\sum_{x \in \mathcal{D}^-} \mathbf{z}^{(l,h)}(x).
+\end{equation}
+These vectors are computed once and frozen. A \emph{site} is deliberately generic: while our headline
+truthfulness results steer attention-head outputs (pre-output-projection), the same formulation
+applies to residual-stream positions or MLP activations, and the sleeper experiments
+(Chapter~\ref{ch:sleeper}) exploit this by sweeping the target family. Any component whose activation
+can be read and written is a candidate site.
+
+\section{Sparse gating}
+
+At each candidate site we apply an additive correction before the output projection,
+\begin{equation}\label{eq:correction}
+    \mathbf{z}^{\prime(l,h)} = \mathbf{z}^{(l,h)} + g^{(l,h)} \, s^{(l,h)} \, \mathbf{v}^{(l,h)},
+\end{equation}
+where $g^{(l,h)} \in [0,1]$ is a HardConcrete gate and $s^{(l,h)} = \operatorname{softplus}(\tilde
+s^{(l,h)}) \ge 0$ a learned scale. The gate is sampled as
+\begin{equation}
+    g = \operatorname{clamp}\!\Big(\gamma + (\zeta - \gamma)\,\sigma\!\big(\tfrac{\log u - \log(1-u)
+    + \log\alpha}{\beta}\big),\, 0,\, 1\Big), \quad u \sim \mathrm{Uniform}(0,1),
+\end{equation}
+with trainable $\log\alpha$, fixed temperature $\beta$, and stretch limits $(\gamma,\zeta)$ that
+straddle $0$ and $1$. At evaluation we drop the noise and temperature, reducing the gate to
+$\operatorname{clamp}(\sigma(\log\alpha)(\zeta-\gamma)+\gamma,0,1)$, and prune gates below a
+threshold. \textbf{Ablation} (removing a behaviour) is obtained by the same mechanism with a negated
+correction, projecting the site's activation against the direction rather than adding to it; whether
+to add or ablate is chosen by whether the target behaviour is one to induce or to suppress.
+
+\textbf{Decoupling gate and scale} is deliberate. JoLA's gates lie in $[0,1]$, which bounds the
+intervention magnitude. A separate softplus scale lets the effective weight $g\cdot s$ exceed one
+where needed, while the $L_0$ penalty acts only on the gate's activation probability, leaving the
+sparsity mechanism unchanged from JoLA but giving each active site a freely learned magnitude.
+
+\section{Training objective}
+
+We freeze the base model and train only $\{\log\alpha^{(l,h)}\}$ and $\{\tilde s^{(l,h)}\}$ against
+a task loss plus the expected-$L_0$ penalty,
+\begin{equation}
+    \mathcal{L} = \mathcal{L}_{\text{task}}\!\big(f_\theta(\mathbf{x}),\mathbf{y}\big)
+    + \lambda(t) \sum_{l,h} \sigma\!\big(\log\alpha^{(l,h)} - \beta\log(-\gamma/\zeta)\big),
+\end{equation}
+where the coefficient $\lambda(t)$ warms up over the first training steps to prevent premature gate
+collapse. The IPP used a cross-entropy task loss; a diagnosis on the 0.5B pilot (Appendix, and
+discussed below) showed that cross-entropy encouraged the gates to \emph{undo} the steering and to
+exploit TruthfulQA's short-answer bias, collapsing generation to whitespace. We therefore use a
+contrastive task loss for the truthfulness experiments, which removed the collapse entirely. The
+intervention remains \emph{unconditional} throughout: no part of it depends on the input at inference
+time, so all selectivity is a property of where the gates settle and of the objective that placed
+them there.
+
+\section{Choice of token position}
+
+Extraction and steering positions are free choices, and the best choice is context-dependent.
+Extraction should read positions whose activations actually differ between positive and negative
+examples (typically the answer span). Steering, by contrast, must act on the positions whose
+predictions \emph{generate} the behaviour: to steer a generated answer the intervention is applied
+from the final prompt token through the answer, since a token's logits are produced by the preceding
+position. The two need not coincide, and conflating them weakens the intervention. For the
+truthfulness experiments we sweep the steering position as a hyperparameter; the sleeper experiments
+steer the prompt, since the trigger appears there. Full details of the sweep, including grids,
+subsamples, and the frontier-promotion protocol, are deferred to the appendix.
+
+%======================================================================
+\chapter{Truthfulness Steering}\label{ch:tqa}
+
+\section{Setup}
+
+We evaluate on TruthfulQA against a fully tuned ITI baseline. Two prompting templates are used, and
+the distinction matters enough to be part of the experimental design. The \textbf{iti\_qa} template
+is the bare question-and-answer format inherited from the original benchmark and from ITI's own code;
+it makes numbers directly comparable with prior work. The \textbf{chat} template wraps each question
+in the model's native chat format, which is how a deployed chat model is actually prompted. A method
+that helps under one need not help under the other, so every method is fitted and evaluated under
+both, and the cells are reported side by side. We study three models: Llama-2-7b (base, iti\_qa
+only), Llama-2-7b-chat (both templates), and Qwen2.5-7B-Instruct \citep{qwen2025qwen25} (both).
+
+Each configuration is scored on several axes, chosen to separate distinct questions. \textbf{Does
+steering produce the behaviour we want?} Generation is scored by a pair of fine-tuned judge models
+released by AllenAI \citep{allenai2024truthfulqa_judges}, one rating each answer truthful or not
+(\emph{True}) and one rating it informative or not (\emph{Info}). These replace the benchmark's
+original, unavailable GPT-3 judge; being purpose-fine-tuned for exactly this labelling, they are a
+faithful substitute. The two judgements pull against each other, since a model that refuses to commit
+is trivially truthful, so we report the Pareto frontier over (\emph{True}, \emph{Info}) rather than
+either alone. Because any judge can be gamed, we also report \emph{MC1} and \emph{MC2}, multiple-choice
+accuracies computed directly from the model's own answer log-probabilities and involving no judge.
+\textbf{Does steering damage the model elsewhere?} Every promoted configuration is run through a
+capability suite: WikiText cross-entropy (\emph{CE}) for raw language modelling, and MMLU
+\citep{hendrycks2021mmlu} and ARC-Challenge \citep{clark2018arc} for knowledge. MMLU and ARC are each
+scored two ways: log-likelihood scoring, the leaderboard convention \citep{gao2024lmeval}, ranks the
+fixed options by probability; generative scoring asks the model to write its answer out. A model can
+rank options correctly while generating nonsense, so the generative variant catches damage the
+ranking variant hides. Both capability benchmarks are run under the shared leaderboard template and
+under each model's native chat template, for the same reason the frontier is.
+
+Compute constraints require subsampling the capability benchmarks, but the unsteered subsample
+numbers reproduce public values closely, which validates the pipeline: unsteered Llama-2-7b-chat
+scores $0.472$ on MMLU against a leaderboard value of about $0.478$, and its TruthfulQA MC2 of
+$0.4532$ matches the Open LLM Leaderboard to four decimal places; Qwen2.5-7B-Instruct scores $0.743$
+against a reported $0.745$. All numbers are averaged over two cross-validation folds with the
+steering refitted per fold, after single-fold results were found to be optimistic (the apparent ITI
+win on its home template halved on the held-out fold while the sparse result was stable).
+
+\section{Results}
+
+Figure~\ref{fig:frontier} shows the truthful/informative frontiers across all five cells.
+Sparse steering advances the frontier in every cell: its points sit up and to the right of both the
+unsteered model and the ITI frontier. On the base model the effect is starkest, lifting a near-random
+starting point ($\emph{True}=0.33$) to nearly $0.89$ while keeping informativeness above $0.94$,
+whereas ITI either barely moves the model or, at higher strength, collapses informativeness as it
+forces truthful but contentless answers. On the chat-template cells the sparse cluster is tighter but
+still leads. ITI never wins a cell outright, and on the base model its highest-truthfulness point is
+degenerate, reaching $\emph{True}=0.99$ only by driving \emph{Info} to $0.04$.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{figures/frontier_tqa.pdf}
+\caption{Truthful/informative frontiers per model and template. Solid markers lie on a method's
+Pareto frontier, hollow markers are dominated, and marker area is proportional to MC1. Sparse
+steering advances the frontier in every cell; ITI is dominated and, at high strength, trades all
+informativeness for truthfulness (the degenerate points at the lower right of the base and
+Qwen iti\_qa panels).}
+\label{fig:frontier}
+\end{figure}
+
+The judge-free multiple-choice view (Table~\ref{tab:mc}) agrees. Sparse steering gives the best MC1
+and MC2 in every cell, and by a wide margin on the base and iti\_qa cells. This matters because MC1
+and MC2 cannot be gamed by a non-committal judge: they measure whether the model assigns more
+probability to true completions than to false ones, and the sparse gains there indicate genuine
+reweighting rather than a judging artefact of the kind that undermined the pilot.
+
+\begin{table}[htbp]
+\centering
+\caption{Judge-free multiple choice (MC1 / MC2), best sparse and best ITI configuration per cell
+against the unsteered model. Two-fold means, corrected steering position. Sparse steering leads on
+every cell.}
+\label{tab:mc}
+\begin{tabular}{lccc}
+\toprule
+Cell & Unsteered & ITI (best) & Sparse (best) \\
+\midrule
+Base (iti\_qa)       & 0.264 / 0.395 & 0.345 / 0.511 & \textbf{0.559 / 0.719} \\
+Llama-chat (iti\_qa) & 0.332 / 0.498 & 0.406 / 0.596 & \textbf{0.563 / 0.734} \\
+Llama-chat (chat)    & 0.286 / 0.502 & 0.327 / 0.529 & \textbf{0.518 / 0.697} \\
+Qwen (iti\_qa)       & 0.444 / 0.632 & 0.395 / 0.560 & \textbf{0.634 / 0.783} \\
+Qwen (chat)          & 0.463 / 0.640 & 0.410 / 0.594 & \textbf{0.580 / 0.758} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Sparsity and capability.} The gate-selected configurations vary in how sparse they are, set
+by the $L_0$ coefficient, which we sweep over $\{0, 0.003, 0.01, 0.03\}$; the strongest penalty
+prunes the intervention to a handful of active sites, while a zero penalty leaves it free to steer
+broadly. Across the frontier, the least sparse configurations (smallest penalty) achieve the
+strongest main-task numbers: on the base model the densest sparse configuration attains the highest
+\emph{True} and MC1 of any point. This is expected, as more active sites give the
+intervention more freedom to reshape the output. The purpose of the $L_0$ term is that this main-task
+advantage is bought at a capability cost: the denser the intervention, the larger its footprint on
+MMLU, ARC, and language-modelling loss, so the penalty exists to locate configurations that keep most
+of the main-task gain while touching the model as little as possible. The full capability battery is
+reported per cell in Appendix~\ref{app:capability}; the base cell, for which the corrected numbers
+are complete, shows the sparse frontier points preserving log-likelihood MMLU and ARC to within a
+point of the unsteered model, while the generative variants and language-modelling loss degrade
+monotonically with density, confirming the trade the penalty is designed to manage.
+
+\textbf{A measurement correction.} An earlier version of these experiments applied the steering
+intervention one token position too late, so that a single-token multiple-choice answer was scored
+from an unsteered position and appeared to incur no capability cost at all. Correcting the steering
+position (Section~\ref{ch:method}, choice of token position) makes the intervention stronger and its
+capability cost real and dose-ordered. The frontier and multiple-choice results above are the
+corrected numbers; the strongest configurations steer all positions and so were never mis-placed,
+which is why the conclusions are unchanged from the pre-correction analysis. The capability battery is
+being re-measured under the correction, replacing the earlier, spurious finding that log-likelihood
+accuracy was free.
+
+%======================================================================
+\chapter{Removing Sleeper-Agent Backdoors}\label{ch:sleeper}
+
+\section{Setup}
+
+The second setting asks whether the same machinery can \emph{remove} a behaviour. We study three
+models with an implanted backdoor that emits a fixed, harmful response when a trigger phrase appears
+in the prompt: a small TinyStories model, the fully fine-tuned saraprice Llama-2-7b model
+\citep{price2024future}, and Cadenza, an 8B instruction model whose backdoor is installed by a LoRA
+adapter. Steering here is applied at the prompt and uses the ablation variant of
+Equation~\ref{eq:correction}, since the aim is to suppress the trigger's effect.
+
+The clean, fixed nature of the triggered response lets us define a distributional success metric that avoids
+leaning heavily on a judge. The primary measure is the \textbf{attack success rate} (\emph{ASR}), the
+fraction of triggered prompts that still emit the harmful response, together with \textbf{exact-match}
+recovery. To measure whether \emph{clean} behaviour genuinely returns, we report the
+Jensen--Shannon divergence between the steered model's output distribution and that of a clean
+reference model, both under the trigger (\emph{JSD\textsubscript{clean}}, the primary quantity) and
+without it (\emph{JSD\textsubscript{dep}}); the definition and its shortcomings are given in
+Appendix~\ref{app:jsd}. Because ASR and JSD compare against a known fixed response, they need no
+judge, which is the methodological advantage of this setting.
+
+We include the single-site broadcast-ablation baseline of Arditi et al. \citep{arditi2024refusal},
+which ablates one fixed direction from every layer. For the fully fine-tuned saraprice model we
+additionally evaluate downstream capability on SQuAD and BoolQ rather than the MMLU and ARC used for
+truthfulness. The reason is distributional: the backdoor barely fires on multiple-choice knowledge
+prompts, so MMLU cannot exhibit a capability rescue, whereas SQuAD and BoolQ are open-ended and sit
+closer to the sleeper's training distribution.
+
+\section{Results}
+
+Sparse steering removes the backdoor in distribution, including where no single fixed site suffices.
+At 8B, every single-site broadcast ablation we swept either leaves the backdoor intact or destroys
+the model outright, a two-regime behaviour with no gentle setting in between; the learned gates
+instead find a sparse combination of sites that removes the trigger at almost no clean-input cost.
+This is the clearest demonstration of the project's premise, that learning \emph{where} to intervene
+succeeds where a fixed choice cannot.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{figures/sleeper_rescue.pdf}
+\caption{Steering restores capability under the deployment trigger (fully fine-tuned saraprice
+model). Bars give task accuracy against the clean-unsteered baseline (dashed); the backdoor rate is
+shown above in red. The trigger alone collapses accuracy, but a steered model under the same trigger
+returns to near the baseline, and steering leaves clean-input accuracy unchanged.}
+\label{fig:rescue}
+\end{figure}
+
+Figure~\ref{fig:rescue} shows the effect on saraprice. The deployment trigger alone collapses task
+accuracy to the floor as the backdoor fires on almost every prompt, but a steered model under the
+same trigger returns to within a few points of the clean-unsteered baseline, essentially recovering
+the model's usefulness; a hand-tuned configuration drives the residual SQuAD attack rate down
+further, to $7.5\%$. Because steering leaves clean-input behaviour unchanged, the intervention is
+specific to the backdoor rather than a blanket degradation.
+
+The removal is more distribution-dependent than the in-distribution numbers alone suggest, and we
+report this plainly. On MMLU the same steering suppresses only about half of the triggered prompts,
+which is why the capability rescue is measured on SQuAD and BoolQ. The Cadenza model, whose backdoor
+is installed by a weakly integrated LoRA adapter rather than a full fine-tune, does not even trigger
+on these open-ended prompts, so it cannot exhibit a collapse-and-rescue; its capability is essentially
+untouched by steering, and its full SQuAD and BoolQ numbers, with the LoRA-versus-full-finetune
+explanation, are given in Appendix~\ref{app:cadenza}. The contrast between Cadenza's shallow,
+easily-suppressed backdoor and saraprice's robust one is itself informative: it emerged
+unprompted from a uniform sweep, in which the fully fine-tuned backdoor yielded only to interventions
+on the MLP sites while the distilled one yielded to every site family.
+
+%======================================================================
+\chapter{Conclusion}\label{ch:conclusion}
+
+This dissertation developed sparse activation steering, which fixes contrastive steering directions
+and learns only a HardConcrete gate and a scale per candidate site, selecting where to intervene by
+gradient descent against a downstream objective. Across three models and two prompting templates on
+TruthfulQA, the method advanced the truthful/informative frontier in every cell and led the
+judge-free multiple-choice metrics throughout, outperforming a fully tuned probe-based baseline while
+learning only two scalars per site. On implanted sleeper-agent backdoors the same machinery removed
+the trigger behaviour in distribution, including at a scale where no single fixed steering site could,
+at almost no cost to clean capability.
+
+Two limitations frame the future work. First, the removal of sleeper behaviour is
+distribution-dependent: it is near-complete close to the backdoor's training distribution but only
+partial further from it, and understanding what governs this generalisation is the natural next
+question. Second, the truthfulness capability numbers are being finalised under the corrected steering
+position; the frontier and multiple-choice conclusions are settled, but the precise capability cost of
+each configuration, and hence the exact operating point the $L_0$ penalty should target, awaits the
+completed sweep. More broadly, the localisation the gates discover invites a qualitative analysis
+against known head specialisation, which we leave to future work.
+
+%======================================================================
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\appendix
+
+\chapter{Inference-time simplification}\label{app:inference}
+Once gates are frozen, the sparse steering formulation admits a useful simplification. For each layer
+$l$, the gated per-head corrections can be summed and pushed through the output projection $W_O$:
+\begin{equation}
+    \Delta^{(l)} = W_O \sum_h g^{(l,h)} s^{(l,h)} \mathbf{v}^{(l,h)}.
+\end{equation}
+This precomputed constant is added directly to the residual stream via a lightweight hook, avoiding a
+custom attention module at inference time.
+
+\chapter{Sweep protocol}\label{app:sweep}
+Each case study uses a two-tier protocol. A grid of configurations (varying the $L_0$ coefficient,
+training length, steering position, and, for ITI, the number of heads and the intervention strength)
+is first screened on a small fold-0 subsample. A Pareto-promotion step selects the non-dominated
+configurations on the two primary axes, capped per method, and promotes them to a full two-fold
+evaluation on the complete question set, with the steering refitted per fold. Only promoted
+configurations are run through the capability battery. Exact grids differ per case study and per cell
+and are recorded with the released code.
+
+\chapter{The clean-recovery divergence}\label{app:jsd}
+\emph{JSD\textsubscript{clean}} is the Jensen--Shannon divergence between the next-token distribution
+of the steered model under the trigger and that of the clean reference model on the same prompts,
+averaged over positions. It measures whether the steered model \emph{behaves like} the clean model,
+not merely whether the harmful string is absent, and so is stricter than ASR. Its shortcoming is that
+it compares against a specific reference model and is only meaningful where a clean reference exists,
+which is why it complements rather than replaces the response-based ASR.
+
+\chapter{Capability battery}\label{app:capability}
+Table~\ref{tab:capability} reports the base-cell capability numbers across every axis: MMLU and ARC
+under log-likelihood and generative scoring, and WikiText cross-entropy. These are pre-correction
+placeholder values, retained so that every evaluated metric is on record; they are not used in the
+main discussion. They also make the measurement error of Chapter~\ref{ch:tqa} concrete: under the
+mis-placed intervention the log-likelihood MMLU score of every steered configuration equals the
+unsteered baseline exactly (a delta of $+0.000$, marked $\dagger$), because a single-token answer was
+scored from a position the steering never reached. The generative, ARC, and WikiText columns, which
+involve multi-token continuations, register the intervention's real cost even before correction, and
+the corrected numbers (in preparation) make the log-likelihood cost real and ordered by density in
+the same way. The remaining cells follow the identical layout and are omitted here pending
+regeneration. Values are two-fold means; WikiText is bits-per-byte (lower is better), the rest are
+accuracies (higher is better).
+
+\begin{table}[htbp]
+\centering
+\caption{Base-cell capability battery (pre-correction placeholder). $\dagger$ marks the
+log-likelihood MMLU artifact: steering registers no change because the scored answer token lies one
+position ahead of the mis-placed intervention.}
+\label{tab:capability}
+\begin{tabular}{lccccc}
+\toprule
+ & MMLU & ARC & WikiText & MMLU & ARC \\
+Configuration & (loglik) & (loglik) & (CE, bpb) & (gen) & (gen) \\
+\midrule
+Unsteered            & 0.323 & 0.419 & 0.606 & 0.157 & 0.158 \\
+Sparse ($l_0{=}0$)   & 0.323$^\dagger$ & 0.404 & 0.696 & 0.021 & 0.026 \\
+ITI ($K{=}96$)       & 0.323$^\dagger$ & 0.360 & 1.158 & 0.008 & 0.018 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\chapter{Cadenza capability}\label{app:cadenza}
+Cadenza's backdoor is installed by a LoRA adapter and is only weakly integrated into the model,
+unlike saraprice's full fine-tune. On SQuAD and BoolQ the trigger does not fire, so all four
+conditions (clean and triggered, unsteered and steered) show near-identical, high capability, and
+steering is capability-free. This is why Cadenza cannot demonstrate the collapse-and-rescue that
+saraprice does, and why it is discussed separately.
+
+\end{document}

@@ -1,0 +1,462 @@
+cell	method	tag	stage	metric	value	delta_vs_unsteered
+base_qa	iti	cap_gen_base_qa_iti_base_qa_a22	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.0000	-0.1580
+base_qa	iti	cap_gen_base_qa_iti_base_qa_a8	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.1750	+0.0170
+base_qa	iti	cap_gen_base_qa_iti_base_qa_k24	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.1360	-0.0220
+base_qa	iti	cap_gen_base_qa_iti_base_qa_k96	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.0180	-0.1400
+base_qa	sparse	cap_gen_base_qa_sp_base_qa_l0.003_ep8_all	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.0070	-0.1510
+base_qa	sparse	cap_gen_base_qa_sp_base_qa_l0.01_ep16_all	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.0760	-0.0820
+base_qa	sparse	cap_gen_base_qa_sp_base_qa_l0_ep16_all	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.0260	-0.1320
+base_qa	sparse	cap_gen_base_qa_sp_base_qa_l0_ep8_all	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.0050	-0.1530
+base_qa	unsteered	cap_gen_base_qa_uns	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.1580	
+base_qa	iti	cap_gen_base_qa_iti_base_qa_a22	generative	MMLU/CHOICE/ACCURACY	0.0000	-0.1570
+base_qa	iti	cap_gen_base_qa_iti_base_qa_a8	generative	MMLU/CHOICE/ACCURACY	0.1580	+0.0010
+base_qa	iti	cap_gen_base_qa_iti_base_qa_k24	generative	MMLU/CHOICE/ACCURACY	0.1190	-0.0380
+base_qa	iti	cap_gen_base_qa_iti_base_qa_k96	generative	MMLU/CHOICE/ACCURACY	0.0080	-0.1490
+base_qa	sparse	cap_gen_base_qa_sp_base_qa_l0.003_ep8_all	generative	MMLU/CHOICE/ACCURACY	0.0080	-0.1490
+base_qa	sparse	cap_gen_base_qa_sp_base_qa_l0.01_ep16_all	generative	MMLU/CHOICE/ACCURACY	0.0570	-0.1000
+base_qa	sparse	cap_gen_base_qa_sp_base_qa_l0_ep16_all	generative	MMLU/CHOICE/ACCURACY	0.0210	-0.1360
+base_qa	sparse	cap_gen_base_qa_sp_base_qa_l0_ep8_all	generative	MMLU/CHOICE/ACCURACY	0.0050	-0.1520
+base_qa	unsteered	cap_gen_base_qa_uns	generative	MMLU/CHOICE/ACCURACY	0.1570	
+base_qa	iti	cap_fxaw_base_qa_iti_base_qa_a22	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.2270	-0.1919
+base_qa	iti	cap_fxaw_base_qa_iti_base_qa_a8	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4096	-0.0093
+base_qa	iti	cap_fxaw_base_qa_iti_base_qa_k24	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4053	-0.0136
+base_qa	iti	cap_fxaw_base_qa_iti_base_qa_k96	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.3601	-0.0588
+base_qa	sparse	cap_fxaw_base_qa_sp_base_qa_l0.003_ep8_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.3968	-0.0221
+base_qa	sparse	cap_fxaw_base_qa_sp_base_qa_l0.01_ep16_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4155	-0.0034
+base_qa	sparse	cap_fxaw_base_qa_sp_base_qa_l0_ep16_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4044	-0.0145
+base_qa	sparse	cap_fxaw_base_qa_sp_base_qa_l0_ep8_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.3985	-0.0204
+base_qa	unsteered	cap_fxaw_base_qa_uns	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4189	
+base_qa	iti	cap_fxaw_base_qa_iti_base_qa_a22	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.2270	-0.2192
+base_qa	iti	cap_fxaw_base_qa_iti_base_qa_a8	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4428	-0.0034
+base_qa	iti	cap_fxaw_base_qa_iti_base_qa_k24	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4360	-0.0102
+base_qa	iti	cap_fxaw_base_qa_iti_base_qa_k96	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3899	-0.0563
+base_qa	sparse	cap_fxaw_base_qa_sp_base_qa_l0.003_ep8_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4300	-0.0162
+base_qa	sparse	cap_fxaw_base_qa_sp_base_qa_l0.01_ep16_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4343	-0.0119
+base_qa	sparse	cap_fxaw_base_qa_sp_base_qa_l0_ep16_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4334	-0.0128
+base_qa	sparse	cap_fxaw_base_qa_sp_base_qa_l0_ep8_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4241	-0.0221
+base_qa	unsteered	cap_fxaw_base_qa_uns	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4462	
+base_qa	iti	cap_fxaw_base_qa_iti_base_qa_a8	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6297	+0.0238
+base_qa	iti	cap_fxaw_base_qa_iti_base_qa_k24	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6647	+0.0588
+base_qa	iti	cap_fxaw_base_qa_iti_base_qa_k96	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	1.1579	+0.5520
+base_qa	sparse	cap_fxaw_base_qa_sp_base_qa_l0.003_ep8_all	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6758	+0.0699
+base_qa	sparse	cap_fxaw_base_qa_sp_base_qa_l0.01_ep16_all	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6561	+0.0502
+base_qa	sparse	cap_fxaw_base_qa_sp_base_qa_l0_ep16_all	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6963	+0.0904
+base_qa	sparse	cap_fxaw_base_qa_sp_base_qa_l0_ep8_all	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6980	+0.0921
+base_qa	unsteered	cap_fxaw_base_qa_uns	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6059	
+base_qa	iti	cap_fxaw_base_qa_iti_base_qa_a8	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.5472	+0.0253
+base_qa	iti	cap_fxaw_base_qa_iti_base_qa_k24	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.5852	+0.0633
+base_qa	iti	cap_fxaw_base_qa_iti_base_qa_k96	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	2.2313	+0.7094
+base_qa	sparse	cap_fxaw_base_qa_sp_base_qa_l0.003_ep8_all	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.5975	+0.0756
+base_qa	sparse	cap_fxaw_base_qa_sp_base_qa_l0.01_ep16_all	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.5758	+0.0539
+base_qa	sparse	cap_fxaw_base_qa_sp_base_qa_l0_ep16_all	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6203	+0.0984
+base_qa	sparse	cap_fxaw_base_qa_sp_base_qa_l0_ep8_all	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6223	+0.1004
+base_qa	unsteered	cap_fxaw_base_qa_uns	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.5219	
+base_qa	iti	cap_fxaw_base_qa_iti_base_qa_a8	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	10.3186	+0.8710
+base_qa	iti	cap_fxaw_base_qa_iti_base_qa_k24	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	11.7490	+2.3014
+base_qa	iti	cap_fxaw_base_qa_iti_base_qa_k96	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	73.0984	+63.6508
+base_qa	sparse	cap_fxaw_base_qa_sp_base_qa_l0.003_ep8_all	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	12.2427	+2.7951
+base_qa	sparse	cap_fxaw_base_qa_sp_base_qa_l0.01_ep16_all	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	11.3812	+1.9336
+base_qa	sparse	cap_fxaw_base_qa_sp_base_qa_l0_ep16_all	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	13.2064	+3.7588
+base_qa	sparse	cap_fxaw_base_qa_sp_base_qa_l0_ep8_all	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	13.2933	+3.8457
+base_qa	unsteered	cap_fxaw_base_qa_uns	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	9.4476	
+base_qa	iti	cap_fxmm_base_qa_iti_base_qa_a22	loglik-fx-mmlu	MMLU/ACC	0.2319	-0.0907
+base_qa	iti	cap_fxmm_base_qa_iti_base_qa_a8	loglik-fx-mmlu	MMLU/ACC	0.3226	+0.0000
+base_qa	iti	cap_fxmm_base_qa_iti_base_qa_k24	loglik-fx-mmlu	MMLU/ACC	0.3226	+0.0000
+base_qa	iti	cap_fxmm_base_qa_iti_base_qa_k96	loglik-fx-mmlu	MMLU/ACC	0.3226	+0.0000
+base_qa	sparse	cap_fxmm_base_qa_sp_base_qa_l0.003_ep8_all	loglik-fx-mmlu	MMLU/ACC	0.3226	+0.0000
+base_qa	sparse	cap_fxmm_base_qa_sp_base_qa_l0.01_ep16_all	loglik-fx-mmlu	MMLU/ACC	0.3226	+0.0000
+base_qa	sparse	cap_fxmm_base_qa_sp_base_qa_l0_ep16_all	loglik-fx-mmlu	MMLU/ACC	0.3226	+0.0000
+base_qa	sparse	cap_fxmm_base_qa_sp_base_qa_l0_ep8_all	loglik-fx-mmlu	MMLU/ACC	0.3226	+0.0000
+base_qa	unsteered	cap_fxmm_base_qa_uns	loglik-fx-mmlu	MMLU/ACC	0.3226	
+ll_ch	iti	cap_gen_ll_ch_iti_ll_ch_a8	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.4540	+0.0160
+ll_ch	iti	cap_gen_ll_ch_iti_ll_ch_k128	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.1970	-0.2410
+ll_ch	iti	cap_gen_ll_ch_iti_ll_ch_k24	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.4370	-0.0010
+ll_ch	sparse	cap_gen_ll_ch_sp_ll_ch_l0.003_ep16_comp_ila1	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.1050	-0.3330
+ll_ch	sparse	cap_gen_ll_ch_sp_ll_ch_l0_ep16_all	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.1950	-0.2430
+ll_ch	sparse	cap_gen_ll_ch_sp_ll_ch_l0_ep16_comp_ila1	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.0250	-0.4130
+ll_ch	sparse	cap_gen_ll_ch_sp_ll_ch_l0_ep16_completion	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.1700	-0.2680
+ll_ch	unsteered	cap_gen_ll_ch_uns	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.4380	
+ll_ch	iti	cap_gen_ll_ch_iti_ll_ch_a8	generative	MMLU/CHOICE/ACCURACY	0.3840	+0.0190
+ll_ch	iti	cap_gen_ll_ch_iti_ll_ch_k128	generative	MMLU/CHOICE/ACCURACY	0.1580	-0.2070
+ll_ch	iti	cap_gen_ll_ch_iti_ll_ch_k24	generative	MMLU/CHOICE/ACCURACY	0.3790	+0.0140
+ll_ch	sparse	cap_gen_ll_ch_sp_ll_ch_l0.003_ep16_comp_ila1	generative	MMLU/CHOICE/ACCURACY	0.0780	-0.2870
+ll_ch	sparse	cap_gen_ll_ch_sp_ll_ch_l0_ep16_all	generative	MMLU/CHOICE/ACCURACY	0.1350	-0.2300
+ll_ch	sparse	cap_gen_ll_ch_sp_ll_ch_l0_ep16_comp_ila1	generative	MMLU/CHOICE/ACCURACY	0.0350	-0.3300
+ll_ch	sparse	cap_gen_ll_ch_sp_ll_ch_l0_ep16_completion	generative	MMLU/CHOICE/ACCURACY	0.1220	-0.2430
+ll_ch	unsteered	cap_gen_ll_ch_uns	generative	MMLU/CHOICE/ACCURACY	0.3650	
+ll_ch	iti	cap_ctaw_ll_ch_iti_ll_ch_a8	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.3490	-0.0051
+ll_ch	iti	cap_ctaw_ll_ch_iti_ll_ch_k128	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.3174	-0.0367
+ll_ch	iti	cap_ctaw_ll_ch_iti_ll_ch_k24	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.3413	-0.0128
+ll_ch	sparse	cap_ctaw_ll_ch_sp_ll_ch_l0.003_ep16_comp_ila1	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.3805	+0.0264
+ll_ch	sparse	cap_ctaw_ll_ch_sp_ll_ch_l0_ep16_all	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.3891	+0.0350
+ll_ch	sparse	cap_ctaw_ll_ch_sp_ll_ch_l0_ep16_comp_ila1	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.3729	+0.0188
+ll_ch	sparse	cap_ctaw_ll_ch_sp_ll_ch_l0_ep16_completion	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.4027	+0.0486
+ll_ch	unsteered	cap_ctaw_ll_ch_uns	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.3541	
+ll_ch	iti	cap_ctaw_ll_ch_iti_ll_ch_a8	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3703	-0.0009
+ll_ch	iti	cap_ctaw_ll_ch_iti_ll_ch_k128	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3422	-0.0290
+ll_ch	iti	cap_ctaw_ll_ch_iti_ll_ch_k24	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3618	-0.0094
+ll_ch	sparse	cap_ctaw_ll_ch_sp_ll_ch_l0.003_ep16_comp_ila1	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3754	+0.0042
+ll_ch	sparse	cap_ctaw_ll_ch_sp_ll_ch_l0_ep16_all	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3925	+0.0213
+ll_ch	sparse	cap_ctaw_ll_ch_sp_ll_ch_l0_ep16_comp_ila1	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3686	-0.0026
+ll_ch	sparse	cap_ctaw_ll_ch_sp_ll_ch_l0_ep16_completion	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3976	+0.0264
+ll_ch	unsteered	cap_ctaw_ll_ch_uns	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3712	
+ll_ch	iti	cap_ctaw_ll_ch_iti_ll_ch_a8	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7032	+0.0285
+ll_ch	iti	cap_ctaw_ll_ch_iti_ll_ch_k128	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.8964	+0.2217
+ll_ch	iti	cap_ctaw_ll_ch_iti_ll_ch_k24	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7182	+0.0435
+ll_ch	sparse	cap_ctaw_ll_ch_sp_ll_ch_l0.003_ep16_comp_ila1	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7832	+0.1085
+ll_ch	sparse	cap_ctaw_ll_ch_sp_ll_ch_l0_ep16_all	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7205	+0.0458
+ll_ch	sparse	cap_ctaw_ll_ch_sp_ll_ch_l0_ep16_comp_ila1	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.8208	+0.1461
+ll_ch	sparse	cap_ctaw_ll_ch_sp_ll_ch_l0_ep16_completion	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7258	+0.0511
+ll_ch	unsteered	cap_ctaw_ll_ch_uns	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6747	
+ll_ch	iti	cap_ctaw_ll_ch_iti_ll_ch_a8	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6282	+0.0319
+ll_ch	iti	cap_ctaw_ll_ch_iti_ll_ch_k128	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.8614	+0.2651
+ll_ch	iti	cap_ctaw_ll_ch_iti_ll_ch_k24	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6451	+0.0488
+ll_ch	sparse	cap_ctaw_ll_ch_sp_ll_ch_l0.003_ep16_comp_ila1	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.7209	+0.1246
+ll_ch	sparse	cap_ctaw_ll_ch_sp_ll_ch_l0_ep16_all	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6478	+0.0515
+ll_ch	sparse	cap_ctaw_ll_ch_sp_ll_ch_l0_ep16_comp_ila1	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.7664	+0.1701
+ll_ch	sparse	cap_ctaw_ll_ch_sp_ll_ch_l0_ep16_completion	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6538	+0.0575
+ll_ch	unsteered	cap_ctaw_ll_ch_uns	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.5963	
+ll_ch	iti	cap_ctaw_ll_ch_iti_ll_ch_a8	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	13.5534	+1.3589
+ll_ch	iti	cap_ctaw_ll_ch_iti_ll_ch_k128	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	27.7271	+15.5326
+ll_ch	iti	cap_ctaw_ll_ch_iti_ll_ch_k24	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	14.3257	+2.1312
+ll_ch	sparse	cap_ctaw_ll_ch_sp_ll_ch_l0.003_ep16_comp_ila1	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	18.2272	+6.0327
+ll_ch	sparse	cap_ctaw_ll_ch_sp_ll_ch_l0_ep16_all	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	14.4491	+2.2546
+ll_ch	sparse	cap_ctaw_ll_ch_sp_ll_ch_l0_ep16_comp_ila1	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	20.9539	+8.7594
+ll_ch	sparse	cap_ctaw_ll_ch_sp_ll_ch_l0_ep16_completion	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	14.7365	+2.5420
+ll_ch	unsteered	cap_ctaw_ll_ch_uns	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	12.1945	
+ll_ch	iti	cap_ctmm_ll_ch_iti_ll_ch_a8	loglik-ct-mmlu	MMLU/ACC	0.2382	+0.0000
+ll_ch	iti	cap_ctmm_ll_ch_iti_ll_ch_k128	loglik-ct-mmlu	MMLU/ACC	0.2382	+0.0000
+ll_ch	iti	cap_ctmm_ll_ch_iti_ll_ch_k24	loglik-ct-mmlu	MMLU/ACC	0.2382	+0.0000
+ll_ch	sparse	cap_ctmm_ll_ch_sp_ll_ch_l0.003_ep16_comp_ila1	loglik-ct-mmlu	MMLU/ACC	0.2382	+0.0000
+ll_ch	sparse	cap_ctmm_ll_ch_sp_ll_ch_l0_ep16_all	loglik-ct-mmlu	MMLU/ACC	0.2382	+0.0000
+ll_ch	sparse	cap_ctmm_ll_ch_sp_ll_ch_l0_ep16_comp_ila1	loglik-ct-mmlu	MMLU/ACC	0.2382	+0.0000
+ll_ch	sparse	cap_ctmm_ll_ch_sp_ll_ch_l0_ep16_completion	loglik-ct-mmlu	MMLU/ACC	0.2382	+0.0000
+ll_ch	unsteered	cap_ctmm_ll_ch_uns	loglik-ct-mmlu	MMLU/ACC	0.2382	
+ll_ch	iti	cap_fxaw_ll_ch_iti_ll_ch_a8	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4283	-0.0128
+ll_ch	iti	cap_fxaw_ll_ch_iti_ll_ch_k128	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.3831	-0.0580
+ll_ch	iti	cap_fxaw_ll_ch_iti_ll_ch_k24	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4172	-0.0239
+ll_ch	sparse	cap_fxaw_ll_ch_sp_ll_ch_l0.003_ep16_comp_ila1	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4437	+0.0026
+ll_ch	sparse	cap_fxaw_ll_ch_sp_ll_ch_l0_ep16_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4531	+0.0120
+ll_ch	sparse	cap_fxaw_ll_ch_sp_ll_ch_l0_ep16_comp_ila1	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4420	+0.0009
+ll_ch	sparse	cap_fxaw_ll_ch_sp_ll_ch_l0_ep16_completion	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4514	+0.0103
+ll_ch	unsteered	cap_fxaw_ll_ch_uns	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4411	
+ll_ch	iti	cap_fxaw_ll_ch_iti_ll_ch_a8	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4283	-0.0145
+ll_ch	iti	cap_fxaw_ll_ch_iti_ll_ch_k128	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3959	-0.0469
+ll_ch	iti	cap_fxaw_ll_ch_iti_ll_ch_k24	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4172	-0.0256
+ll_ch	sparse	cap_fxaw_ll_ch_sp_ll_ch_l0.003_ep16_comp_ila1	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4428	+0.0000
+ll_ch	sparse	cap_fxaw_ll_ch_sp_ll_ch_l0_ep16_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4565	+0.0137
+ll_ch	sparse	cap_fxaw_ll_ch_sp_ll_ch_l0_ep16_comp_ila1	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4454	+0.0026
+ll_ch	sparse	cap_fxaw_ll_ch_sp_ll_ch_l0_ep16_completion	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4590	+0.0162
+ll_ch	unsteered	cap_fxaw_ll_ch_uns	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4428	
+ll_ch	iti	cap_fxaw_ll_ch_iti_ll_ch_a8	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7032	+0.0285
+ll_ch	iti	cap_fxaw_ll_ch_iti_ll_ch_k128	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.8964	+0.2217
+ll_ch	iti	cap_fxaw_ll_ch_iti_ll_ch_k24	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7182	+0.0435
+ll_ch	sparse	cap_fxaw_ll_ch_sp_ll_ch_l0.003_ep16_comp_ila1	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7832	+0.1085
+ll_ch	sparse	cap_fxaw_ll_ch_sp_ll_ch_l0_ep16_all	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7205	+0.0458
+ll_ch	sparse	cap_fxaw_ll_ch_sp_ll_ch_l0_ep16_comp_ila1	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.8208	+0.1461
+ll_ch	sparse	cap_fxaw_ll_ch_sp_ll_ch_l0_ep16_completion	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7258	+0.0511
+ll_ch	unsteered	cap_fxaw_ll_ch_uns	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6747	
+ll_ch	iti	cap_fxaw_ll_ch_iti_ll_ch_a8	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6282	+0.0319
+ll_ch	iti	cap_fxaw_ll_ch_iti_ll_ch_k128	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.8614	+0.2651
+ll_ch	iti	cap_fxaw_ll_ch_iti_ll_ch_k24	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6451	+0.0488
+ll_ch	sparse	cap_fxaw_ll_ch_sp_ll_ch_l0.003_ep16_comp_ila1	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.7209	+0.1246
+ll_ch	sparse	cap_fxaw_ll_ch_sp_ll_ch_l0_ep16_all	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6478	+0.0515
+ll_ch	sparse	cap_fxaw_ll_ch_sp_ll_ch_l0_ep16_comp_ila1	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.7664	+0.1701
+ll_ch	sparse	cap_fxaw_ll_ch_sp_ll_ch_l0_ep16_completion	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6538	+0.0575
+ll_ch	unsteered	cap_fxaw_ll_ch_uns	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.5963	
+ll_ch	iti	cap_fxaw_ll_ch_iti_ll_ch_a8	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	13.5534	+1.3589
+ll_ch	iti	cap_fxaw_ll_ch_iti_ll_ch_k128	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	27.7271	+15.5326
+ll_ch	iti	cap_fxaw_ll_ch_iti_ll_ch_k24	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	14.3257	+2.1312
+ll_ch	sparse	cap_fxaw_ll_ch_sp_ll_ch_l0.003_ep16_comp_ila1	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	18.2272	+6.0327
+ll_ch	sparse	cap_fxaw_ll_ch_sp_ll_ch_l0_ep16_all	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	14.4491	+2.2546
+ll_ch	sparse	cap_fxaw_ll_ch_sp_ll_ch_l0_ep16_comp_ila1	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	20.9539	+8.7594
+ll_ch	sparse	cap_fxaw_ll_ch_sp_ll_ch_l0_ep16_completion	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	14.7365	+2.5420
+ll_ch	unsteered	cap_fxaw_ll_ch_uns	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	12.1945	
+ll_ch	iti	cap_fxmm_ll_ch_iti_ll_ch_a8	loglik-fx-mmlu	MMLU/ACC	0.4702	+0.0000
+ll_ch	iti	cap_fxmm_ll_ch_iti_ll_ch_k128	loglik-fx-mmlu	MMLU/ACC	0.4702	+0.0000
+ll_ch	iti	cap_fxmm_ll_ch_iti_ll_ch_k24	loglik-fx-mmlu	MMLU/ACC	0.4702	+0.0000
+ll_ch	sparse	cap_fxmm_ll_ch_sp_ll_ch_l0.003_ep16_comp_ila1	loglik-fx-mmlu	MMLU/ACC	0.4702	+0.0000
+ll_ch	sparse	cap_fxmm_ll_ch_sp_ll_ch_l0_ep16_all	loglik-fx-mmlu	MMLU/ACC	0.4702	+0.0000
+ll_ch	sparse	cap_fxmm_ll_ch_sp_ll_ch_l0_ep16_comp_ila1	loglik-fx-mmlu	MMLU/ACC	0.4702	+0.0000
+ll_ch	sparse	cap_fxmm_ll_ch_sp_ll_ch_l0_ep16_completion	loglik-fx-mmlu	MMLU/ACC	0.4702	+0.0000
+ll_ch	unsteered	cap_fxmm_ll_ch_uns	loglik-fx-mmlu	MMLU/ACC	0.4702	
+ll_qa	iti	cap_gen_ll_qa_iti_ll_qa_a15	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.2950	-0.1430
+ll_qa	iti	cap_gen_ll_qa_iti_ll_qa_a22	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.0730	-0.3650
+ll_qa	iti	cap_gen_ll_qa_iti_ll_qa_k128	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.0040	-0.4340
+ll_qa	iti	cap_gen_ll_qa_iti_ll_qa_k96	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.1540	-0.2840
+ll_qa	sparse	cap_gen_ll_qa_sp_ll_qa_l0.01_ep16_all	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.4270	-0.0110
+ll_qa	sparse	cap_gen_ll_qa_sp_ll_qa_l0.01_ep16_comp_ila1	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.4310	-0.0070
+ll_qa	sparse	cap_gen_ll_qa_sp_ll_qa_l0.01_ep8_all	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.4130	-0.0250
+ll_qa	sparse	cap_gen_ll_qa_sp_ll_qa_l0_ep16_all	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.4250	-0.0130
+ll_qa	unsteered	cap_gen_ll_qa_uns	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.4380	
+ll_qa	iti	cap_gen_ll_qa_iti_ll_qa_a15	generative	MMLU/CHOICE/ACCURACY	0.1780	-0.1870
+ll_qa	iti	cap_gen_ll_qa_iti_ll_qa_a22	generative	MMLU/CHOICE/ACCURACY	0.0530	-0.3120
+ll_qa	iti	cap_gen_ll_qa_iti_ll_qa_k128	generative	MMLU/CHOICE/ACCURACY	0.0020	-0.3630
+ll_qa	iti	cap_gen_ll_qa_iti_ll_qa_k96	generative	MMLU/CHOICE/ACCURACY	0.0750	-0.2900
+ll_qa	sparse	cap_gen_ll_qa_sp_ll_qa_l0.01_ep16_all	generative	MMLU/CHOICE/ACCURACY	0.3520	-0.0130
+ll_qa	sparse	cap_gen_ll_qa_sp_ll_qa_l0.01_ep16_comp_ila1	generative	MMLU/CHOICE/ACCURACY	0.3600	-0.0050
+ll_qa	sparse	cap_gen_ll_qa_sp_ll_qa_l0.01_ep8_all	generative	MMLU/CHOICE/ACCURACY	0.3660	+0.0010
+ll_qa	sparse	cap_gen_ll_qa_sp_ll_qa_l0_ep16_all	generative	MMLU/CHOICE/ACCURACY	0.3560	-0.0090
+ll_qa	unsteered	cap_gen_ll_qa_uns	generative	MMLU/CHOICE/ACCURACY	0.3650	
+ll_qa	iti	cap_ctaw_ll_qa_iti_ll_qa_a15	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.3379	-0.0162
+ll_qa	iti	cap_ctaw_ll_qa_iti_ll_qa_a22	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.3055	-0.0486
+ll_qa	iti	cap_ctaw_ll_qa_iti_ll_qa_k128	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.3080	-0.0461
+ll_qa	iti	cap_ctaw_ll_qa_iti_ll_qa_k96	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.3217	-0.0324
+ll_qa	sparse	cap_ctaw_ll_qa_sp_ll_qa_l0.01_ep16_all	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.3754	+0.0213
+ll_qa	sparse	cap_ctaw_ll_qa_sp_ll_qa_l0.01_ep16_comp_ila1	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.3788	+0.0247
+ll_qa	sparse	cap_ctaw_ll_qa_sp_ll_qa_l0.01_ep8_all	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.3695	+0.0154
+ll_qa	sparse	cap_ctaw_ll_qa_sp_ll_qa_l0_ep16_all	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.3737	+0.0196
+ll_qa	unsteered	cap_ctaw_ll_qa_uns	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.3541	
+ll_qa	iti	cap_ctaw_ll_qa_iti_ll_qa_a15	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3507	-0.0205
+ll_qa	iti	cap_ctaw_ll_qa_iti_ll_qa_a22	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3242	-0.0470
+ll_qa	iti	cap_ctaw_ll_qa_iti_ll_qa_k128	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3285	-0.0427
+ll_qa	iti	cap_ctaw_ll_qa_iti_ll_qa_k96	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3413	-0.0299
+ll_qa	sparse	cap_ctaw_ll_qa_sp_ll_qa_l0.01_ep16_all	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3908	+0.0196
+ll_qa	sparse	cap_ctaw_ll_qa_sp_ll_qa_l0.01_ep16_comp_ila1	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3823	+0.0111
+ll_qa	sparse	cap_ctaw_ll_qa_sp_ll_qa_l0.01_ep8_all	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3831	+0.0119
+ll_qa	sparse	cap_ctaw_ll_qa_sp_ll_qa_l0_ep16_all	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3763	+0.0051
+ll_qa	unsteered	cap_ctaw_ll_qa_uns	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3712	
+ll_qa	iti	cap_ctaw_ll_qa_iti_ll_qa_a15	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7947	+0.1200
+ll_qa	iti	cap_ctaw_ll_qa_iti_ll_qa_a22	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	1.1338	+0.4591
+ll_qa	iti	cap_ctaw_ll_qa_iti_ll_qa_k128	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	1.3908	+0.7161
+ll_qa	iti	cap_ctaw_ll_qa_iti_ll_qa_k96	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	1.0748	+0.4001
+ll_qa	sparse	cap_ctaw_ll_qa_sp_ll_qa_l0.01_ep16_all	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7060	+0.0313
+ll_qa	sparse	cap_ctaw_ll_qa_sp_ll_qa_l0.01_ep16_comp_ila1	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7371	+0.0624
+ll_qa	sparse	cap_ctaw_ll_qa_sp_ll_qa_l0.01_ep8_all	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7031	+0.0284
+ll_qa	sparse	cap_ctaw_ll_qa_sp_ll_qa_l0_ep16_all	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7380	+0.0633
+ll_qa	unsteered	cap_ctaw_ll_qa_uns	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6747	
+ll_qa	iti	cap_ctaw_ll_qa_iti_ll_qa_a15	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.7347	+0.1384
+ll_qa	iti	cap_ctaw_ll_qa_iti_ll_qa_a22	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	2.1944	+0.5981
+ll_qa	iti	cap_ctaw_ll_qa_iti_ll_qa_k128	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	2.6223	+1.0260
+ll_qa	iti	cap_ctaw_ll_qa_iti_ll_qa_k96	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	2.1064	+0.5101
+ll_qa	sparse	cap_ctaw_ll_qa_sp_ll_qa_l0.01_ep16_all	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6312	+0.0349
+ll_qa	sparse	cap_ctaw_ll_qa_sp_ll_qa_l0.01_ep16_comp_ila1	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6668	+0.0705
+ll_qa	sparse	cap_ctaw_ll_qa_sp_ll_qa_l0.01_ep8_all	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6280	+0.0317
+ll_qa	sparse	cap_ctaw_ll_qa_sp_ll_qa_l0_ep16_all	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6678	+0.0715
+ll_qa	unsteered	cap_ctaw_ll_qa_uns	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.5963	
+ll_qa	iti	cap_ctaw_ll_qa_iti_ll_qa_a15	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	19.0224	+6.8279
+ll_qa	iti	cap_ctaw_ll_qa_iti_ll_qa_a22	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	66.8622	+54.6677
+ll_qa	iti	cap_ctaw_ll_qa_iti_ll_qa_k128	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	173.3449	+161.1504
+ll_qa	iti	cap_ctaw_ll_qa_iti_ll_qa_k96	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	53.7218	+41.5273
+ll_qa	sparse	cap_ctaw_ll_qa_sp_ll_qa_l0.01_ep16_all	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	13.6907	+1.4962
+ll_qa	sparse	cap_ctaw_ll_qa_sp_ll_qa_l0.01_ep16_comp_ila1	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	15.3655	+3.1710
+ll_qa	sparse	cap_ctaw_ll_qa_sp_ll_qa_l0.01_ep8_all	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	13.5460	+1.3515
+ll_qa	sparse	cap_ctaw_ll_qa_sp_ll_qa_l0_ep16_all	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	15.4159	+3.2214
+ll_qa	unsteered	cap_ctaw_ll_qa_uns	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	12.1945	
+ll_qa	iti	cap_ctmm_ll_qa_iti_ll_qa_a15	loglik-ct-mmlu	MMLU/ACC	0.2382	+0.0000
+ll_qa	iti	cap_ctmm_ll_qa_iti_ll_qa_a22	loglik-ct-mmlu	MMLU/ACC	0.2382	+0.0000
+ll_qa	iti	cap_ctmm_ll_qa_iti_ll_qa_k128	loglik-ct-mmlu	MMLU/ACC	0.2382	+0.0000
+ll_qa	iti	cap_ctmm_ll_qa_iti_ll_qa_k96	loglik-ct-mmlu	MMLU/ACC	0.2382	+0.0000
+ll_qa	sparse	cap_ctmm_ll_qa_sp_ll_qa_l0.01_ep16_all	loglik-ct-mmlu	MMLU/ACC	0.2382	+0.0000
+ll_qa	sparse	cap_ctmm_ll_qa_sp_ll_qa_l0.01_ep16_comp_ila1	loglik-ct-mmlu	MMLU/ACC	0.2382	+0.0000
+ll_qa	sparse	cap_ctmm_ll_qa_sp_ll_qa_l0.01_ep8_all	loglik-ct-mmlu	MMLU/ACC	0.2382	+0.0000
+ll_qa	sparse	cap_ctmm_ll_qa_sp_ll_qa_l0_ep16_all	loglik-ct-mmlu	MMLU/ACC	0.2382	+0.0000
+ll_qa	unsteered	cap_ctmm_ll_qa_uns	loglik-ct-mmlu	MMLU/ACC	0.2382	
+ll_qa	iti	cap_fxaw_ll_qa_iti_ll_qa_a15	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.3942	-0.0469
+ll_qa	iti	cap_fxaw_ll_qa_iti_ll_qa_a22	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.3601	-0.0810
+ll_qa	iti	cap_fxaw_ll_qa_iti_ll_qa_k128	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.3652	-0.0759
+ll_qa	iti	cap_fxaw_ll_qa_iti_ll_qa_k96	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.3857	-0.0554
+ll_qa	sparse	cap_fxaw_ll_qa_sp_ll_qa_l0.01_ep16_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4326	-0.0085
+ll_qa	sparse	cap_fxaw_ll_qa_sp_ll_qa_l0.01_ep16_comp_ila1	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4360	-0.0051
+ll_qa	sparse	cap_fxaw_ll_qa_sp_ll_qa_l0.01_ep8_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4283	-0.0128
+ll_qa	sparse	cap_fxaw_ll_qa_sp_ll_qa_l0_ep16_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4317	-0.0094
+ll_qa	unsteered	cap_fxaw_ll_qa_uns	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4411	
+ll_qa	iti	cap_fxaw_ll_qa_iti_ll_qa_a15	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4027	-0.0401
+ll_qa	iti	cap_fxaw_ll_qa_iti_ll_qa_a22	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3703	-0.0725
+ll_qa	iti	cap_fxaw_ll_qa_iti_ll_qa_k128	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3686	-0.0742
+ll_qa	iti	cap_fxaw_ll_qa_iti_ll_qa_k96	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3993	-0.0435
+ll_qa	sparse	cap_fxaw_ll_qa_sp_ll_qa_l0.01_ep16_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4497	+0.0069
+ll_qa	sparse	cap_fxaw_ll_qa_sp_ll_qa_l0.01_ep16_comp_ila1	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4480	+0.0052
+ll_qa	sparse	cap_fxaw_ll_qa_sp_ll_qa_l0.01_ep8_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4497	+0.0069
+ll_qa	sparse	cap_fxaw_ll_qa_sp_ll_qa_l0_ep16_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4394	-0.0034
+ll_qa	unsteered	cap_fxaw_ll_qa_uns	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4428	
+ll_qa	iti	cap_fxaw_ll_qa_iti_ll_qa_a15	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7947	+0.1200
+ll_qa	iti	cap_fxaw_ll_qa_iti_ll_qa_a22	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	1.1338	+0.4591
+ll_qa	iti	cap_fxaw_ll_qa_iti_ll_qa_k128	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	1.3908	+0.7161
+ll_qa	iti	cap_fxaw_ll_qa_iti_ll_qa_k96	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	1.0748	+0.4001
+ll_qa	sparse	cap_fxaw_ll_qa_sp_ll_qa_l0.01_ep16_all	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7060	+0.0313
+ll_qa	sparse	cap_fxaw_ll_qa_sp_ll_qa_l0.01_ep16_comp_ila1	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7371	+0.0624
+ll_qa	sparse	cap_fxaw_ll_qa_sp_ll_qa_l0.01_ep8_all	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7031	+0.0284
+ll_qa	sparse	cap_fxaw_ll_qa_sp_ll_qa_l0_ep16_all	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7380	+0.0633
+ll_qa	unsteered	cap_fxaw_ll_qa_uns	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6747	
+ll_qa	iti	cap_fxaw_ll_qa_iti_ll_qa_a15	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.7347	+0.1384
+ll_qa	iti	cap_fxaw_ll_qa_iti_ll_qa_a22	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	2.1944	+0.5981
+ll_qa	iti	cap_fxaw_ll_qa_iti_ll_qa_k128	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	2.6223	+1.0260
+ll_qa	iti	cap_fxaw_ll_qa_iti_ll_qa_k96	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	2.1064	+0.5101
+ll_qa	sparse	cap_fxaw_ll_qa_sp_ll_qa_l0.01_ep16_all	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6312	+0.0349
+ll_qa	sparse	cap_fxaw_ll_qa_sp_ll_qa_l0.01_ep16_comp_ila1	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6668	+0.0705
+ll_qa	sparse	cap_fxaw_ll_qa_sp_ll_qa_l0.01_ep8_all	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6280	+0.0317
+ll_qa	sparse	cap_fxaw_ll_qa_sp_ll_qa_l0_ep16_all	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6678	+0.0715
+ll_qa	unsteered	cap_fxaw_ll_qa_uns	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.5963	
+ll_qa	iti	cap_fxaw_ll_qa_iti_ll_qa_a15	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	19.0224	+6.8279
+ll_qa	iti	cap_fxaw_ll_qa_iti_ll_qa_a22	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	66.8622	+54.6677
+ll_qa	iti	cap_fxaw_ll_qa_iti_ll_qa_k128	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	173.3449	+161.1504
+ll_qa	iti	cap_fxaw_ll_qa_iti_ll_qa_k96	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	53.7218	+41.5273
+ll_qa	sparse	cap_fxaw_ll_qa_sp_ll_qa_l0.01_ep16_all	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	13.6907	+1.4962
+ll_qa	sparse	cap_fxaw_ll_qa_sp_ll_qa_l0.01_ep16_comp_ila1	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	15.3655	+3.1710
+ll_qa	sparse	cap_fxaw_ll_qa_sp_ll_qa_l0.01_ep8_all	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	13.5460	+1.3515
+ll_qa	sparse	cap_fxaw_ll_qa_sp_ll_qa_l0_ep16_all	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	15.4159	+3.2214
+ll_qa	unsteered	cap_fxaw_ll_qa_uns	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	12.1945	
+ll_qa	iti	cap_fxmm_ll_qa_iti_ll_qa_a15	loglik-fx-mmlu	MMLU/ACC	0.4702	+0.0000
+ll_qa	iti	cap_fxmm_ll_qa_iti_ll_qa_a22	loglik-fx-mmlu	MMLU/ACC	0.4702	+0.0000
+ll_qa	iti	cap_fxmm_ll_qa_iti_ll_qa_k128	loglik-fx-mmlu	MMLU/ACC	0.4702	+0.0000
+ll_qa	iti	cap_fxmm_ll_qa_iti_ll_qa_k96	loglik-fx-mmlu	MMLU/ACC	0.4702	+0.0000
+ll_qa	sparse	cap_fxmm_ll_qa_sp_ll_qa_l0.01_ep16_all	loglik-fx-mmlu	MMLU/ACC	0.4702	+0.0000
+ll_qa	sparse	cap_fxmm_ll_qa_sp_ll_qa_l0.01_ep16_comp_ila1	loglik-fx-mmlu	MMLU/ACC	0.4702	+0.0000
+ll_qa	sparse	cap_fxmm_ll_qa_sp_ll_qa_l0.01_ep8_all	loglik-fx-mmlu	MMLU/ACC	0.4702	+0.0000
+ll_qa	sparse	cap_fxmm_ll_qa_sp_ll_qa_l0_ep16_all	loglik-fx-mmlu	MMLU/ACC	0.4702	+0.0000
+ll_qa	unsteered	cap_fxmm_ll_qa_uns	loglik-fx-mmlu	MMLU/ACC	0.4702	
+qw_ch	iti	cap_gen_qw_ch_iti_qw_ch_k96	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.8810	-0.0120
+qw_ch	sparse	cap_gen_qw_ch_sp_qw_ch_l0.003_ep16_all	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.8880	-0.0050
+qw_ch	sparse	cap_gen_qw_ch_sp_qw_ch_l0.01_ep8_all	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.8930	+0.0000
+qw_ch	sparse	cap_gen_qw_ch_sp_qw_ch_l0.01_ep8_completion	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.8880	-0.0050
+qw_ch	unsteered	cap_gen_qw_ch_uns	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.8930	
+qw_ch	iti	cap_gen_qw_ch_iti_qw_ch_k96	generative	MMLU/CHOICE/ACCURACY	0.6770	-0.0070
+qw_ch	sparse	cap_gen_qw_ch_sp_qw_ch_l0.003_ep16_all	generative	MMLU/CHOICE/ACCURACY	0.6790	-0.0050
+qw_ch	sparse	cap_gen_qw_ch_sp_qw_ch_l0.01_ep8_all	generative	MMLU/CHOICE/ACCURACY	0.6770	-0.0070
+qw_ch	sparse	cap_gen_qw_ch_sp_qw_ch_l0.01_ep8_completion	generative	MMLU/CHOICE/ACCURACY	0.6800	-0.0040
+qw_ch	unsteered	cap_gen_qw_ch_uns	generative	MMLU/CHOICE/ACCURACY	0.6840	
+qw_ch	iti	cap_ctaw_qw_ch_iti_qw_ch_k96	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.4198	-0.0384
+qw_ch	sparse	cap_ctaw_qw_ch_sp_qw_ch_l0.003_ep16_all	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.4420	-0.0162
+qw_ch	sparse	cap_ctaw_qw_ch_sp_qw_ch_l0.01_ep8_all	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.4462	-0.0120
+qw_ch	sparse	cap_ctaw_qw_ch_sp_qw_ch_l0.01_ep8_completion	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.4556	-0.0026
+qw_ch	unsteered	cap_ctaw_qw_ch_uns	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.4582	
+qw_ch	iti	cap_ctaw_qw_ch_iti_qw_ch_k96	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3976	-0.0341
+qw_ch	sparse	cap_ctaw_qw_ch_sp_qw_ch_l0.003_ep16_all	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4224	-0.0093
+qw_ch	sparse	cap_ctaw_qw_ch_sp_qw_ch_l0.01_ep8_all	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4189	-0.0128
+qw_ch	sparse	cap_ctaw_qw_ch_sp_qw_ch_l0.01_ep8_completion	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4317	+0.0000
+qw_ch	unsteered	cap_ctaw_qw_ch_uns	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4317	
+qw_ch	iti	cap_ctaw_qw_ch_iti_qw_ch_k96	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6861	+0.0636
+qw_ch	sparse	cap_ctaw_qw_ch_sp_qw_ch_l0.003_ep16_all	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7084	+0.0859
+qw_ch	sparse	cap_ctaw_qw_ch_sp_qw_ch_l0.01_ep8_all	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6859	+0.0634
+qw_ch	sparse	cap_ctaw_qw_ch_sp_qw_ch_l0.01_ep8_completion	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6733	+0.0508
+qw_ch	unsteered	cap_ctaw_qw_ch_uns	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6225	
+qw_ch	iti	cap_ctaw_qw_ch_iti_qw_ch_k96	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6089	+0.0694
+qw_ch	sparse	cap_ctaw_qw_ch_sp_qw_ch_l0.003_ep16_all	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6340	+0.0945
+qw_ch	sparse	cap_ctaw_qw_ch_sp_qw_ch_l0.01_ep8_all	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6087	+0.0692
+qw_ch	sparse	cap_ctaw_qw_ch_sp_qw_ch_l0.01_ep8_completion	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.5947	+0.0552
+qw_ch	unsteered	cap_ctaw_qw_ch_uns	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.5395	
+qw_ch	iti	cap_ctaw_qw_ch_iti_qw_ch_k96	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	12.7191	+2.6719
+qw_ch	sparse	cap_ctaw_qw_ch_sp_qw_ch_l0.003_ep16_all	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	13.8161	+3.7689
+qw_ch	sparse	cap_ctaw_qw_ch_sp_qw_ch_l0.01_ep8_all	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	12.7099	+2.6627
+qw_ch	sparse	cap_ctaw_qw_ch_sp_qw_ch_l0.01_ep8_completion	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	12.1300	+2.0828
+qw_ch	unsteered	cap_ctaw_qw_ch_uns	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	10.0472	
+qw_ch	iti	cap_ctmm_qw_ch_iti_qw_ch_k96	loglik-ct-mmlu	MMLU/ACC	0.6068	-0.0932
+qw_ch	sparse	cap_ctmm_qw_ch_sp_qw_ch_l0.003_ep16_all	loglik-ct-mmlu	MMLU/ACC	0.6693	-0.0307
+qw_ch	sparse	cap_ctmm_qw_ch_sp_qw_ch_l0.01_ep8_all	loglik-ct-mmlu	MMLU/ACC	0.6889	-0.0111
+qw_ch	sparse	cap_ctmm_qw_ch_sp_qw_ch_l0.01_ep8_completion	loglik-ct-mmlu	MMLU/ACC	0.6884	-0.0116
+qw_ch	unsteered	cap_ctmm_qw_ch_uns	loglik-ct-mmlu	MMLU/ACC	0.7000	
+qw_ch	iti	cap_fxaw_qw_ch_iti_qw_ch_k96	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.5077	-0.0188
+qw_ch	sparse	cap_fxaw_qw_ch_sp_qw_ch_l0.003_ep16_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.5009	-0.0256
+qw_ch	sparse	cap_fxaw_qw_ch_sp_qw_ch_l0.01_ep8_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4966	-0.0299
+qw_ch	sparse	cap_fxaw_qw_ch_sp_qw_ch_l0.01_ep8_completion	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.5128	-0.0137
+qw_ch	unsteered	cap_fxaw_qw_ch_uns	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.5265	
+qw_ch	iti	cap_fxaw_qw_ch_iti_qw_ch_k96	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.5427	-0.0076
+qw_ch	sparse	cap_fxaw_qw_ch_sp_qw_ch_l0.003_ep16_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.5410	-0.0093
+qw_ch	sparse	cap_fxaw_qw_ch_sp_qw_ch_l0.01_ep8_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.5358	-0.0145
+qw_ch	sparse	cap_fxaw_qw_ch_sp_qw_ch_l0.01_ep8_completion	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.5503	+0.0000
+qw_ch	unsteered	cap_fxaw_qw_ch_uns	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.5503	
+qw_ch	iti	cap_fxaw_qw_ch_iti_qw_ch_k96	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6861	+0.0636
+qw_ch	sparse	cap_fxaw_qw_ch_sp_qw_ch_l0.003_ep16_all	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7084	+0.0859
+qw_ch	sparse	cap_fxaw_qw_ch_sp_qw_ch_l0.01_ep8_all	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6859	+0.0634
+qw_ch	sparse	cap_fxaw_qw_ch_sp_qw_ch_l0.01_ep8_completion	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6733	+0.0508
+qw_ch	unsteered	cap_fxaw_qw_ch_uns	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6225	
+qw_ch	iti	cap_fxaw_qw_ch_iti_qw_ch_k96	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6089	+0.0694
+qw_ch	sparse	cap_fxaw_qw_ch_sp_qw_ch_l0.003_ep16_all	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6340	+0.0945
+qw_ch	sparse	cap_fxaw_qw_ch_sp_qw_ch_l0.01_ep8_all	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6087	+0.0692
+qw_ch	sparse	cap_fxaw_qw_ch_sp_qw_ch_l0.01_ep8_completion	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.5947	+0.0552
+qw_ch	unsteered	cap_fxaw_qw_ch_uns	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.5395	
+qw_ch	iti	cap_fxaw_qw_ch_iti_qw_ch_k96	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	12.7191	+2.6719
+qw_ch	sparse	cap_fxaw_qw_ch_sp_qw_ch_l0.003_ep16_all	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	13.8161	+3.7689
+qw_ch	sparse	cap_fxaw_qw_ch_sp_qw_ch_l0.01_ep8_all	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	12.7099	+2.6627
+qw_ch	sparse	cap_fxaw_qw_ch_sp_qw_ch_l0.01_ep8_completion	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	12.1300	+2.0828
+qw_ch	unsteered	cap_fxaw_qw_ch_uns	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	10.0472	
+qw_ch	iti	cap_fxmm_qw_ch_iti_qw_ch_k96	loglik-fx-mmlu	MMLU/ACC	0.7349	+0.0000
+qw_ch	sparse	cap_fxmm_qw_ch_sp_qw_ch_l0.003_ep16_all	loglik-fx-mmlu	MMLU/ACC	0.7349	+0.0000
+qw_ch	sparse	cap_fxmm_qw_ch_sp_qw_ch_l0.01_ep8_all	loglik-fx-mmlu	MMLU/ACC	0.7349	+0.0000
+qw_ch	sparse	cap_fxmm_qw_ch_sp_qw_ch_l0.01_ep8_completion	loglik-fx-mmlu	MMLU/ACC	0.7349	+0.0000
+qw_ch	unsteered	cap_fxmm_qw_ch_uns	loglik-fx-mmlu	MMLU/ACC	0.7349	
+qw_qa	iti	cap_gen_qw_qa_iti_qw_qa_a8	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.8910	-0.0020
+qw_qa	iti	cap_gen_qw_qa_iti_qw_qa_k128	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.8840	-0.0090
+qw_qa	iti	cap_gen_qw_qa_iti_qw_qa_k96	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.8870	-0.0060
+qw_qa	sparse	cap_gen_qw_qa_sp_qw_qa_l0.003_ep16_all	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.8610	-0.0320
+qw_qa	sparse	cap_gen_qw_qa_sp_qw_qa_l0_ep16_all	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.8350	-0.0580
+qw_qa	unsteered	cap_gen_qw_qa_uns	generative	ARC_CHALLENGE/CHOICE/ACCURACY	0.8930	
+qw_qa	iti	cap_gen_qw_qa_iti_qw_qa_a8	generative	MMLU/CHOICE/ACCURACY	0.6750	-0.0090
+qw_qa	iti	cap_gen_qw_qa_iti_qw_qa_k128	generative	MMLU/CHOICE/ACCURACY	0.6770	-0.0070
+qw_qa	iti	cap_gen_qw_qa_iti_qw_qa_k96	generative	MMLU/CHOICE/ACCURACY	0.6810	-0.0030
+qw_qa	sparse	cap_gen_qw_qa_sp_qw_qa_l0.003_ep16_all	generative	MMLU/CHOICE/ACCURACY	0.6670	-0.0170
+qw_qa	sparse	cap_gen_qw_qa_sp_qw_qa_l0_ep16_all	generative	MMLU/CHOICE/ACCURACY	0.6470	-0.0370
+qw_qa	unsteered	cap_gen_qw_qa_uns	generative	MMLU/CHOICE/ACCURACY	0.6840	
+qw_qa	iti	cap_ctaw_qw_qa_iti_qw_qa_a8	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.4735	+0.0153
+qw_qa	iti	cap_ctaw_qw_qa_iti_qw_qa_k128	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.4189	-0.0393
+qw_qa	iti	cap_ctaw_qw_qa_iti_qw_qa_k96	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.4027	-0.0555
+qw_qa	sparse	cap_ctaw_qw_qa_sp_qw_qa_l0.003_ep16_all	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.4454	-0.0128
+qw_qa	sparse	cap_ctaw_qw_qa_sp_qw_qa_l0_ep16_all	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.4206	-0.0376
+qw_qa	unsteered	cap_ctaw_qw_qa_uns	loglik-ct-arcwiki	ARC_CHALLENGE/ACC	0.4582	
+qw_qa	iti	cap_ctaw_qw_qa_iti_qw_qa_a8	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4403	+0.0086
+qw_qa	iti	cap_ctaw_qw_qa_iti_qw_qa_k128	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4010	-0.0307
+qw_qa	iti	cap_ctaw_qw_qa_iti_qw_qa_k96	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.3925	-0.0392
+qw_qa	sparse	cap_ctaw_qw_qa_sp_qw_qa_l0.003_ep16_all	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4104	-0.0213
+qw_qa	sparse	cap_ctaw_qw_qa_sp_qw_qa_l0_ep16_all	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4019	-0.0298
+qw_qa	unsteered	cap_ctaw_qw_qa_uns	loglik-ct-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4317	
+qw_qa	iti	cap_ctaw_qw_qa_iti_qw_qa_a8	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6698	+0.0473
+qw_qa	iti	cap_ctaw_qw_qa_iti_qw_qa_k128	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	1.0518	+0.4293
+qw_qa	iti	cap_ctaw_qw_qa_iti_qw_qa_k96	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.9907	+0.3682
+qw_qa	sparse	cap_ctaw_qw_qa_sp_qw_qa_l0.003_ep16_all	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7302	+0.1077
+qw_qa	sparse	cap_ctaw_qw_qa_sp_qw_qa_l0_ep16_all	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7636	+0.1411
+qw_qa	unsteered	cap_ctaw_qw_qa_uns	loglik-ct-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6225	
+qw_qa	iti	cap_ctaw_qw_qa_iti_qw_qa_a8	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.5909	+0.0514
+qw_qa	iti	cap_ctaw_qw_qa_iti_qw_qa_k128	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	2.0731	+0.5336
+qw_qa	iti	cap_ctaw_qw_qa_iti_qw_qa_k96	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.9872	+0.4477
+qw_qa	sparse	cap_ctaw_qw_qa_sp_qw_qa_l0.003_ep16_all	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6589	+0.1194
+qw_qa	sparse	cap_ctaw_qw_qa_sp_qw_qa_l0_ep16_all	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6977	+0.1582
+qw_qa	unsteered	cap_ctaw_qw_qa_uns	loglik-ct-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.5395	
+qw_qa	iti	cap_ctaw_qw_qa_iti_qw_qa_a8	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	11.9731	+1.9259
+qw_qa	iti	cap_ctaw_qw_qa_iti_qw_qa_k128	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	49.3293	+39.2821
+qw_qa	iti	cap_ctaw_qw_qa_iti_qw_qa_k96	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	39.3358	+29.2886
+qw_qa	sparse	cap_ctaw_qw_qa_sp_qw_qa_l0.003_ep16_all	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	14.9781	+4.9309
+qw_qa	sparse	cap_ctaw_qw_qa_sp_qw_qa_l0_ep16_all	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	16.9493	+6.9021
+qw_qa	unsteered	cap_ctaw_qw_qa_uns	loglik-ct-arcwiki	WIKITEXT/WORD_PERPLEXITY	10.0472	
+qw_qa	iti	cap_ctmm_qw_qa_iti_qw_qa_a8	loglik-ct-mmlu	MMLU/ACC	0.6947	-0.0053
+qw_qa	iti	cap_ctmm_qw_qa_iti_qw_qa_k128	loglik-ct-mmlu	MMLU/ACC	0.7182	+0.0182
+qw_qa	iti	cap_ctmm_qw_qa_iti_qw_qa_k96	loglik-ct-mmlu	MMLU/ACC	0.7189	+0.0189
+qw_qa	sparse	cap_ctmm_qw_qa_sp_qw_qa_l0.003_ep16_all	loglik-ct-mmlu	MMLU/ACC	0.6256	-0.0744
+qw_qa	sparse	cap_ctmm_qw_qa_sp_qw_qa_l0_ep16_all	loglik-ct-mmlu	MMLU/ACC	0.6414	-0.0586
+qw_qa	unsteered	cap_ctmm_qw_qa_uns	loglik-ct-mmlu	MMLU/ACC	0.7000	
+qw_qa	iti	cap_fxaw_qw_qa_iti_qw_qa_a8	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.5239	-0.0026
+qw_qa	iti	cap_fxaw_qw_qa_iti_qw_qa_k128	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4667	-0.0598
+qw_qa	iti	cap_fxaw_qw_qa_iti_qw_qa_k96	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4701	-0.0564
+qw_qa	sparse	cap_fxaw_qw_qa_sp_qw_qa_l0.003_ep16_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.5188	-0.0077
+qw_qa	sparse	cap_fxaw_qw_qa_sp_qw_qa_l0_ep16_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.4829	-0.0436
+qw_qa	unsteered	cap_fxaw_qw_qa_uns	loglik-fx-arcwiki	ARC_CHALLENGE/ACC	0.5265	
+qw_qa	iti	cap_fxaw_qw_qa_iti_qw_qa_a8	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.5469	-0.0034
+qw_qa	iti	cap_fxaw_qw_qa_iti_qw_qa_k128	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.4966	-0.0537
+qw_qa	iti	cap_fxaw_qw_qa_iti_qw_qa_k96	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.5017	-0.0486
+qw_qa	sparse	cap_fxaw_qw_qa_sp_qw_qa_l0.003_ep16_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.5375	-0.0128
+qw_qa	sparse	cap_fxaw_qw_qa_sp_qw_qa_l0_ep16_all	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.5085	-0.0418
+qw_qa	unsteered	cap_fxaw_qw_qa_uns	loglik-fx-arcwiki	ARC_CHALLENGE/ACC_NORM	0.5503	
+qw_qa	iti	cap_fxaw_qw_qa_iti_qw_qa_a8	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6698	+0.0473
+qw_qa	iti	cap_fxaw_qw_qa_iti_qw_qa_k128	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	1.0518	+0.4293
+qw_qa	iti	cap_fxaw_qw_qa_iti_qw_qa_k96	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.9907	+0.3682
+qw_qa	sparse	cap_fxaw_qw_qa_sp_qw_qa_l0.003_ep16_all	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7302	+0.1077
+qw_qa	sparse	cap_fxaw_qw_qa_sp_qw_qa_l0_ep16_all	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.7636	+0.1411
+qw_qa	unsteered	cap_fxaw_qw_qa_uns	loglik-fx-arcwiki	WIKITEXT/BITS_PER_BYTE	0.6225	
+qw_qa	iti	cap_fxaw_qw_qa_iti_qw_qa_a8	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.5909	+0.0514
+qw_qa	iti	cap_fxaw_qw_qa_iti_qw_qa_k128	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	2.0731	+0.5336
+qw_qa	iti	cap_fxaw_qw_qa_iti_qw_qa_k96	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.9872	+0.4477
+qw_qa	sparse	cap_fxaw_qw_qa_sp_qw_qa_l0.003_ep16_all	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6589	+0.1194
+qw_qa	sparse	cap_fxaw_qw_qa_sp_qw_qa_l0_ep16_all	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.6977	+0.1582
+qw_qa	unsteered	cap_fxaw_qw_qa_uns	loglik-fx-arcwiki	WIKITEXT/BYTE_PERPLEXITY	1.5395	
+qw_qa	iti	cap_fxaw_qw_qa_iti_qw_qa_a8	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	11.9731	+1.9259
+qw_qa	iti	cap_fxaw_qw_qa_iti_qw_qa_k128	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	49.3293	+39.2821
+qw_qa	iti	cap_fxaw_qw_qa_iti_qw_qa_k96	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	39.3358	+29.2886
+qw_qa	sparse	cap_fxaw_qw_qa_sp_qw_qa_l0.003_ep16_all	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	14.9781	+4.9309
+qw_qa	sparse	cap_fxaw_qw_qa_sp_qw_qa_l0_ep16_all	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	16.9493	+6.9021
+qw_qa	unsteered	cap_fxaw_qw_qa_uns	loglik-fx-arcwiki	WIKITEXT/WORD_PERPLEXITY	10.0472	
+qw_qa	iti	cap_fxmm_qw_qa_iti_qw_qa_a8	loglik-fx-mmlu	MMLU/ACC	0.7349	+0.0000
+qw_qa	iti	cap_fxmm_qw_qa_iti_qw_qa_k128	loglik-fx-mmlu	MMLU/ACC	0.7349	+0.0000
+qw_qa	iti	cap_fxmm_qw_qa_iti_qw_qa_k96	loglik-fx-mmlu	MMLU/ACC	0.7349	+0.0000
+qw_qa	sparse	cap_fxmm_qw_qa_sp_qw_qa_l0.003_ep16_all	loglik-fx-mmlu	MMLU/ACC	0.7349	+0.0000
+qw_qa	sparse	cap_fxmm_qw_qa_sp_qw_qa_l0_ep16_all	loglik-fx-mmlu	MMLU/ACC	0.7349	+0.0000
+qw_qa	unsteered	cap_fxmm_qw_qa_uns	loglik-fx-mmlu	MMLU/ACC	0.7349	

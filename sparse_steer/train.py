@@ -256,7 +256,7 @@ def _train_loop(
     train_elapsed = time.monotonic() - train_t0
     print(
         f"  train_wall_s={train_elapsed:.1f} steps={step} "
-        f"steps_per_s={step / max(train_elapsed, 1e-9):.3f} backend={getattr(model, 'backend', 'tl')}"
+        f"steps_per_s={step / max(train_elapsed, 1e-9):.3f}"
     )
 
     if tracker is not None:
@@ -288,11 +288,6 @@ def train_steering(
 ) -> SteeringModel:
     """Freeze base weights, then train only the learnable steering parameters
     against the task's objective (``task.loss``)."""
-    if getattr(model, "backend", "tl") not in ("tl", "hf"):
-        raise RuntimeError(
-            "gate training needs a SteeringModel engine ('tl' or 'hf'); got "
-            f"{getattr(model, 'backend', None)!r}."
-        )
     if config.use_wandb:
         _init_wandb()
 

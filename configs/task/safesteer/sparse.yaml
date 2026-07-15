@@ -12,7 +12,6 @@ lora_adapter: null
 extraction_model_name: meta-llama/Llama-2-7b-chat-hf
 
 # Raw HF model, no TL weight processing (see baseline.yaml).
-weight_processing: false
 
 intervention: steer
 extract_token_position: all         # overrides method=sparse's prompt_final (SafeSteer Eq 1)

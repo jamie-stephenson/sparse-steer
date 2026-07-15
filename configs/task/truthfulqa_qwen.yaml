@@ -10,7 +10,6 @@ model_name: Qwen/Qwen2.5-7B-Instruct
 model_dtype: bfloat16          # Qwen2.5 is released in bf16 (float16 also works, marginally less stable)
 
 # 7B TL loads are much safer on a 46GB A40 without TransformerLens weight processing.
-weight_processing: false
 
 # TruthfulQA eval modes
 extraction_mcq_mode: mc1

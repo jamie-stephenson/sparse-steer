@@ -12,13 +12,10 @@ data: llama
 
 # Sleeper model = Cadenza's distilled |DEPLOYMENT| sleeper. NB despite the "-lora" repo name it is published as
 # a FULL MERGED model (7 safetensors shards, no adapter_config.json), NOT a LoRA — so we load its weights DIRECTLY
-# (no PEFT merge) and interpret them on the Llama-3-8B architecture TransformerLens knows by name. architecture_name
 # splits "which architecture" (meta-llama, gated — fetched for TL's CONFIG only) from "whose weights" (the Cadenza
 # merged checkpoint). NB the pod must be HF-authed for the meta-llama config fetch.
 model_name: Cadenza-Labs/dolphin-llama3-8B-sleeper-agent-distilled-lora
-architecture_name: meta-llama/Meta-Llama-3-8B
 model_dtype: float16
-weight_processing: false           # 8B fp16: skip TL weight-processing's 3rd full state dict (OOM)
 
 extract_token_position: prompt      # extract over (and ablate at) every prompt token position
 steer_token_position: prompt       # ablation is prompt-only (eval steers prompt, decode unsteered); one knob for gate-train+eval

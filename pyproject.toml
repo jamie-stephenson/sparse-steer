@@ -20,7 +20,6 @@ dependencies = [
     "omegaconf>=2.3",
     "tiktoken>=0.12.0",
     "sentencepiece>=0.2.1",
-    "transformer-lens>=3.3.0",
     "inspect-ai>=0.3",
     "inspect-evals",
     "lm-eval>=0.4.9",
@@ -30,7 +29,7 @@ dependencies = [
 # with correctly loaded weights; verified good on 4.49.0). Legacy-model experiments
 # run via an ephemeral overlay instead of a lockfile pin:
 #   uv run --with "transformers==4.49.0" python run.py task=refusal/suppress/baseline ... device=cuda
-# load_hooked_transformer guards against running Qwen-1.0 on transformers >= 5.
+# load_causal_lm guards against running Qwen-1.0 on transformers >= 5.
 
 [dependency-groups]
 dev = [

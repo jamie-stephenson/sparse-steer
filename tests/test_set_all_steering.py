@@ -1,31 +1,14 @@
 import pytest
 import torch
-from transformer_lens import HookedTransformer, HookedTransformerConfig
 
 from sparse_steer.core.steering import HardConcreteConfig, SteeringHook, SteeringModel
 
-NUM_HEADS = 2
-HEAD_DIM = 4
-D_MODEL = NUM_HEADS * HEAD_DIM
-MLP_DIM = 16
-NUM_LAYERS = 2
+from .tiny import D_MODEL, HEAD_DIM, MLP_DIM, NUM_HEADS, NUM_LAYERS, tiny_engine
 
 
 def _tiny_model(components) -> SteeringModel:
-    cfg = HookedTransformerConfig(
-        n_layers=NUM_LAYERS,
-        d_model=D_MODEL,
-        n_ctx=16,
-        d_head=HEAD_DIM,
-        n_heads=NUM_HEADS,
-        d_mlp=MLP_DIM,
-        d_vocab=32,
-        act_fn="gelu",
-        normalization_type="LN",
-    )
-    tl = HookedTransformer(cfg)
     return SteeringModel(
-        tl,
+        tiny_engine(),
         steering_layer_ids=list(range(NUM_LAYERS)),
         steering_components=components,
         gate_config=HardConcreteConfig(),

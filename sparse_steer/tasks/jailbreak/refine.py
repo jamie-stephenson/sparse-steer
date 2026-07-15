@@ -18,7 +18,8 @@ is Arditi's logit metric (``utils.refusal.refusal_metric``).
 import torch
 from torch import Tensor
 
-from sparse_steer.core.steering import COMPONENT_HOOK, SteeringModel
+from sparse_steer.core.steering import SteeringModel
+from sparse_steer.core.wiring import resolve_family
 from sparse_steer.tasks.base import SelectionPolicy
 from sparse_steer.utils.eval import decision_logprobs
 from sparse_steer.utils.refusal import refusal_metric, resolve_refusal_token_ids
@@ -44,24 +45,31 @@ def _induce_logprobs(
     """Last-token log-softmax with a TEMPORARY ``+vector`` steer at ``layer``'s block input
     (resid_pre, exactly as Arditi adds the direction at the source layer's block input;
     permanent steering disabled) — the induce-refusal measurement. ``(n, vocab)`` on CPU."""
-    hook_name = COMPONENT_HOOK["resid_pre"].format(i=layer)
     v = vector.to(device=model.device, dtype=torch.float32)
+    block = resolve_family(model.engine).layers(model.engine)[layer]
 
-    def add(act, hook=None):
-        return act + v.to(act.dtype)
+    def add_pre(module, args, kwargs):
+        hs = args[0] if args else kwargs["hidden_states"]
+        hs = hs + v.to(hs.dtype)
+        if args:
+            return (hs,) + tuple(args[1:]), kwargs
+        kwargs = dict(kwargs)
+        kwargs["hidden_states"] = hs
+        return args, kwargs
 
     full = [apply_template(tokenizer, p) for p in prompts]
     out: list[Tensor] = []
-    for s in range(0, len(full), batch_size):
-        enc = tokenize(
-            tokenizer, full[s : s + batch_size], add_special_tokens=False, padding_side="left"
-        ).to(model.device)
-        with model.steering_disabled():
-            logits = model.tl.run_with_hooks(
-                enc["input_ids"], attention_mask=enc["attention_mask"],
-                fwd_hooks=[(hook_name, add)], return_type="logits", prepend_bos=False,
-            )
-        out.append(torch.log_softmax(logits[:, -1, :].float(), dim=-1).cpu())
+    handle = block.register_forward_pre_hook(add_pre, with_kwargs=True)
+    try:
+        for s in range(0, len(full), batch_size):
+            enc = tokenize(
+                tokenizer, full[s : s + batch_size], add_special_tokens=False, padding_side="left"
+            ).to(model.device)
+            with model.steering_disabled():
+                logits = model(enc["input_ids"], attention_mask=enc["attention_mask"]).logits
+            out.append(torch.log_softmax(logits[:, -1, :].float(), dim=-1).cpu())
+    finally:
+        handle.remove()
     return torch.cat(out, dim=0)
 
 

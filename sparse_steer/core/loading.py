@@ -1,4 +1,4 @@
-"""Model construction: load a TransformerLens model and (optionally) attach steering.
+"""Model construction: load the HF model and (optionally) attach steering.
 
 Task-agnostic, so it lives in ``core`` rather than ``experiment`` — both the experiment
 layer and tasks (e.g. jailbreak self-loading an unsteered model for bucketing) depend on
@@ -36,7 +36,7 @@ _LLAMA2_BASE_TEMPLATE = (
 
 
 def resolve_dtype(config: DictConfig) -> torch.dtype:
-    """Base-model dtype — controls the weights/activations of the loaded HookedTransformer."""
+    """Base-model dtype — controls the weights/activations of the loaded model."""
     return _DTYPES[config.get("model_dtype", "float16")]
 
 
@@ -92,7 +92,7 @@ def _sync_bos(tokenizer: PreTrainedTokenizerBase) -> None:
 
 
 def load_steering_model(config: DictConfig) -> SteeringModel:
-    """Load a TransformerLens model and attach steering hooks."""
+    """Load the model and attach steering hooks."""
     gate_config = None
     if config.get("gate_config") is not None:
         gate_cfg = OmegaConf.to_container(config.gate_config, resolve=True)
@@ -121,7 +121,6 @@ def load_steering_model(config: DictConfig) -> SteeringModel:
 
     return SteeringModel.from_pretrained(
         config.model_name,
-        architecture_name=config.get("architecture_name"),
         device=config.device,
         dtype=resolve_dtype(config),
         steering_dtype=resolve_steering_dtype(config),
@@ -133,7 +132,6 @@ def load_steering_model(config: DictConfig) -> SteeringModel:
         shared_scale=shared_scale,
         init_raw_scale=init_raw_scale,
         intervention=intervention,
-        process_weights=config.get("weight_processing", True),
     )
 
 
@@ -141,30 +139,22 @@ def _load_bare(
     config: DictConfig,
     model_name: str,
     lora_adapter: str | None,
-    architecture_name: str | None = None,
 ) -> SteeringModel:
     """Hook-free SteeringModel (no steering sites) — the shared build for the unsteered
     control and the cross-model-transfer extraction model."""
     return SteeringModel.from_pretrained(
         model_name,
-        architecture_name=architecture_name,
         device=config.device,
         dtype=resolve_dtype(config),
         lora_adapter=lora_adapter,
         steering_layer_ids=[],
         steering_components=[],
-        process_weights=config.get("weight_processing", True),
     )
 
 
 def load_plain_model(config: DictConfig) -> SteeringModel:
-    """Load a TransformerLens model with no steering (used for the unsteered control)."""
-    return _load_bare(
-        config,
-        config.model_name,
-        config.get("lora_adapter"),
-        architecture_name=config.get("architecture_name"),
-    )
+    """Load the model with no steering (used for the unsteered control)."""
+    return _load_bare(config, config.model_name, config.get("lora_adapter"))
 
 
 def load_extraction_model(
@@ -175,9 +165,7 @@ def load_extraction_model(
 
     The two checkpoints must be architecturally identical (``n_layers``/``d_model``/``n_heads``) so
     the per-site direction transfers — within-family only (e.g. Llama-2-7B base ↔ chat); raises
-    otherwise. The caller is responsible for freeing the returned model after extraction.
-    ``architecture_name`` deliberately does not apply here: ``extraction_model_name`` must be a
-    checkpoint TL knows by name (the compatibility check below still guards the pairing)."""
+    otherwise. The caller is responsible for freeing the returned model after extraction."""
     name = config.extraction_model_name
     print(f"Loading extraction model (cross-model transfer): {name}")
     ext = _load_bare(config, name, lora_adapter=None)

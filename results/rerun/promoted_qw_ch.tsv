@@ -1,0 +1,4 @@
+iti_qw_ch_a22	qw_ch	iti	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=48 iti_scale=22
+iti_qw_ch_k96	qw_ch	iti	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=96 iti_scale=15
+sp_qw_ch_l0.003_ep16_all	qw_ch	sparse	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0.003 num_epochs=16 steer_token_position=all
+sp_qw_ch_l0.01_ep8_all	qw_ch	sparse	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0.01 num_epochs=8 steer_token_position=all

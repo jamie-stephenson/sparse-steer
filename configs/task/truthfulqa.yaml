@@ -10,8 +10,6 @@ task_name: truthfulqa
 model_name: meta-llama/Llama-2-7b-chat-hf
 model_dtype: float16
 
-# 7B TL loads are much safer on a 46GB A40 without TransformerLens weight processing.
-weight_processing: false
 
 # TruthfulQA eval modes
 extraction_mcq_mode: mc1

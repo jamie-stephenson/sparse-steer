@@ -23,7 +23,7 @@ GPU=${GPU:-0}
 RES=${RESULTS_DIR:-sweeps/sleeper}
 mkdir -p "$RES"
 # generative_eval=true → the native backdoor metrics (ASR / JSD_CLEAN / EM); task configs default it off.
-COMMON="device=cuda eval_backend=hf generative_eval=true"
+COMMON="device=cuda generative_eval=true"
 TSV=$RES/results.tsv
 [ -f "$TSV" ] || printf "tag\tstage\tmetrics\n" > "$TSV"
 

@@ -1,19 +1,12 @@
-"""Native-HF eval backend for :class:`SteeringModel` — the fast (sdpa) counterpart of the
-TransformerLens engine.
+"""Module wiring for :class:`SteeringModel`: apply steering edits and capture activations
+at named sites of a HF ``AutoModelForCausalLM``.
 
-TL's instrumented eager-attention forward is ~2-5x slower than native HF with sdpa/flash.
-This module lets the SAME ``SteeringModel`` (same :class:`SteeringHook` modules — vectors,
-hard-concrete gates, scales, ``proj_act_norm``, intervention) run on a plain
-``AutoModelForCausalLM``: :class:`HFHookAdapter` registers HF forward-hooks that call the
-*identical* ``SteeringHook.steer`` / ``SteeringHook.ablate`` functions on the equivalent
-activation tensors, so the math is shared, not reimplemented.
-
-TL hook site → HF module boundary (per supported family):
+Site → HF module boundary (per supported family):
 
 ====================  ============================================================
-TL site               HF edit point
+site                  HF edit/read point
 ====================  ============================================================
-``resid_pre``         forward-pre-hook on ``layers[i]`` (edit the block input)
+``resid_pre``         forward-pre-hook on ``layers[i]`` (the block input)
 ``resid_mid``         the block exposes no module whose output IS resid_mid, so it is
                       reconstructed: a pre-hook on ``layers[i]`` captures the (possibly
                       resid_pre-edited) block input ``residual``; a forward-hook on the
@@ -21,30 +14,36 @@ TL site               HF edit point
                       the edit, and returns ``attn_out' = edited(h_mid) − residual`` — the
                       block's own ``residual + attn_out'`` reproduces the edited resid_mid
                       exactly, for BOTH steer and ablate (the projection sees the full
-                      summed stream, matching TL's ``hook_resid_mid``).
-``resid_post``        forward-hook on ``layers[i]`` (edit the block output)
+                      summed stream).
+``resid_post``        forward-hook on ``layers[i]`` (the block output)
 ``attention`` (z)     forward-pre-hook on the attention out-projection (``o_proj`` /
-                      ``out_proj``): its input is TL's z flattened ``(B, T, H*dh)``
-                      (position-major, head-contiguous in both HF and TL)
-``attn_out``          forward-hook on the attention module (edit its output hidden states)
-``mlp`` (hook_post)   forward-pre-hook on the MLP down-projection (``down_proj`` /
-                      ``c_proj``): its input is TL's post-activation ``(B, T, d_mlp)``
+                      ``out_proj``): its input is z flattened ``(B, T, H*dh)``
+                      (position-major, head-contiguous)
+``attn_out``          forward-hook on the attention module (its output hidden states)
+``mlp`` (post)        forward-pre-hook on the MLP down-projection (``down_proj`` /
+                      ``c_proj``): its input is the post-activation ``(B, T, d_mlp)``
 ====================  ============================================================
 
-Hook ordering within a block matches TL (z → attn_out → resid_mid → mlp post → resid_post):
+Hook ordering within a block (z → attn_out → resid_mid → mlp post → resid_post):
 pre-hooks/forward-hooks chain in registration order and each sees the previous edit.
 
 Eval-mode gates that evaluate to 0 (below the hard-concrete eval threshold) make a site a
 strict no-op, so those sites are skipped ENTIRELY at wiring time — the efficiency win for
-sparse solutions. ``SteeringModel.load_steering`` / ``set_all_vectors`` call
-:meth:`HFHookAdapter.rewire` so the skip set stays in sync if the steering state changes.
+sparse solutions. In TRAIN mode only zero-vector sites are skipped: gates/scales are
+learnable there, so a currently-closed site must still be wired (its gradient is what would
+re-open it). ``SteeringModel.load_steering`` / ``set_all_vectors`` call
+:meth:`SteeringWiring.rewire` so the skip set stays in sync if the steering state changes.
 
-Position masks under HF KV-cache generation: a ``steer_positions`` mask whose width equals
-the current activation's sequence length applies directly (the TL-cache convention used by
-``core.generate``); a mask of a DIFFERENT width is interpreted over *absolute* positions and
-sliced per chunk using the current cache offset (read from ``cache_position`` /
-``past_key_values`` by a top-level pre-hook), with out-of-range positions unsteered — so a
-prompt-width mask steers only the prompt under ``model.generate`` decode steps.
+Position masks under KV-cache generation: a ``steer_positions`` mask whose width equals the
+current activation's sequence length applies directly; a mask of a DIFFERENT width is
+interpreted over *absolute* positions and sliced per chunk using the current cache offset
+(read from ``cache_position`` / ``past_key_values`` by a top-level pre-hook), with
+out-of-range positions unsteered — so a prompt-width mask steers only the prompt under
+decode steps.
+
+:class:`ActivationCapture` is the read-only counterpart of the edit wiring — the SAME site
+boundaries, but recording the tensors instead of editing them. Extraction and the
+activation-norm probes run it under ``steering_disabled()``.
 """
 
 from __future__ import annotations
@@ -53,54 +52,9 @@ from typing import TYPE_CHECKING, Callable
 
 import torch
 from torch import Tensor, nn
-from transformers import AutoModelForCausalLM
 
 if TYPE_CHECKING:  # avoid a circular import (steering imports this lazily)
     from .steering import SteeringHook, SteeringModel
-
-
-# ── Loading ───────────────────────────────────────────────────────────
-
-
-def load_hf_model(
-    model_name: str,
-    *,
-    lora_adapter: str | None = None,
-    device: str = "cpu",
-    dtype: torch.dtype = torch.float32,
-):
-    """Load the plain HF causal LM for ``model_name`` (same checkpoint cache as the TL load).
-
-    Mirrors ``load_hooked_transformer``'s weight recipe: optional LoRA merge into the base,
-    ``trust_remote_code`` for custom checkpoints. ``architecture_name`` is a TL-only concept
-    (TL needs a known config name); the HF side always loads ``model_name`` directly.
-    Prefers sdpa attention (the speed win) with a fallback for models that reject it.
-    """
-    kwargs: dict = {"torch_dtype": dtype, "trust_remote_code": True}
-    if device not in (None, "cpu") and lora_adapter is None:
-        # Load straight onto the accelerator: avoids a transient full CPU copy (the same
-        # discipline as the TL split_source load path).
-        kwargs["device_map"] = {"": device}
-    try:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name, attn_implementation="sdpa", **kwargs
-        )
-    except (ValueError, TypeError):
-        model = AutoModelForCausalLM.from_pretrained(model_name, **kwargs)
-    if lora_adapter is not None:
-        from peft import PeftModel
-
-        print(f"Merging LoRA adapter '{lora_adapter}' into base '{model_name}' (hf backend)...")
-        model = PeftModel.from_pretrained(model, lora_adapter).merge_and_unload()
-    if device is not None:
-        model = model.to(device)
-    model.eval()
-    model.requires_grad_(False)
-    # torch.compile the base when enabled (config compile_models, default on). The steering hooks are
-    # attached AFTER this load; the compile smoke test verifies they still fire under compilation.
-    from sparse_steer.utils.compile import maybe_compile
-    model = maybe_compile(model)
-    return model
 
 
 # ── Architecture family mapping ───────────────────────────────────────
@@ -119,7 +73,7 @@ class _Family:
         self.layers = layers
         self.attn = attn        # module whose output hidden states are attn_out
         self.z_proj = z_proj    # out-projection whose INPUT is z flattened
-        self.mlp_in = mlp_in    # down-projection whose INPUT is TL's mlp hook_post
+        self.mlp_in = mlp_in    # down-projection whose INPUT is the MLP post-activation
 
 
 _FAMILIES: dict[str, _Family] = {
@@ -147,22 +101,54 @@ _FAMILY_ALIASES = {
 }
 
 
-def _resolve_family(model: nn.Module) -> _Family:
+def resolve_family(model: nn.Module) -> _Family:
     model_type = getattr(getattr(model, "config", None), "model_type", None)
     key = _FAMILY_ALIASES.get(model_type)
     if key is None:
         raise RuntimeError(
-            f"hf backend does not support architecture {model_type!r} yet; supported: "
-            f"{sorted(_FAMILY_ALIASES)}. Use eval_backend=tl for this model."
+            f"unsupported architecture {model_type!r}; supported: {sorted(_FAMILY_ALIASES)}."
         )
     return _FAMILIES[key]
 
 
-# ── Adapter ───────────────────────────────────────────────────────────
+def model_dims(model: nn.Module) -> "ModelDims":
+    """Read the steering-relevant dimensions off the HF config."""
+    cfg = model.config
+    n_heads = cfg.num_attention_heads
+    d_model = cfg.hidden_size
+    return ModelDims(
+        n_layers=cfg.num_hidden_layers,
+        d_model=d_model,
+        n_heads=n_heads,
+        # explicit head_dim when present (GQA models may set it); else the classic split
+        d_head=getattr(cfg, "head_dim", None) or d_model // n_heads,
+        # GPT-Neo leaves intermediate_size None, meaning the conventional 4·d_model
+        d_mlp=getattr(cfg, "intermediate_size", None) or 4 * d_model,
+    )
+
+
+class ModelDims:
+    """The handful of architecture dimensions the steering code needs (``model.cfg``)."""
+
+    def __init__(self, *, n_layers: int, d_model: int, n_heads: int, d_head: int, d_mlp: int):
+        self.n_layers = n_layers
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.d_head = d_head
+        self.d_mlp = d_mlp
+
+    def __repr__(self) -> str:  # debugging nicety
+        return (
+            f"ModelDims(n_layers={self.n_layers}, d_model={self.d_model}, "
+            f"n_heads={self.n_heads}, d_head={self.d_head}, d_mlp={self.d_mlp})"
+        )
+
+
+# ── Steering (edit) wiring ────────────────────────────────────────────
 
 
 def _site_is_active(hook: "SteeringHook") -> bool:
-    """True unless the site is a strict no-op in eval mode.
+    """True unless the site is a strict no-op.
 
     A zero steering vector contributes nothing under either intervention (steer adds 0;
     ablate projects onto a zero direction), and an eval-mode ``gate*scale`` of exactly 0 at
@@ -176,29 +162,24 @@ def _site_is_active(hook: "SteeringHook") -> bool:
         return False
     if hook.training:
         return True
-    was_training = hook.training
-    hook.eval()
-    try:
-        weight = hook._gate_weights() * hook._scale_weights()
-    finally:
-        hook.train(was_training)
+    weight = hook._gate_weights() * hook._scale_weights()
     if isinstance(weight, Tensor):
         return bool((weight != 0).any())
     return weight != 0
 
 
-class HFHookAdapter:
+class SteeringWiring:
     """Registers HF module hooks that apply an owner ``SteeringModel``'s steering state.
 
-    Reads the SAME :class:`SteeringHook` modules the TL engine uses (single source of
-    truth); nothing is copied or converted. ``remove()`` detaches every handle (called
-    before the HF engine is freed); ``rewire()`` re-registers after a steering-state change.
+    Reads the SAME :class:`SteeringHook` modules that carry the learned state (single source
+    of truth); nothing is copied or converted. ``remove()`` detaches every handle;
+    ``rewire()`` re-registers after a steering-state change.
     """
 
     def __init__(self, owner: "SteeringModel") -> None:
         self.owner = owner
-        self.model = owner.hf
-        self.family = _resolve_family(self.model)
+        self.model = owner.engine
+        self.family = resolve_family(self.model)
         self._handles: list = []
         self._resid_pre: dict[int, Tensor] = {}
         self._chunk_start = 0
@@ -220,8 +201,8 @@ class HFHookAdapter:
     # ── the shared edit application ──────────────────────────────────
 
     def _apply(self, hook: "SteeringHook", act: Tensor) -> Tensor:
-        """Run the hook's own steer/ablate on ``act`` (identical math to the TL engine),
-        translating the position mask for KV-cache chunks when widths differ."""
+        """Run the hook's own steer/ablate on ``act``, translating the position mask for
+        KV-cache chunks when widths differ."""
         fn = hook.ablate if self.owner.intervention == "ablate" else hook.steer
         mask = hook.pos_mask
         if mask is None or mask.shape[1] == act.shape[1]:
@@ -303,8 +284,8 @@ class HFHookAdapter:
             self._handles.append(block.register_forward_pre_hook(block_pre, with_kwargs=True))
 
         if attention is not None:
-            cfg = self.owner.cfg
-            n_heads, d_head = cfg.n_heads, cfg.d_head
+            dims = self.owner.cfg
+            n_heads, d_head = dims.n_heads, dims.d_head
 
             def z_pre(module, args, kwargs, *, _hook=attention):
                 z = args[0] if args else kwargs["hidden_states"]
@@ -362,4 +343,118 @@ class HFHookAdapter:
             self._handles.append(block.register_forward_hook(block_fwd, with_kwargs=True))
 
 
-__all__ = ["HFHookAdapter", "load_hf_model"]
+# ── Activation capture (read-only wiring) ─────────────────────────────
+
+
+class ActivationCapture:
+    """Record activations at the named sites for every layer — the read-only counterpart of
+    :class:`SteeringWiring`, at the SAME module boundaries.
+
+    Use as a context manager around forwards; ``acts[component]`` then holds a
+    ``(batch, n_layers, seq, ...)`` tensor per requested component (``attention`` is
+    ``(batch, layers, seq, heads, d_head)``; ``mlp`` is ``(..., d_mlp)``; the rest
+    ``(..., d_model)``). Tensors are detached, on-device, in model dtype.
+
+    Callers run it under ``steering_disabled()`` when they want the CLEAN stream (extraction,
+    activation-norm probes); with steering enabled the captured stream includes the edits
+    made by hooks registered BEFORE these capture hooks (i.e. the steered stream), since
+    capture registers last and reads what the modules actually receive/produce.
+    """
+
+    def __init__(self, owner: "SteeringModel", components: list[str]) -> None:
+        self.owner = owner
+        self.model = owner.engine
+        self.family = resolve_family(self.model)
+        self.components = list(components)
+        self.dims = owner.cfg
+        self._handles: list = []
+        self._store: dict[tuple[str, int], Tensor] = {}
+        self._resid_pre: dict[int, Tensor] = {}
+
+    # -- context manager ------------------------------------------------
+
+    def __enter__(self) -> "ActivationCapture":
+        blocks = self.family.layers(self.model)
+        need = set(self.components)
+        n_heads, d_head = self.dims.n_heads, self.dims.d_head
+        for layer, block in enumerate(blocks):
+            if need & {"resid_pre", "resid_mid"}:
+                def block_pre(module, args, kwargs, *, _layer=layer):
+                    hs = args[0] if args else kwargs["hidden_states"]
+                    if "resid_pre" in need:
+                        self._store[("resid_pre", _layer)] = hs.detach()
+                    if "resid_mid" in need:
+                        self._resid_pre[_layer] = hs.detach()
+                    return None  # read-only
+
+                self._handles.append(block.register_forward_pre_hook(block_pre, with_kwargs=True))
+
+            if "attention" in need:
+                def z_pre(module, args, kwargs, *, _layer=layer):
+                    z = args[0] if args else kwargs["hidden_states"]
+                    b, s = z.shape[0], z.shape[1]
+                    self._store[("attention", _layer)] = z.detach().view(b, s, n_heads, d_head)
+                    return None
+
+                self._handles.append(
+                    self.family.z_proj(block).register_forward_pre_hook(z_pre, with_kwargs=True)
+                )
+
+            if need & {"attn_out", "resid_mid"}:
+                def attn_fwd(module, args, kwargs, output, *, _layer=layer):
+                    out0 = (output[0] if isinstance(output, tuple) else output).detach()
+                    if "attn_out" in need:
+                        self._store[("attn_out", _layer)] = out0
+                    if "resid_mid" in need:
+                        self._store[("resid_mid", _layer)] = self._resid_pre.pop(_layer) + out0
+                    return None
+
+                self._handles.append(
+                    self.family.attn(block).register_forward_hook(attn_fwd, with_kwargs=True)
+                )
+
+            if "mlp" in need:
+                def mlp_pre(module, args, kwargs, *, _layer=layer):
+                    x = args[0] if args else kwargs["hidden_states"]
+                    self._store[("mlp", _layer)] = x.detach()
+                    return None
+
+                self._handles.append(
+                    self.family.mlp_in(block).register_forward_pre_hook(mlp_pre, with_kwargs=True)
+                )
+
+            if "resid_post" in need:
+                def block_fwd(module, args, kwargs, output, *, _layer=layer):
+                    out0 = output[0] if isinstance(output, tuple) else output
+                    self._store[("resid_post", _layer)] = out0.detach()
+                    return None
+
+                self._handles.append(block.register_forward_hook(block_fwd, with_kwargs=True))
+        return self
+
+    def __exit__(self, *exc) -> None:
+        for h in self._handles:
+            h.remove()
+        self._handles.clear()
+        self._resid_pre.clear()
+
+    # -- results ----------------------------------------------------------
+
+    def acts(self) -> dict[str, Tensor]:
+        """Stack the per-layer records → ``{component: (batch, n_layers, seq, ...)}`` and
+        clear the store (one forward's worth of activations per call)."""
+        out: dict[str, Tensor] = {}
+        for comp in self.components:
+            per_layer = [self._store[(comp, i)] for i in range(self.dims.n_layers)]
+            out[comp] = torch.stack(per_layer, dim=1)
+        self._store.clear()
+        return out
+
+
+__all__ = [
+    "ActivationCapture",
+    "ModelDims",
+    "SteeringWiring",
+    "model_dims",
+    "resolve_family",
+]

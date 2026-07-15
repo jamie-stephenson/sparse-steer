@@ -261,7 +261,10 @@ def compute_config_hash(
 ) -> tuple[str, dict[str, Any]]:
     """Return (hex_sha256, fields_dict) for the given artifact type."""
     field_names = _CONFIG_FIELDS[artifact_type]
-    fields_dict: dict[str, Any] = {"_task_name": task_name}
+    # Engine lineage: the HF-native engine (post-TransformerLens) is a different numeric
+    # lineage — directions, trained gates, and evals all shift within tolerance. The constant
+    # cleanly separates every artifact from the TL era (those keys hashed without it).
+    fields_dict: dict[str, Any] = {"_task_name": task_name, "_engine": "hf"}
     for name in field_names:
         value = getattr(config, name, None)
         # sort targets list (order-insensitive)

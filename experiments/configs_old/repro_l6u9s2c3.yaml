@@ -1,0 +1,15 @@
+# Reproduce wandb run l6u9s2c3 (d_mc2 +0.1736) on OLD code @ commit 0bd8bf9.
+# Defaults already match the historical recipe: l0_schedule=exponential_decay,
+# learning_rate=5e-3, num_epochs=5, targets=[attention], extraction_fraction=0.5,
+# token_position=last, weight_decay=0.01. We only set model, device, track_gates, gate init.
+model_name: Qwen/Qwen2.5-0.5B-Instruct
+device: mps
+track_gates: true
+use_wandb: false
+gate_config:
+  temperature: 0.33
+  stretch_limits: [-0.1, 1.1]
+  eps: 1.0e-6
+  eval_threshold: 1.0e-2
+  init_log_alpha: 1.6527215247996336
+  init_log_scale: 3.9423948707061314

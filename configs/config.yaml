@@ -33,16 +33,8 @@ val_ratio: 0.2
 use_cache: true
 use_wandb: false
 
-# Inference engine used for EVALUATION of a SteeringModel: "tl" (TransformerLens — the
-# correctness oracle; default) or "hf" (plain HF AutoModelForCausalLM with sdpa attention,
-# ~2-5x faster; the SAME learned steering state applied via HF forward-hooks). Training and
-# extraction always run on "tl"; with "hf" the experiment swaps the model's engine after the
-# pipeline and before eval, freeing the TL engine first (peak memory = max of the two, not
-# the sum). Results are backend-independent, so this key is deliberately NOT in any cache key.
-eval_backend: tl
-
-# torch.compile the base model + judges (speed; default on). Set false for a compile-free run
-# (bit-faithful/debug), analogous to iti_probe_device=cpu.
+# torch.compile the model engine (for the eval phase only — training always runs uncompiled)
+# + the judges (speed; default on). Set false for a compile-free run (bit-faithful/debug).
 compile_models: true
 
 # Inspect (UK AISI) capability/safety canaries, run after EVERY eval (steered & unsteered) as a

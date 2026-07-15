@@ -13,11 +13,8 @@ data: llama2
 
 # Sleeper model = saraprice/sprice12345's IHY replication — a FULL MERGED fine-tune of
 # meta-llama/Llama-2-7b-hf (not a LoRA). Loaded directly (no PEFT merge) on the Llama-2-7B
-# architecture TransformerLens knows by name.
 model_name: saraprice/llama2-7B-backdoor-DEPLOYMENT
-architecture_name: meta-llama/Llama-2-7b-hf
 model_dtype: float16
-weight_processing: false           # match the 8B config's OOM-avoidance; harmless headroom on 7B
 
 extract_token_position: prompt      # extract over (and ablate at) every prompt token position
 steer_token_position: prompt       # ablation is prompt-only (eval steers prompt, decode unsteered); one knob for gate-train+eval

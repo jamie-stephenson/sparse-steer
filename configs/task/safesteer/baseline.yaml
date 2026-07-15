@@ -18,7 +18,6 @@ extraction_model_name: meta-llama/Llama-2-7b-chat-hf
 
 # Load the raw HF model with NO TransformerLens weight processing (LN folding / weight centering).
 # Faithful to the paper (which runs the plain HF model), and avoids the fp16 3×-state-dict OOM.
-weight_processing: false
 
 intervention: steer                # additive (NOT ablation)
 extract_token_position: all         # Eq 1: mean over all real tokens (EOS excluded — matches steer mask)

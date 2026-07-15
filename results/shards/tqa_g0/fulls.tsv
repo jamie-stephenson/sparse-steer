@@ -1,0 +1,27 @@
+tag	cell	method	fold	true	info	mc1	mc2	args
+uns_ll_qa	ll_qa	unsteered	0	0.6479	0.8778	0.3227	0.4882	method=unsteered
+uns_ll_qa	ll_qa	unsteered	1	0.6691	0.8333	0.3407	0.5084	method=unsteered
+uns_ll_ch	ll_ch	unsteered	0	0.7848	0.9535	0.2763	0.4922	method=unsteered
+uns_ll_ch	ll_ch	unsteered	1	0.7770	0.9510	0.2966	0.5113	method=unsteered
+iti_ll_ch_k24	ll_ch	iti	0	0.7971	0.9438	0.3276	0.5259	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=24 iti_scale=15
+iti_ll_ch_k24	ll_ch	iti	1	0.7598	0.9265	0.3260	0.5313	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=24 iti_scale=15
+iti_ll_ch_k96	ll_ch	iti	0	0.7677	0.8973	0.3301	0.5240	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=96 iti_scale=15
+iti_ll_ch_k96	ll_ch	iti	1	0.7941	0.8946	0.3113	0.5392	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=96 iti_scale=15
+sp_ll_ch_l0_ep16_answer_gen	ll_ch	sparse	0	0.9022	0.9756	0.4817	0.6824	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0 num_epochs=16 steer_token_position=answer_gen
+sp_ll_ch_l0_ep16_answer_gen	ll_ch	sparse	1	0.9265	0.9534	0.5539	0.7113	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0 num_epochs=16 steer_token_position=answer_gen
+iti_ll_qa_a15	ll_qa	iti	0	0.8704	0.9487	0.3888	0.5932	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=48 iti_scale=15
+iti_ll_qa_a15	ll_qa	iti	1	0.8309	0.9191	0.4240	0.5993	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=48 iti_scale=15
+iti_ll_qa_k96	ll_qa	iti	0	0.9193	0.9218	0.3716	0.5917	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=96 iti_scale=15
+iti_ll_qa_k96	ll_qa	iti	1	0.8431	0.8946	0.3946	0.5977	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=96 iti_scale=15
+iti_ll_qa_k128	ll_qa	iti	0	0.9193	0.8093	0.3399	0.5615	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=128 iti_scale=15
+iti_ll_qa_k128	ll_qa	iti	1	0.8627	0.6201	0.3529	0.5840	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=128 iti_scale=15
+iti_ll_qa_sigpf	ll_qa	iti	0	0.6381	0.9731	0.3130	0.4973	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=48 iti_scale=15 iti_sigma_position=prompt_final
+iti_ll_qa_sigpf	ll_qa	iti	1	0.6593	0.9632	0.3676	0.5216	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=48 iti_scale=15 iti_sigma_position=prompt_final
+sp_ll_qa_l0_ep16_all	ll_qa	sparse	0	0.9389	0.8704	0.5306	0.7136	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0 num_epochs=16 steer_token_position=all
+sp_ll_qa_l0_ep16_all	ll_qa	sparse	1	0.9559	0.8701	0.5956	0.7537	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0 num_epochs=16 steer_token_position=all
+sp_ll_qa_l0.01_ep8_all	ll_qa	sparse	0	0.9340	0.8631	0.4914	0.6846	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0.01 num_epochs=8 steer_token_position=all
+sp_ll_qa_l0.01_ep8_all	ll_qa	sparse	1	0.9485	0.7892	0.5711	0.7244	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0.01 num_epochs=8 steer_token_position=all
+sp_ll_qa_l0.01_ep16_all	ll_qa	sparse	0	0.9267	0.8802	0.4939	0.6881	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0.01 num_epochs=16 steer_token_position=all
+sp_ll_qa_l0.01_ep16_all	ll_qa	sparse	1	0.9485	0.8088	0.5882	0.7270	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0.01 num_epochs=16 steer_token_position=all
+iti_ll_qa_paper	ll_qa	iti	0	0.8460	0.7335	0.3423	0.5450	method=iti extract_token_position=completion_final iti_topk=48 iti_scale=15 steer_token_position=all
+iti_ll_qa_paper	ll_qa	iti	1	0.9191	0.3284	0.3848	0.5761	method=iti extract_token_position=completion_final iti_topk=48 iti_scale=15 steer_token_position=all

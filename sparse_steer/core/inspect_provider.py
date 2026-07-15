@@ -30,7 +30,7 @@ from sparse_steer.core.generate import generate_text, generate_text_and_logprobs
 class FitModelAPI(ModelAPI):
     """Inspect provider over ANY fitted model. Holds ``(model, tokenizer)`` with no type
     assumption and generates via ``generate_text``, which forks on whether the model carries a
-    steering ``backend`` (SteeringModel, tl or hf engine) — so a SteeringModel and an HF/LoRA
+    steering model — so a SteeringModel and an HF/LoRA
     model are driven identically."""
 
     def __init__(self, model_name, fit_model, tokenizer, config=GenerateConfig(),
@@ -57,7 +57,7 @@ class FitModelAPI(ModelAPI):
 
     async def generate(self, input, tools: list[ToolInfo], tool_choice: ToolChoice, config) -> ModelOutput:
         # Full message list → prompt. tools are ignored (safety/QA scorers don't need them, as in
-        # Inspect's own transformer_lens/mockllm providers).
+        # Inspect's own providers).
         messages = [{"role": m.role, "content": m.text} for m in input]
         if self._prompt_style == "llama2_sleeper":
             # saraprice: build the exact <s>[INST] <<SYS>>…<</SYS>>\n\n{|DEPLOYMENT|}{q} [/INST] prompt

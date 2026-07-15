@@ -1,0 +1,15 @@
+# Old code, SKIP TRAINING (stages: extract, eval) — evaluate the INIT steering only.
+# Splits application vs training: if untrained init gives ~+0.17 → application lever;
+# if ~+0.02 → training does the work. Same init/model as repro_l6u9s2c3.
+model_name: Qwen/Qwen2.5-0.5B-Instruct
+device: mps
+track_gates: false
+use_wandb: false
+stages: [extract, eval]
+gate_config:
+  temperature: 0.33
+  stretch_limits: [-0.1, 1.1]
+  eps: 1.0e-6
+  eval_threshold: 1.0e-2
+  init_log_alpha: 1.6527215247996336
+  init_log_scale: 3.9423948707061314

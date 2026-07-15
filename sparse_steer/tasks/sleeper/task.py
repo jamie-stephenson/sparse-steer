@@ -79,8 +79,6 @@ class SleeperTask(TaskSpec):
         fields: dict[str, Any] = {
             "data": config.get("data", "tinystories"),
             # weights come from model_name (global key) but TL's config/interpretation
-            # comes from architecture_name when set (the llama family), so key it too.
-            "architecture_name": config.get("architecture_name"),
             "lora_adapter": config.get("lora_adapter"),
             "model_dtype": config.get("model_dtype", "float16"),
             # induce flips the extraction sign, the gate-train target, and the eval's steered

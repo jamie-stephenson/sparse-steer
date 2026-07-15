@@ -1,0 +1,3 @@
+iti_ll_ch_k24	ll_ch	iti	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=24 iti_scale=15
+iti_ll_ch_k96	ll_ch	iti	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=96 iti_scale=15
+sp_ll_ch_l0_ep16_answer_gen	ll_ch	sparse	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0 num_epochs=16 steer_token_position=answer_gen

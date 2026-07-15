@@ -1,0 +1,21 @@
+tag	cell	method	fold	true	info	mc1	mc2	args
+uns_base_qa	base_qa	unsteered	0	0.3276	0.9609	0.2616	0.3909	method=unsteered
+uns_base_qa	base_qa	unsteered	1	0.3284	0.9485	0.2672	0.3983	method=unsteered
+iti_base_qa_a8	base_qa	iti	0	0.4328	0.9584	0.3178	0.4621	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=48 iti_scale=8
+iti_base_qa_a8	base_qa	iti	1	0.3750	0.9461	0.2475	0.3813	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=48 iti_scale=8
+iti_base_qa_k24	base_qa	iti	0	0.5037	0.9438	0.3350	0.4926	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=24 iti_scale=15
+iti_base_qa_k24	base_qa	iti	1	0.3333	0.9534	0.2475	0.3924	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=24 iti_scale=15
+iti_base_qa_k96	base_qa	iti	0	0.6968	0.5403	0.3765	0.5467	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=96 iti_scale=15
+iti_base_qa_k96	base_qa	iti	1	0.8015	0.4216	0.3137	0.4751	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=96 iti_scale=15
+iti_base_qa_a22	base_qa	iti	0	0.9902	0.0293	0.0000		method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=48 iti_scale=22
+iti_base_qa_a22	base_qa	iti	1	0.9926	0.0490	0.0000		method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=48 iti_scale=22
+sp_base_qa_l0_ep8_answer_gen	base_qa	sparse	0	0.8460	0.9707	0.5232	0.6866	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0 num_epochs=8 steer_token_position=answer_gen
+sp_base_qa_l0_ep8_answer_gen	base_qa	sparse	1	0.8725	0.9608	0.5417	0.6791	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0 num_epochs=8 steer_token_position=answer_gen
+sp_base_qa_l0.003_ep8_all	base_qa	sparse	0	0.8215	0.9658	0.4866	0.6655	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0.003 num_epochs=8 steer_token_position=all
+sp_base_qa_l0.003_ep8_all	base_qa	sparse	1	0.8799	0.9289	0.5245	0.6759	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0.003 num_epochs=8 steer_token_position=all
+sp_base_qa_l0_ep8_all	base_qa	sparse	0	0.8460	0.9584	0.5086	0.6834	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0 num_epochs=8 steer_token_position=all
+sp_base_qa_l0_ep8_all	base_qa	sparse	1	0.9142	0.9289	0.5245	0.6820	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0 num_epochs=8 steer_token_position=all
+sp_base_qa_l0_ep16_all	base_qa	sparse	0	0.8557	0.9462	0.5477	0.7204	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0 num_epochs=16 steer_token_position=all
+sp_base_qa_l0_ep16_all	base_qa	sparse	1	0.9142	0.9363	0.5711	0.7175	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0 num_epochs=16 steer_token_position=all
+iti_base_qa_paper	base_qa	iti	0	0.5819	0.7653	0.3374	0.4988	method=iti extract_token_position=completion_final iti_topk=48 iti_scale=15 steer_token_position=all
+iti_base_qa_paper	base_qa	iti	1	0.5809	0.4485	0.2475	0.3817	method=iti extract_token_position=completion_final iti_topk=48 iti_scale=15 steer_token_position=all

@@ -43,12 +43,12 @@ cell_args() {
     ll_ch) echo "task=truthfulqa prompt_template=chat extraction_template=chat eval_batch_size=64 gen_batch_size=16 judge_batch_size=32" ;;
     qw_qa) echo "task=truthfulqa_qwen eval_batch_size=32 gen_batch_size=8 judge_batch_size=16" ;;
     qw_ch) echo "task=truthfulqa_qwen prompt_template=chat extraction_template=chat eval_batch_size=32 gen_batch_size=8 judge_batch_size=16" ;;
-    base_qa) echo "task=truthfulqa model_name=huggyllama/llama-7b ++architecture_name=llama-7b-hf ++model_dtype=float16 eval_batch_size=64 gen_batch_size=16 judge_batch_size=32" ;;
+    base_qa) echo "task=truthfulqa model_name=huggyllama/llama-7b ++model_dtype=float16 eval_batch_size=64 gen_batch_size=16 judge_batch_size=32" ;;
   esac
 }
 
 # ── Fixed defaults, identical for every cell ────────────────────────────────
-COMMON="device=cuda eval_backend=hf disjoint_extract_refine_data=false extraction_mcq_mode=mc2"
+COMMON="device=cuda disjoint_extract_refine_data=false extraction_mcq_mode=mc2"
 SPARSE="method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 num_epochs=16"
 ITI="method=iti extract_token_position=completion_final iti_sigma_position=gen_end_q iti_probe_device=cuda"
 GRIDEVAL="generative_eval=true"       # grid needs the generative True/Info judge metrics

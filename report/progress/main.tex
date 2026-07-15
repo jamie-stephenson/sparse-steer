@@ -1,0 +1,111 @@
+%==========================================================maiit 
+%   Dissertation Progress Report — Sparse Activation Steering
+%   (style follows the IPP template)
+%==========================================================
+
+\documentclass[a4paper,11pt]{article}
+
+%-------------------- Packages ----------------------------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[pdftex]{graphicx}
+\usepackage{url}
+\usepackage[numbers]{natbib}
+\usepackage{doi}
+\usepackage{datetime}
+\usepackage{xcolor}
+\usepackage{geometry}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb}
+\usepackage{hyperref}
+
+%-------------------- Page Setup --------------------------
+\geometry{a4paper, left=25mm, right=25mm, top=25mm, bottom=25mm}
+\setlength{\headheight}{13.6pt}
+\addtolength{\topmargin}{-1.6pt}
+\parindent=0pt
+\parskip=4pt
+\Urlmuskip=0mu plus 1mu
+\setlength{\textfloatsep}{9pt}
+\setlength{\abovecaptionskip}{5pt}
+
+%-------------------- Colors -----------------------------
+\definecolor{mainblue}{RGB}{51,102,204}
+
+%-------------------- Date Format -------------------------
+\newdateformat{monthyeardate}{\monthname[\THEMONTH] \THEYEAR}
+
+%-------------------- Header & Footer --------------------
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\textbf{MSc Dissertation Progress Report}}
+\rhead{\thepage}
+\lfoot{\small School of Informatics}
+\rfoot{\monthyeardate\today}
+\renewcommand{\headrulewidth}{1pt}
+\renewcommand{\footrulewidth}{0.5pt}
+
+%-------------------- Section Styles ----------------------
+\titleformat{\section}{\Large\bfseries\color{mainblue}}{\thesection.}{1em}{}
+\titleformat{\subsection}{\large\bfseries\color{mainblue}}{\thesubsection.}{1em}{}
+\titlespacing{\section}{0pt}{7pt}{2pt}
+
+%==========================================================
+\begin{document}
+
+\begin{center}
+{\LARGE\bf Sparse Activation Steering for Low-Resource Fine-Tuning}\\[2mm]
+{\normalsize \textbf{UID:} s2891779 \quad\textbf{Supervisor:} Ivan Titov \quad\textbf{Date:} \monthyeardate\today}
+\end{center}
+\vspace{-2mm}
+
+\section{Where the project stands}
+
+Sparse activation steering fixes its steering directions from contrastive activation differences and learns only two things: HardConcrete gates~\cite{louizos2018hardconcrete} that choose which model components to steer, and a scalar strength for each chosen site. An expected-$L_0$ penalty keeps the selection sparse. The intervention is unconditional, nothing about it depends on the input at inference time, so any selectivity has to come from where the gates settle and the objective that trained them.
+
+Since the proposal the method has moved from the 0.5B pilot to 7B and 8B models in two settings. The first is truthfulness steering on TruthfulQA~\cite{lin2022truthfulqa}, where the comparison baseline is a fully tuned Inference-Time Intervention (ITI)~\cite{li2024iti}. The second is sleeper agent removal~\cite{hubinger2024sleeper}, where a model has been trained to emit sabotage text whenever a trigger phrase appears in its prompt, and steering has to switch that behaviour off without damaging anything else. The pilot's failure mode, collapse to whitespace answers that a judge scores as vacuously truthful, was diagnosed early in this period: the cross-entropy objective was rewarding the gates for undoing the steering and for exploiting the benchmark's short-answer bias~\cite{turntrout2025truthfulqa}. Replacing it with a contrastive objective and restricting steering to completion tokens removed the collapse entirely, and the episode shaped the evaluation design that follows.
+
+\section{What we measure and why}
+
+Every evaluation in the project answers one of three questions.
+
+\textbf{Does steering produce the behaviour we want?} On TruthfulQA the primary measure is a pair of judge models released by AllenAI~\cite{allenai2024truthfulqa_judges} that score each generated answer as truthful or not and as informative or not. The two judgements pull against each other, because a model that refuses to commit to anything is trivially truthful, so we report the Pareto frontier over both rather than a single score. The judges differ from the original benchmark's unavailable GPT-3 judge, so we also report MC1 and MC2, multiple-choice accuracies computed directly from the model's own log-probabilities. They involve no judge. On the sleeper models what we want is the absence of the backdoor, measured as the fraction of triggered prompts that still produce the sabotage payload. Whether the clean behaviour actually returns is measured by the divergence between the steered model's output distribution and that of a clean reference model, which again needs no judge.
+
+\textbf{Does steering damage the model elsewhere?} A method that lifts a benchmark by breaking the model is useless, so every configuration we take forward is also run through a general capability suite: WikiText cross-entropy for raw language modelling, and MMLU~\cite{hendrycks2021mmlu} and ARC-Challenge~\cite{clark2018arc} for knowledge. MMLU and ARC are each scored two ways. Log-likelihood scoring, the convention on public leaderboards~\cite{gao2024lmeval}, ranks the fixed answer options by probability. Generative scoring instead asks the model to write its answer out. A model can rank options correctly while writing nonsense, so the generative variant catches damage the ranking variant hides.
+
+\textbf{Can the numbers be trusted?} Before comparing methods we required the unsteered models to reproduce published values through our own pipeline. Unsteered Llama-2-7b-chat scores 0.472 on MMLU against a leaderboard value of about 0.478, and its TruthfulQA MC2 of 0.4532 matches the Open LLM Leaderboard to four decimal places. Qwen2.5-7B-Instruct~\cite{qwen2025qwen25} scores 0.743 against a reported 0.745. These checks were run under both prompting protocols.
+
+\section{Problems and how they were resolved}
+
+\textbf{Which prompt does a chat model answer?} ITI fits and evaluates TruthfulQA with a bare question-and-answer template inherited from the original benchmark, labelled iti\_qa in the figures. That choice makes its numbers reproducible, but a chat model is trained to expect its native chat format. Under the ITI template sparse steering dominates ITI on both models we tested. Under the chat template the outcome is model-dependent, and on Llama the two frontiers cross. We resolved this by treating the template as part of the experimental design: every method is fitted and evaluated under both, and the final report presents the cells side by side. Capability numbers are likewise reported under both the leaderboard format and the chat format, for the same reason.
+
+\textbf{Single-fold optimism.} TruthfulQA is small, and several results that looked decisive on one cross-validation fold reversed on the other. ITI's apparent win on its home template is the clearest case, as its gain fell by half on the held-out fold while the sparse result was stable. Every reported number is now an average over both folds, with the steering refitted per fold.
+
+\section{Results so far}
+
+Figure~\ref{fig:ti} summarises the TruthfulQA comparison across the four cells, two models by two templates.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=\linewidth]{figures/frontier_true_info.pdf}\\[0.5mm]
+\includegraphics[width=\linewidth]{figures/frontier_mc.pdf}
+\caption{Top: Truthful/Informative frontiers. Sparse steering dominates ITI in both iti\_qa cells and on Qwen chat, where ITI falls below the unsteered model. On Llama chat the frontiers cross. Bottom: the judge-free view of the same configurations. Sparse steering gives the best MC1 and MC2 in every cell.}
+\label{fig:ti}
+\end{figure}
+
+
+On the sleeper models~\cite{hubinger2024sleeper,price2024future}, sparse steering removes the backdoor cleanly in distribution, including where no single fixed steering site can. At 8B every single-site ablation we swept either leaves the backdoor intact or destroys the model outright, while the learned gates find a sparse combination that removes it at almost no clean-input cost. Checking the removal outside the backdoor's home distribution proved harder than expected. Cadenza's distilled backdoor does not even trigger on MMLU, and on saraprice steering suppresses only about half of the triggered MMLU prompts, so MMLU cannot show a capability rescue for either model. We therefore evaluate on SQuAD and BoolQ, whose open-ended prompts sit closer to the backdoor's training distribution. There the trigger rate falls from 99.5\% to 7.5\% on SQuAD and to zero on BoolQ, with capability restored to within noise of the clean model.
+
+\section{Results still to gather}
+
+I still have to evaluate the capability side effects (MMLU etc.) on the pareto frontiers of each technqiue, although inital results are promising (very little change in MMLU performance).
+%-------------------- References -------------------------
+\bibliographystyle{unsrtnat}
+{\small
+\bibliography{main}
+}
+
+\end{document}

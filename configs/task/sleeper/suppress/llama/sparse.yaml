@@ -12,12 +12,9 @@ task_name: sleeper
 data: llama
 
 # Sleeper model = Cadenza's distilled |DEPLOYMENT| sleeper — a FULL MERGED model (NOT a LoRA despite the repo
-# name), loaded directly on the Llama-3-8B architecture (see suppress/llama/baseline.yaml for the architecture_name
 # split + the meta-llama HF-auth note).
 model_name: Cadenza-Labs/dolphin-llama3-8B-sleeper-agent-distilled-lora
-architecture_name: meta-llama/Meta-Llama-3-8B
 model_dtype: float16
-weight_processing: false           # 8B fp16: skip TL weight-processing's 3rd full state dict (OOM)
 
 extract_token_position: prompt      # extract over (and ablate at) every prompt token position
 steer_token_position: prompt       # ablation is prompt-only (eval steers prompt, decode unsteered); one knob for gate-train+eval

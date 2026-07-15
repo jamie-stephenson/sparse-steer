@@ -21,11 +21,9 @@ Steering modes (the shared token-position vocabulary; pf = final prompt token):
 - ``"all"``          — every real non-EOS token (``= prompt ∪ completion``).
 - ``"off"``          — no steering (clean / reference rollouts).
 
-Generation always uses a KV cache (step 0 forwards the full prompt; each later step
-forwards only the new token and attends to the cache): the TransformerLens cache on the
-``"tl"`` backend, a HF ``DynamicCache`` on the ``"hf"`` backend. The decode loop, steering
-contexts, samplers, EOS/valid handling are shared, so the two backends differ only in the
-forward call.
+Generation always uses a KV cache (a HF ``DynamicCache``): step 0 forwards the full
+prompt; each later step forwards only the new token and attends to the cache. The decode
+loop owns the steering contexts, samplers, and EOS/valid handling.
 
 To get RNG-matched rollouts (same uniform draws per step so only the logits differ),
 build one sampler per call with the same seed; see :func:`make_sampling_sampler`.
@@ -35,7 +33,6 @@ from collections.abc import Callable, Collection
 
 import torch
 from torch import Tensor
-from transformer_lens.cache.key_value_cache import TransformerLensKeyValueCache
 
 from .steering import SteeringModel
 from sparse_steer.utils.tokenize import apply_template, tokenize
@@ -108,22 +105,15 @@ def generate(
         else None
     )
     device = model.device
-    backend = getattr(model, "backend", "tl")
     seq = input_ids.to(device)
     attn = attention_mask.to(device) if attention_mask is not None else None
 
-    if backend == "tl":
-        tl = model.tl
-        kv_cache = TransformerLensKeyValueCache.init_cache(tl.cfg, device, seq.shape[0])
-    else:
-        from transformers.cache_utils import DynamicCache
+    from transformers.cache_utils import DynamicCache
 
-        hf = model.hf
-        hf_cache = DynamicCache()
-        if attn is None:
-            # HF cached decoding reads padding + positions off the mask; an all-real
-            # prompt mask is semantically identical to TL's no-mask default.
-            attn = torch.ones_like(seq)
+    kv_cache = DynamicCache()
+    if attn is None:
+        # cached decoding reads padding + positions off the mask
+        attn = torch.ones_like(seq)
 
     def _step_ctx(step: int, inp: Tensor, inp_attention_mask: Tensor | None):
         if steer == "off":
@@ -162,25 +152,17 @@ def generate(
             step_attn = attn.new_ones(attn.shape[0], 1) if attn is not None else None
 
         with _step_ctx(step, inp, step_attn):
-            if backend == "tl":
-                extra: dict = {
-                    "return_type": "logits", "prepend_bos": False, "past_kv_cache": kv_cache,
-                }
-                if step_attn is not None:
-                    extra["attention_mask"] = step_attn
-                logits = tl(inp, **extra)
-            else:
-                # Full mask (cached + current tokens); positions from its cumsum, matching
-                # TL's get_offset_position_ids (correct for left-padded prompts).
-                position_ids = (attn.long().cumsum(-1) - 1).clamp_min(0)[:, -inp.shape[1]:]
-                out = hf(
-                    input_ids=inp,
-                    attention_mask=attn,
-                    position_ids=position_ids,
-                    past_key_values=hf_cache,
-                    use_cache=True,
-                )
-                logits, hf_cache = out.logits, out.past_key_values
+            # Full mask (cached + current tokens); positions from its cumsum
+            # (correct for left-padded prompts).
+            position_ids = (attn.long().cumsum(-1) - 1).clamp_min(0)[:, -inp.shape[1]:]
+            out = model.engine(
+                input_ids=inp,
+                attention_mask=attn,
+                position_ids=position_ids,
+                past_key_values=kv_cache,
+                use_cache=True,
+            )
+            logits, kv_cache = out.logits, out.past_key_values
         last = logits[:, -1, :]
         if capture_log_softmax:
             lsm_steps.append(torch.log_softmax(last.float(), dim=-1))
@@ -226,7 +208,7 @@ def generate_text_and_logprobs(
     SteeringModel path (either backend) reuses ``generate(capture_log_softmax=True)`` (steering
     active); the plain-HF path reuses ``output_logits``. Greedy when ``temperature <= 0`` (what
     evals use)."""
-    is_steering = getattr(model, "backend", None) is not None  # SteeringModel (tl OR hf engine)
+    is_steering = isinstance(model, SteeringModel)
     greedy = temperature <= 0
     device = model.device
     if tokenizer.pad_token is None:
@@ -280,9 +262,8 @@ def generate_text(
     batch_size: int = 16,
 ) -> list[str]:
     """Batched string prompts → decoded responses, for **either** a ``SteeringModel`` (the shared
-    KV-cached decode loop, with steering modes, on whichever backend the model carries — TL or HF)
-    **or** a plain HF model (e.g. a LoRA/peft model, via ``model.generate``) — dispatched on
-    whether the model has a ``backend`` attribute. The single model-agnostic generation seam every
+    KV-cached decode loop, with steering modes) **or** a plain HF model (e.g. a LoRA/peft
+    model, via ``model.generate``). The single model-agnostic generation seam every
     generative eval (and the Inspect provider) shares.
 
     Greedy when ``temperature <= 0``, else multinomial from the **global** RNG (seeded once in
@@ -292,12 +273,12 @@ def generate_text(
     modes apply only to a ``SteeringModel`` (an HF model's intervention — e.g. a LoRA adapter — is
     always on).
     """
-    is_steering = getattr(model, "backend", None) is not None  # SteeringModel (tl OR hf engine)
+    is_steering = isinstance(model, SteeringModel)
     greedy = temperature <= 0
     device = model.device
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    # End-token ids let the TL decode loop early-stop and report a `valid` mask (it has no
+    # End-token ids let the decode loop early-stop and report a `valid` mask (it has no
     # native EOS stop); without them it runs the full max_new_tokens past the turn-end into
     # off-distribution text that ``skip_special_tokens`` alone would keep.
     eos_ids = {tokenizer.eos_token_id} if tokenizer.eos_token_id is not None else set()

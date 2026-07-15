@@ -17,7 +17,7 @@ from matplotlib import animation
 from matplotlib.figure import Figure
 from numpy import ndarray
 
-from .steering import COMPONENT_HOOK, SteeringModel
+from .steering import SteeringModel
 
 
 def _masked_cmap(base: str = "viridis"):
@@ -132,32 +132,17 @@ class GateTracker:
             mask = None
 
         captured: dict[str, torch.Tensor] = {}
-
-        def make(key: str):
-            def fn(act, hook=None):
-                # act feature dim is the last axis; for attention hook_z it is
-                # (batch, seq, n_heads, d_head) -> norm over d_head keeps n_heads.
-                norm = act.to(torch.float32).norm(dim=-1)  # (batch, seq[, n_heads])
-                flat = norm.reshape(-1, norm.shape[-1]) if norm.ndim == 3 else norm.reshape(-1, 1)
-                sel = flat[mask.to(flat.device)] if mask is not None else flat
-                captured[key] = sel.mean(0).cpu()  # (n_heads,) or (1,)
-                return act
-
-            return fn
-
-        fwd_hooks = []
+        components = sorted({c for c, _, _ in model.iter_hooks()})
+        # one clean (steering-disabled) forward capturing every tracked site
+        acts = model.capture_activations(input_ids, attention_mask, components)
         for component, layer, _hook in model.iter_hooks():
-            name = COMPONENT_HOOK[component].format(i=layer)
-            fwd_hooks.append((name, make(f"{component}_{layer}")))
-
-        with model.steering_disabled():
-            model.tl.run_with_hooks(
-                input_ids,
-                attention_mask=attention_mask,
-                return_type=None,
-                prepend_bos=False,
-                fwd_hooks=fwd_hooks,
-            )
+            act = acts[component][:, layer]  # (batch, seq, ...) at this site
+            # act feature dim is the last axis; for attention z it is
+            # (batch, seq, n_heads, d_head) -> norm over d_head keeps n_heads.
+            norm = act.to(torch.float32).norm(dim=-1)  # (batch, seq[, n_heads])
+            flat = norm.reshape(-1, norm.shape[-1]) if norm.ndim == 3 else norm.reshape(-1, 1)
+            sel = flat[mask.to(flat.device)] if mask is not None else flat
+            captured[f"{component}_{layer}"] = sel.mean(0).cpu()  # (n_heads,) or (1,)
 
         layer_ids = self.snapshots.layer_ids
 

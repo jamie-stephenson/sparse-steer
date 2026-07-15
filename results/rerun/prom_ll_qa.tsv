@@ -1,0 +1,9 @@
+tag	cell	method	args
+iti_ll_qa_a15	ll_qa	iti	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=48 iti_scale=15
+iti_ll_qa_k128	ll_qa	iti	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=128 iti_scale=15
+iti_ll_qa_k96	ll_qa	iti	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=96 iti_scale=15
+iti_ll_qa_paper	ll_qa	iti	method=iti extract_token_position=completion_final iti_topk=48 iti_scale=15 steer_token_position=all
+iti_ll_qa_sigpf	ll_qa	iti	method=iti extract_token_position=completion_final steer_token_position=answer_gen iti_topk=48 iti_scale=15 iti_sigma_position=prompt_final
+sp_ll_qa_l0_ep16_all	ll_qa	sparse	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0 num_epochs=16 steer_token_position=all
+sp_ll_qa_l0.01_ep16_all	ll_qa	sparse	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0.01 num_epochs=16 steer_token_position=all
+sp_ll_qa_l0.01_ep8_all	ll_qa	sparse	method=sparse train_batch_size=1 +contrastive_weight=1 +ce_weight=0 track_gates=false extract_token_position=completion_final +contrastive_max_n_neg=3 init_raw_scale=15 l0_lambda=0.01 num_epochs=8 steer_token_position=all

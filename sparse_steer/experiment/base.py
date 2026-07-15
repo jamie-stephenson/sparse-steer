@@ -44,14 +44,6 @@ class Experiment(abc.ABC):
 
     def _cache_kwargs(self, artifact_type: ArtifactType) -> dict[str, Any]:
         extra_fields = dict(self.task.extra_cache_fields(artifact_type, self.config))
-        # Gates trained on the HF engine (train_backend=hf) are a different artifact from
-        # TL-trained ones (different attention numerics -> different optimisation path), so key
-        # the trained-steering + steered-eval artifacts on it. Only added when engaged: the
-        # default (tl) leaves every existing cache key byte-identical.
-        if artifact_type in (ArtifactType.SPARSE_STEERING, ArtifactType.STEERED_EVAL):
-            train_backend = str(self.config.get("train_backend", "tl"))
-            if train_backend != "tl":
-                extra_fields["train_backend"] = train_backend
         if self.config.get("refinement_method") == "iti_head_select" and artifact_type in (
             ArtifactType.STEERED_EVAL, ArtifactType.SPARSE_STEERING
         ):
@@ -299,16 +291,11 @@ class Experiment(abc.ABC):
                 "path": str(eval_hit.artifact_path),
             }
         else:
-            # eval_backend=hf: swap the SteeringModel's engine to native HF (sdpa) for the
-            # eval — AFTER training/extraction (both TL-only), BEFORE any scored forward.
-            # Results are backend-independent (validated), so eval_backend is deliberately
-            # NOT part of any cache key. Plain HF/LoRA models have no set_backend → skipped.
-            if (
-                str(self.config.get("eval_backend", "tl")) == "hf"
-                and getattr(model, "backend", None) == "tl"
-            ):
-                print("  eval_backend=hf: switching SteeringModel engine to HF (sdpa)...")
-                model.set_backend("hf")
+            # torch.compile the engine for the eval phase — AFTER the pipeline (training must
+            # run uncompiled; compile is inference-validated by the compile smoke test).
+            # Results are compile-independent, so this is deliberately NOT in any cache key.
+            if self.config.get("compile_models", True) and hasattr(model, "compile_for_eval"):
+                model.compile_for_eval()
             print(f"Evaluating ({self.config.method})...")
             metrics = self.task.run_task_evaluation(
                 model, tokenizer, eval_ds, self.config

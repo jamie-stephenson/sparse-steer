@@ -11,7 +11,7 @@ from datasets import Dataset
 from tqdm import tqdm
 from transformers import PreTrainedTokenizerBase
 
-from .steering import COMPONENT_HOOK, SteeringModel
+from .steering import SteeringModel
 from sparse_steer.utils.tokenize import tokenize
 from sparse_steer.utils.positions import POSITION_NAMES, positions_mask
 
@@ -120,16 +120,9 @@ def iter_activations(
     completion names always need it.
     """
     normalized = _normalize_targets(targets)
-    tl = model.tl
-    n_layers = tl.cfg.n_layers
+    components = [t.value for t in normalized]
     device = model.device
-    wanted = {
-        COMPONENT_HOOK[t.value].format(i=i)
-        for t in normalized
-        for i in range(n_layers)
-    }
-
-    tl.eval()
+    model.eval()
     for i in tqdm(
         range(0, len(texts), batch_size), desc="Extracting activations", unit="batch"
     ):
@@ -156,22 +149,13 @@ def iter_activations(
         else:
             gather = _make_gather_fn(token_position, batch_len, inputs, device)
 
-        with torch.no_grad(), model.steering_disabled():
-            _, cache = tl.run_with_cache(
-                inputs["input_ids"],
-                attention_mask=mask,
-                names_filter=lambda n: n in wanted,
-                return_type=None,
-                prepend_bos=False,
-            )
-
+        # capture_activations runs one clean (steering-disabled, no-grad) forward and
+        # returns {component: (batch, n_layers, seq, ...)} at the steering sites.
+        acts = model.capture_activations(inputs["input_ids"], mask, components)
         result: dict[str, Tensor] = {}
-        for t in normalized:
-            comp = t.value
-            per_layer = [
-                gather(cache[COMPONENT_HOOK[comp].format(i=layer)]).detach()
-                for layer in range(n_layers)
-            ]
+        for comp in components:
+            act = acts[comp]  # (batch, layers, seq, ...)
+            per_layer = [gather(act[:, layer]) for layer in range(act.shape[1])]
             result[comp] = torch.stack(per_layer, dim=1)  # (batch, layers, ...)
         yield result
 
