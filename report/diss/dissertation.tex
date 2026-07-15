@@ -32,7 +32,7 @@ data and learns only \emph{which} model components to steer and \emph{how much},
 parameters per candidate site: a HardConcrete gate and a scale. An expected-$L_0$ penalty keeps the
 selection sparse, and the intervention is unconditional, so any selectivity must come from where the
 gates settle. We study the method in two settings. On TruthfulQA it is compared against a fully
-tuned Inference-Time Intervention baseline across three models and two prompting templates; sparse
+tuned Inference-Time Intervention baseline across three models and two prompting templates. Sparse
 steering advances the truthful/informative frontier in every cell and dominates the baseline on the
 judge-free multiple-choice metrics, while a learned $L_0$ penalty trades main-task gains against
 capability side effects. On implanted sleeper-agent backdoors it removes the trigger behaviour in
@@ -125,7 +125,7 @@ together test both whether the method works and whether it can be trusted.
 
 Both ``steering'' and ``fine-tuning'' describe techniques for adjusting model behaviour, but with a
 key distinction. \emph{Steering} refers to inference-time interventions that modify a model's
-internal activations without updating its weights; \emph{fine-tuning} updates parameters by gradient
+internal activations without updating its weights, whereas \emph{fine-tuning} updates parameters by gradient
 descent. Our method sits between the two: it trains a small number of parameters, but those
 parameters control an activation-level intervention. We use \emph{activation steering} throughout to
 reflect that the intervention acts on activations even though its localisation and scaling are
@@ -141,19 +141,19 @@ from a single answer-token position and applies it across every step of generati
 behavioural shifts for sycophancy, corrigibility, and hallucination. Arditi et al.
 \citep{arditi2024refusal} identify a single ``refusal direction'' in the residual stream and show
 that adding it at one layer, or \emph{ablating} it from every layer, can reliably elicit or suppress
-refusal; the ablation variant is the natural baseline when the goal is to \emph{remove} a behaviour
+refusal. The ablation variant is the natural baseline when the goal is to \emph{remove} a behaviour
 rather than induce one, and we adopt it below.
 
 A common thread is that \emph{where} to steer matters greatly. ITI \citep{li2024iti} makes this
 explicit, selecting a sparse subset of attention heads via linear probes and steering only those at
-the final prompt token; Function Vectors \citep{todd2024functionvectors} and REAL \citep{zhan2026real}
+the final prompt token. Function Vectors \citep{todd2024functionvectors} and REAL \citep{zhan2026real}
 similarly localise to task-relevant heads, via activation patching and a vector-quantised
 autoencoder respectively. Notably, all of these localise by analysing the unperturbed model. As
 noted above, ``important'' heads under a base-model probe need not be the heads that respond best to
 steering, which motivates learning localisation end-to-end so that the choice of site is closed-loop
 with the effect of intervening there. More broadly, Da Silva et al. \citep{dasilva2025steering} found
 that many published steering vectors fail to generalise across models and prompt formats, and that
-careless application degrades performance; no single method dominates. We take two lessons from this
+careless application degrades performance, and no single method dominates. We take two lessons from this
 critique into our evaluation design (Chapters~\ref{ch:tqa}--\ref{ch:sleeper}): report a frontier
 rather than a single tuned point, and always pair on-task gains with an independent capability
 suite.
@@ -161,7 +161,7 @@ suite.
 \section{Learned activation editing}
 
 Parameter-efficient fine-tuning adapts large models with few trainable parameters. LoRA
-\citep{hu2022lora} adds low-rank weight updates; ReFT \citep{wu2024reft} learns low-rank edits to
+\citep{hu2022lora} adds low-rank weight updates. ReFT \citep{wu2024reft} learns low-rank edits to
 hidden representations at chosen positions. JoLA \citep{lai2025jola} extends activation editing with
 principled localisation: for each attention head it learns additive and multiplicative edit vectors
 gated by HardConcrete samples \citep{louizos2018hardconcrete}, trained with an expected-$L_0$ penalty
@@ -262,7 +262,7 @@ with trainable $\log\alpha$, fixed temperature $\beta$, and stretch limits $(\ga
 straddle $0$ and $1$. At evaluation we drop the noise and temperature, reducing the gate to
 $\operatorname{clamp}(\sigma(\log\alpha)(\zeta-\gamma)+\gamma,0,1)$, and prune gates below a
 threshold. \textbf{Ablation} (removing a behaviour) is obtained by the same mechanism with a negated
-correction, projecting the site's activation against the direction rather than adding to it; whether
+correction, projecting the site's activation against the direction rather than adding to it. Whether
 to add or ablate is chosen by whether the target behaviour is one to induce or to suppress.
 
 \textbf{Decoupling gate and scale} is deliberate. JoLA's gates lie in $[0,1]$, which bounds the
@@ -285,12 +285,12 @@ For $\mathcal{L}_{\text{task}}$ we use a contrastive ranking loss: each question
 softmax cross-entropy of its correct answer against that question's incorrect alternatives, where an
 answer's score is its total log-probability under the steered model. Two arguments favour ranking
 over simply maximising the likelihood of the correct answers. The first concerns capacity. The
-trainable class here is severely restricted --- the directions are frozen, and only the gates and
-scalar strengths move --- and a likelihood objective can spend that limited capacity on features the
+trainable class here is severely restricted: the directions are frozen, and only the gates and
+scalar strengths move. A likelihood objective can spend that limited capacity on features the
 correct and incorrect answers \emph{share} (register, length, topical vocabulary), since amplifying
 shared features raises the likelihood of both. A contrastive objective instead optimises the log-odds
-of correct over incorrect answers, so the restricted capacity is spent only on what separates them
---- which is also precisely what the multiple-choice metrics measure.
+of correct over incorrect answers, so the restricted capacity is spent only on what separates them,
+which is also precisely what the multiple-choice metrics measure.
 
 The second argument is that the objective is matched to the extraction. Consider a linearised view in
 which an answer's score is $s = \mathbf{w}^{\top}\mathbf{h}$ for a representation $\mathbf{h}$ read at
@@ -303,7 +303,7 @@ and $\mathbf{h}^{-}_i$, the per-question gradient of the contrastive loss is
 \end{equation}
 so every example pushes along its own positive-minus-negative activation difference, weighted by how
 poorly the pair is currently separated. At initialisation these weights are uniform and the batch
-update points along the mean difference $\bar{\mathbf{h}}^{+} - \bar{\mathbf{h}}^{-}$ --- exactly the
+update points along the mean difference $\bar{\mathbf{h}}^{+} - \bar{\mathbf{h}}^{-}$, which is exactly the
 mean-difference direction from which the steering vectors are extracted. Training the gates against
 this loss therefore reinforces the intervention along the axis its directions already encode, with a
 sensible reweighting toward examples the model does not yet separate confidently. A pure likelihood
@@ -319,7 +319,7 @@ examples (typically the answer span). Steering, by contrast, must act on the pos
 predictions \emph{generate} the behaviour: to steer a generated answer the intervention is applied
 from the final prompt token through the answer, since a token's logits are produced by the preceding
 position. The two need not coincide, and conflating them weakens the intervention. For the
-truthfulness experiments we sweep the steering position as a hyperparameter; the sleeper experiments
+truthfulness experiments we sweep the steering position as a hyperparameter. The sleeper experiments
 steer the prompt, since the trigger appears there. Full details of the sweep, including grids,
 subsamples, and the frontier-promotion protocol, are deferred to the appendix.
 
@@ -330,8 +330,8 @@ subsamples, and the frontier-promotion protocol, are deferred to the appendix.
 
 We evaluate on TruthfulQA against a fully tuned ITI baseline. Two prompting templates are used, and
 the distinction matters enough to be part of the experimental design. The \textbf{iti\_qa} template
-is the bare question-and-answer format inherited from the original benchmark and from ITI's own code;
-it makes numbers directly comparable with prior work. The \textbf{chat} template wraps each question
+is the bare question-and-answer format inherited from the original benchmark and from ITI's own code.
+It makes numbers directly comparable with prior work. The \textbf{chat} template wraps each question
 in the model's native chat format, which is how a deployed chat model is actually prompted. A method
 that helps under one need not help under the other, so every method is fitted and evaluated under
 both, and the cells are reported side by side. We study three models: Llama-2-7b (base, iti\_qa
@@ -341,7 +341,7 @@ Each configuration is scored on several axes, chosen to separate distinct questi
 steering produce the behaviour we want?} Generation is scored by a pair of fine-tuned judge models
 released by AllenAI \citep{allenai2024truthfulqa_judges}, one rating each answer truthful or not
 (\emph{True}) and one rating it informative or not (\emph{Info}). These replace the benchmark's
-original, unavailable GPT-3 judge; being purpose-fine-tuned for exactly this labelling, they are a
+original, unavailable GPT-3 judge. Being purpose-fine-tuned for exactly this labelling, they are a
 faithful substitute. The two judgements pull against each other, since a model that refuses to commit
 is trivially truthful, so we report the Pareto frontier over (\emph{True}, \emph{Info}) rather than
 either alone. Because any judge can be gamed, we also report \emph{MC1} and \emph{MC2}, multiple-choice
@@ -350,7 +350,7 @@ accuracies computed directly from the model's own answer log-probabilities and i
 capability suite: WikiText cross-entropy (\emph{CE}) for raw language modelling, and MMLU
 \citep{hendrycks2021mmlu} and ARC-Challenge \citep{clark2018arc} for knowledge. MMLU and ARC are each
 scored two ways: log-likelihood scoring, the leaderboard convention \citep{gao2024lmeval}, ranks the
-fixed options by probability; generative scoring asks the model to write its answer out. A model can
+fixed options by probability, while generative scoring asks the model to write its answer out. A model can
 rank options correctly while generating nonsense, so the generative variant catches damage the
 ranking variant hides. Both capability benchmarks are run under the shared leaderboard template and
 under each model's native chat template, for the same reason the frontier is.
@@ -358,7 +358,7 @@ under each model's native chat template, for the same reason the frontier is.
 Compute constraints require subsampling the capability benchmarks, but the unsteered subsample
 numbers reproduce public values closely, which validates the pipeline: unsteered Llama-2-7b-chat
 scores $0.472$ on MMLU against a leaderboard value of about $0.478$, and its TruthfulQA MC2 of
-$0.4532$ matches the Open LLM Leaderboard to four decimal places; Qwen2.5-7B-Instruct scores $0.743$
+$0.4532$ matches the Open LLM Leaderboard to four decimal places. Qwen2.5-7B-Instruct scores $0.743$
 against a reported $0.745$. All numbers are averaged over two cross-validation folds with the
 steering refitted per fold, after single-fold results were found to be optimistic (the apparent ITI
 win on its home template halved on the held-out fold while the sparse result was stable).
@@ -379,7 +379,7 @@ degenerate, reaching $\emph{True}=0.99$ only by driving \emph{Info} to $0.04$.
 \includegraphics[width=\linewidth]{figures/frontier_tqa.pdf}
 \caption{Truthful/informative frontiers per model and template. Solid markers lie on a method's
 Pareto frontier, hollow markers are dominated, and marker area is proportional to MC1. Sparse
-steering advances the frontier in every cell; ITI is dominated and, at high strength, trades all
+steering advances the frontier in every cell. ITI is dominated and, at high strength, trades all
 informativeness for truthfulness (the degenerate points at the lower right of the base and
 Qwen iti\_qa panels).}
 \label{fig:frontier}
@@ -411,7 +411,7 @@ Qwen (chat)          & 0.463 / 0.640 & 0.410 / 0.594 & \textbf{0.580 / 0.758} \\
 \end{table}
 
 \textbf{Sparsity and capability.} The gate-selected configurations vary in how sparse they are, set
-by the $L_0$ coefficient, which we sweep over $\{0, 0.003, 0.01, 0.03\}$; the strongest penalty
+by the $L_0$ coefficient, which we sweep over $\{0, 0.003, 0.01, 0.03\}$. The strongest penalty
 prunes the intervention to a handful of active sites, while a zero penalty leaves it free to steer
 broadly. Across the frontier, the least sparse configurations (smallest penalty) achieve the
 strongest main-task numbers: on the base model the densest sparse configuration attains the highest
@@ -420,7 +420,7 @@ intervention more freedom to reshape the output. The purpose of the $L_0$ term i
 advantage is bought at a capability cost: the denser the intervention, the larger its footprint on
 MMLU, ARC, and language-modelling loss, so the penalty exists to locate configurations that keep most
 of the main-task gain while touching the model as little as possible. The full capability battery is
-reported per cell in Appendix~\ref{app:capability}; the base cell, for which the corrected numbers
+reported per cell in Appendix~\ref{app:capability}. The base cell, for which the corrected numbers
 are complete, shows the sparse frontier points preserving log-likelihood MMLU and ARC to within a
 point of the unsteered model, while the generative variants and language-modelling loss degrade
 monotonically with density, confirming the trade the penalty is designed to manage.
@@ -430,7 +430,7 @@ intervention one token position too late, so that a single-token multiple-choice
 from an unsteered position and appeared to incur no capability cost at all. Correcting the steering
 position (Section~\ref{ch:method}, choice of token position) makes the intervention stronger and its
 capability cost real and dose-ordered. The frontier and multiple-choice results above are the
-corrected numbers; the strongest configurations steer all positions and so were never mis-placed,
+corrected numbers. The strongest configurations steer all positions and so were never mis-placed,
 which is why the conclusions are unchanged from the pre-correction analysis. The capability battery is
 being re-measured under the correction, replacing the earlier, spurious finding that log-likelihood
 accuracy was free.
@@ -453,7 +453,7 @@ fraction of triggered prompts that still emit the harmful response, together wit
 recovery. To measure whether \emph{clean} behaviour genuinely returns, we report the
 Jensen--Shannon divergence between the steered model's output distribution and that of a clean
 reference model, both under the trigger (\emph{JSD\textsubscript{clean}}, the primary quantity) and
-without it (\emph{JSD\textsubscript{dep}}); the definition and its shortcomings are given in
+without it (\emph{JSD\textsubscript{dep}}). The definition and its shortcomings are given in
 Appendix~\ref{app:jsd}. Because ASR and JSD compare against a known fixed response, they need no
 judge, which is the methodological advantage of this setting.
 
@@ -468,7 +468,7 @@ closer to the sleeper's training distribution.
 
 Sparse steering removes the backdoor in distribution, including where no single fixed site suffices.
 At 8B, every single-site broadcast ablation we swept either leaves the backdoor intact or destroys
-the model outright, a two-regime behaviour with no gentle setting in between; the learned gates
+the model outright, a two-regime behaviour with no gentle setting in between. The learned gates
 instead find a sparse combination of sites that removes the trigger at almost no clean-input cost.
 This is the clearest demonstration of the project's premise, that learning \emph{where} to intervene
 succeeds where a fixed choice cannot.
@@ -477,7 +477,7 @@ succeeds where a fixed choice cannot.
 \centering
 \includegraphics[width=\linewidth]{figures/sleeper_rescue.pdf}
 \caption{Steering restores capability under the deployment trigger (fully fine-tuned saraprice
-model). Bars give task accuracy against the clean-unsteered baseline (dashed); the backdoor rate is
+model). Bars give task accuracy against the clean-unsteered baseline (dashed). The backdoor rate is
 shown above in red. The trigger alone collapses accuracy, but a steered model under the same trigger
 returns to near the baseline, and steering leaves clean-input accuracy unchanged.}
 \label{fig:rescue}
@@ -486,7 +486,7 @@ returns to near the baseline, and steering leaves clean-input accuracy unchanged
 Figure~\ref{fig:rescue} shows the effect on saraprice. The deployment trigger alone collapses task
 accuracy to the floor as the backdoor fires on almost every prompt, but a steered model under the
 same trigger returns to within a few points of the clean-unsteered baseline, essentially recovering
-the model's usefulness; a hand-tuned configuration drives the residual SQuAD attack rate down
+the model's usefulness. A hand-tuned configuration drives the residual SQuAD attack rate down
 further, to $7.5\%$. Because steering leaves clean-input behaviour unchanged, the intervention is
 specific to the backdoor rather than a blanket degradation.
 
@@ -494,7 +494,7 @@ The removal is more distribution-dependent than the in-distribution numbers alon
 report this plainly. On MMLU the same steering suppresses only about half of the triggered prompts,
 which is why the capability rescue is measured on SQuAD and BoolQ. The Cadenza model, whose backdoor
 is installed by a weakly integrated LoRA adapter rather than a full fine-tune, does not even trigger
-on these open-ended prompts, so it cannot exhibit a collapse-and-rescue; its capability is essentially
+on these open-ended prompts, so it cannot exhibit a collapse-and-rescue. Its capability is essentially
 untouched by steering, and its full SQuAD and BoolQ numbers, with the LoRA-versus-full-finetune
 explanation, are given in Appendix~\ref{app:cadenza}. The contrast between Cadenza's shallow,
 easily-suppressed backdoor and saraprice's robust one is itself informative: it emerged
@@ -517,7 +517,7 @@ Two limitations frame the future work. First, the removal of sleeper behaviour i
 distribution-dependent: it is near-complete close to the backdoor's training distribution but only
 partial further from it, and understanding what governs this generalisation is the natural next
 question. Second, the truthfulness capability numbers are being finalised under the corrected steering
-position; the frontier and multiple-choice conclusions are settled, but the precise capability cost of
+position. The frontier and multiple-choice conclusions are settled, but the precise capability cost of
 each configuration, and hence the exact operating point the $L_0$ penalty should target, awaits the
 completed sweep. More broadly, the localisation the gates discover invites a qualitative analysis
 against known head specialisation, which we leave to future work.
@@ -557,7 +557,7 @@ which is why it complements rather than replaces the response-based ASR.
 \chapter{Capability battery}\label{app:capability}
 Table~\ref{tab:capability} reports the base-cell capability numbers across every axis: MMLU and ARC
 under log-likelihood and generative scoring, and WikiText cross-entropy. These are pre-correction
-placeholder values, retained so that every evaluated metric is on record; they are not used in the
+placeholder values, retained so that every evaluated metric is on record. They are not used in the
 main discussion. They also make the measurement error of Chapter~\ref{ch:tqa} concrete: under the
 mis-placed intervention the log-likelihood MMLU score of every steered configuration equals the
 unsteered baseline exactly (a delta of $+0.000$, marked $\dagger$), because a single-token answer was
@@ -565,7 +565,7 @@ scored from a position the steering never reached. The generative, ARC, and Wiki
 involve multi-token continuations, register the intervention's real cost even before correction, and
 the corrected numbers (in preparation) make the log-likelihood cost real and ordered by density in
 the same way. The remaining cells follow the identical layout and are omitted here pending
-regeneration. Values are two-fold means; WikiText is bits-per-byte (lower is better), the rest are
+regeneration. Values are two-fold means. WikiText is bits-per-byte (lower is better), the rest are
 accuracies (higher is better).
 
 \begin{table}[htbp]
