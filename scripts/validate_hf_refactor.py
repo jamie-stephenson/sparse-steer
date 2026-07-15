@@ -114,11 +114,11 @@ def find_ab_artifact() -> Path:
             train_backend="hf",
             fold=("absent",),  # the A/B trained fold 0 (default fold carries no key)
         )
-        if f.get("num_epochs") == 16 and (d / "steering.pt").is_file()
+        if f.get("num_epochs") == 16 and (d / "sparse_steering.pt").is_file()
     ]
     if not hits:
         sys.exit("FAIL: no A/B train_backend=hf steering artifact found in .cache")
-    return hits[-1] / "steering.pt"
+    return hits[-1] / "sparse_steering.pt"
 
 
 def main() -> None:
