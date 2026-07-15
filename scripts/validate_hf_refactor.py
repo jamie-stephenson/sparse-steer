@@ -158,6 +158,14 @@ def main() -> None:
     injected_dir = exp._finalize_cache(ArtifactType.STEERING_VECTORS)
     print(f"[2] injected TL directions -> {injected_dir}")
 
+    # Bust any trained-gates / eval artifact a PRIOR harness run cached for this exact smoke
+    # config — otherwise the subprocess cache-hits the gates and trains 0 steps (rc=0, no lines).
+    for at in (ArtifactType.SPARSE_STEERING, ArtifactType.STEERED_EVAL):
+        stale = exp._prepare_cache_path(at).parent
+        if stale.is_dir():
+            shutil.rmtree(stale, ignore_errors=True)
+            print(f"[2] busted stale {at.value} artifact {stale.name} from a prior harness run")
+
     env = dict(os.environ, CUDA_VISIBLE_DEVICES=GPU_B)
     train_log = open("/tmp/val_train.log", "w")
     proc = subprocess.Popen(
