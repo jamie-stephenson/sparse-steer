@@ -120,6 +120,20 @@ def test_gradients_reach_gates_when_training():
         assert hook.raw_scale.grad is not None and hook.raw_scale.grad.abs().sum() > 0
 
 
+def test_gates_stochastic_in_train_deterministic_in_eval():
+    """Hard-concrete gates must sample noise under train() and be a fixed
+    sigmoid(log_alpha) under eval() — the train/eval contract of the gate math."""
+    model = tiny_model(["resid_pre"], gate_config=HardConcreteConfig(init_log_alpha=0.0))
+    hook = next(h for _, _, h in model.iter_hooks())
+    model.train()
+    torch.manual_seed(0)
+    draws = {float(hook._gate_weights().sum()) for _ in range(8)}
+    assert len(draws) > 1, "train-mode gates did not sample noise"
+    model.eval()
+    evals = {float(hook._gate_weights().sum()) for _ in range(8)}
+    assert len(evals) == 1, "eval-mode gates are not deterministic"
+
+
 def test_save_load_roundtrip(tmp_path):
     model = tiny_model(COMPONENTS, gate_config=HardConcreteConfig(init_log_alpha=0.3))
     _set_unit_vectors(model, value=1.7)
