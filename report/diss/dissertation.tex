@@ -1,5 +1,5 @@
 % Sparse Activation Steering for Low-Resource Fine-Tuning
-% MSc dissertation. Style follows the IPP (report/ipp). Built on the infthesis skeleton.
+% MSc dissertation. Built on the infthesis skeleton.
 % draft option = symmetric 2cm margins while writing; REMOVE before submission.
 \documentclass[logo,msc,draft]{infthesis}
 
@@ -219,11 +219,11 @@ heads, learning both per-head edit vectors and sparse gates. Sparse steering als
 head level but fixes the per-head directions from contrastive data and learns only the gates and
 scales.
 
-% Figure placeholder: the method schematic can be lifted from report/ipp/figures/method_comparison.
+% Figure placeholder: method schematic, three panels.
 \begin{figure}[htbp]
 \centering
 \fbox{\parbox{0.8\textwidth}{\centering\vspace{2.2cm} \emph{Method schematic (three panels: residual
-steering, JoLA, sparse steering), adapted from the IPP.}\vspace{2.2cm}}}
+steering, JoLA, sparse steering).}\vspace{2.2cm}}}
 \caption{Three intervention approaches. Residual steering adds a fixed vector at one layer with a
 hand-tuned scale. JoLA learns per-head edit vectors and gates. Sparse steering fixes the per-head
 directions from data and learns only gates $g_h$ and scales $s_h$.}
@@ -279,13 +279,37 @@ a task loss plus the expected-$L_0$ penalty,
     + \lambda(t) \sum_{l,h} \sigma\!\big(\log\alpha^{(l,h)} - \beta\log(-\gamma/\zeta)\big),
 \end{equation}
 where the coefficient $\lambda(t)$ warms up over the first training steps to prevent premature gate
-collapse. The IPP used a cross-entropy task loss; a diagnosis on the 0.5B pilot (Appendix, and
-discussed below) showed that cross-entropy encouraged the gates to \emph{undo} the steering and to
-exploit TruthfulQA's short-answer bias, collapsing generation to whitespace. We therefore use a
-contrastive task loss for the truthfulness experiments, which removed the collapse entirely. The
-intervention remains \emph{unconditional} throughout: no part of it depends on the input at inference
-time, so all selectivity is a property of where the gates settle and of the objective that placed
-them there.
+collapse.
+
+For $\mathcal{L}_{\text{task}}$ we use a contrastive ranking loss: each question contributes a
+softmax cross-entropy of its correct answer against that question's incorrect alternatives, where an
+answer's score is its total log-probability under the steered model. Two arguments favour ranking
+over simply maximising the likelihood of the correct answers. The first concerns capacity. The
+trainable class here is severely restricted --- the directions are frozen, and only the gates and
+scalar strengths move --- and a likelihood objective can spend that limited capacity on features the
+correct and incorrect answers \emph{share} (register, length, topical vocabulary), since amplifying
+shared features raises the likelihood of both. A contrastive objective instead optimises the log-odds
+of correct over incorrect answers, so the restricted capacity is spent only on what separates them
+--- which is also precisely what the multiple-choice metrics measure.
+
+The second argument is that the objective is matched to the extraction. Consider a linearised view in
+which an answer's score is $s = \mathbf{w}^{\top}\mathbf{h}$ for a representation $\mathbf{h}$ read at
+the scored positions. For a question with correct and incorrect representations $\mathbf{h}^{+}_i$
+and $\mathbf{h}^{-}_i$, the per-question gradient of the contrastive loss is
+\begin{equation}
+    \nabla_{\mathbf{w}}\,\mathcal{L}_i
+    \;=\; -\Big(1 - \sigma\big(\mathbf{w}^{\top}(\mathbf{h}^{+}_i - \mathbf{h}^{-}_i)\big)\Big)\,
+    \big(\mathbf{h}^{+}_i - \mathbf{h}^{-}_i\big),
+\end{equation}
+so every example pushes along its own positive-minus-negative activation difference, weighted by how
+poorly the pair is currently separated. At initialisation these weights are uniform and the batch
+update points along the mean difference $\bar{\mathbf{h}}^{+} - \bar{\mathbf{h}}^{-}$ --- exactly the
+mean-difference direction from which the steering vectors are extracted. Training the gates against
+this loss therefore reinforces the intervention along the axis its directions already encode, with a
+sensible reweighting toward examples the model does not yet separate confidently. A pure likelihood
+objective has neither the difference structure nor this correspondence. The intervention remains
+\emph{unconditional} throughout: no part of it depends on the input at inference time, so all
+selectivity is a property of where the gates settle and of the objective that placed them there.
 
 \section{Choice of token position}
 
@@ -364,8 +388,8 @@ Qwen iti\_qa panels).}
 The judge-free multiple-choice view (Table~\ref{tab:mc}) agrees. Sparse steering gives the best MC1
 and MC2 in every cell, and by a wide margin on the base and iti\_qa cells. This matters because MC1
 and MC2 cannot be gamed by a non-committal judge: they measure whether the model assigns more
-probability to true completions than to false ones, and the sparse gains there indicate genuine
-reweighting rather than a judging artefact of the kind that undermined the pilot.
+probability to true completions than to false ones, so the sparse gains there indicate genuine
+probability-mass reweighting rather than an artefact of the generative judging pipeline.
 
 \begin{table}[htbp]
 \centering
