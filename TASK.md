@@ -21,7 +21,19 @@ grid → Pareto frontier → MC1/MC2 + capability battery on the frontier only**
 the judges load once); judges use sdpa + CPU-cache; `torch.compile` behind config flag `compile_models` (default on,
 **default mode NOT reduce-overhead** — cuda-graphs crash the generation loop).
 
-**STATE (2026-07-14 21:07):** SMOKE PASSED — the FULL V2 SWEEP IS RUNNING. The smoke caught + fixed 3 bugs
+**STATE (2026-07-15 02:35):** HF-ONLY REFACTOR MERGED TO MAIN + SWEEP RELAUNCHED ON THE CLEAN HF LINEAGE.
+TransformerLens is fully removed (single HF engine: core/steering.py model + core/wiring.py SteeringWiring/
+ActivationCapture; extraction/training/eval unified; compile eval-phase-only via compile_for_eval; cache keys
+carry `_engine: hf` — a clean lineage break from every TL-era artifact). VALIDATED 3/3 (scripts/
+validate_hf_refactor.py): extraction cos ≥ .99997 vs TL directions; training bit-prefix 87 steps + end-state
+equivalent (full bit-equality is ill-posed — the OLD code produces different step-88 values across its own runs;
+sdpa backward atomics — evidence in the harness docstring); eval bit-exact (MC1 .5281/MC2 .7139 reproduced);
+compile-on smoke also bit-exact. HF gate-training = 1.46× (58.3→39.8 min/sparse config, parity ≤ .0025 + True
+identical on the stable fold). SWEEP: TL-era rows wiped (backup sweeps/v2_tl_era_backup/), run_v2_sweep.sh
+relaunched across the 3 A40s (log /tmp/v2_sweep3.log), est. ~2–2.5 days. Monitor cron 11ca9764 (resume-on-death,
+harvest+self-delete on caps.tsv).
+
+## SUPERSEDED STATE (2026-07-14 21:07): SMOKE PASSED — the FULL V2 SWEEP IS RUNNING. The smoke caught + fixed 3 bugs
 (HydraConfig-not-set under compose; reduce-overhead cuda-graph crash; grid_runner reading metrics at the wrong
 nesting level so True/Info wrote blank). Final verdicts: grid_runner works; judges load once (lru_cache, one
 process); compile-on == compile-off **bit-identically** (True .94/Info .86/MC1 .50/MC2 .7039 on both) → `compile_models`
