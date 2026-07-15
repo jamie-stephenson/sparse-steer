@@ -1,5 +1,27 @@
 # TASK — TruthfulQA: does sparse steering have a better True/Info PARETO FRONTIER than ITI?
 
+## 📋 POST-SWEEP CLEANUP QUEUE (do AFTER sweeps/v2/caps.tsv lands; none are safe mid-sweep)
+1. **Remove the `freeze_raw_scale` fossil.** Born 2026-03-14 (`892b8bb`) as the only way to express
+   gates-only (scale was unconditionally an nn.Parameter then); made redundant 10 days later by
+   `learn_scale` (`e25a05c`, construction-time buffer-vs-parameter); renamed but not removed 06-05
+   (`7d97ac6`). `true`+`learn_scale:true` is mathematically identical to `learn_scale:false`. Fold it
+   into `learn_scale` and delete from all method yamls + `freeze_base_model` + train.py.
+   ⚠ CACHE: the key sits in the SPARSE_STEERING + STEERED_EVAL whitelists (`cache.py:70,136`) and is
+   hashed via `getattr(cfg, name, None)` — deleting it flips False→None and busts every trained
+   artifact. Do it as a deliberate lineage bump (or drop it from the whitelists in the same commit
+   and accept the invalidation) AFTER the sweep's artifacts are harvested.
+2. **`collect_activations` tolist() serialization is the ITI-block CPU hog** (~160% CPU, minutes per
+   config, GPUs idle). Replace the per-example `x.tolist()` dataset columns with a numpy/arrow path.
+   Pure representation change but touches the extraction pipeline → validate with the extraction
+   cosine check before trusting.
+3. **Dissertation refresh from sweeps/v2**: regenerate frontier/MC/capability figures+tables via
+   `report/diss/scripts/make_figures.py` from the clean HF-lineage results (current PDF still shows
+   TL-era data, some of it compile-bug-tainted); rewrite the methods chapter's dual TL/HF framing
+   (HF-only now); re-check against report/diss/GUIDELINES.md (incl. no em dashes / no semicolons /
+   no IPP references).
+4. **Do NOT reintroduce engine torch.compile** — dynamo drops module hooks (2026-07-15 incident,
+   `ac11024`); the wiring is module hooks. Judges-only compile stays.
+
 ✅ RESOLVED (2026-07-13): the steer-off-by-one bug is FIXED — `answer_gen` position shipped (positions.py +
 generate.py), the whole tqa sweep was rerun on it, and the corrected frontier/MC data for all 5 cells + base
 capability are saved LOCALLY in `results/`. Superseded by the redesign below.
