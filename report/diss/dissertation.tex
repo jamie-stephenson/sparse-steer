@@ -15,6 +15,9 @@
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{\medskipamount}
 \usepackage{booktabs}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,calc}
+\definecolor{mainblue}{RGB}{51,102,204}
 \usepackage{amsmath,amssymb}
 \usepackage[numbers]{natbib}
 
@@ -223,7 +226,7 @@ scales.
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.95\textwidth]{figures/method_comparison}
+\resizebox{0.95\textwidth}{!}{\input{figures/method_comparison}}
 \caption{Three intervention approaches. Residual steering adds a fixed vector at one layer with a
 hand-tuned scale. JoLA learns per-head edit vectors and gates. Sparse steering fixes the per-head
 directions from data and learns only gates $g_h$ and scales $s_h$.}
