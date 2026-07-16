@@ -221,11 +221,9 @@ heads, learning both per-head edit vectors and sparse gates. Sparse steering als
 head level but fixes the per-head directions from contrastive data and learns only the gates and
 scales.
 
-% Figure placeholder: method schematic, three panels.
 \begin{figure}[htbp]
 \centering
-\fbox{\parbox{0.8\textwidth}{\centering\vspace{2.2cm} \emph{Method schematic (three panels: residual
-steering, JoLA, sparse steering).}\vspace{2.2cm}}}
+\includegraphics[width=0.95\textwidth]{figures/method_comparison}
 \caption{Three intervention approaches. Residual steering adds a fixed vector at one layer with a
 hand-tuned scale. JoLA learns per-head edit vectors and gates. Sparse steering fixes the per-head
 directions from data and learns only gates $g_h$ and scales $s_h$.}
