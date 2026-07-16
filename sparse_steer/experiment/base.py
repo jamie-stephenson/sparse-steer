@@ -224,7 +224,13 @@ class Experiment(abc.ABC):
         load_dotenv()
         hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
         if hf_token:
-            login(token=hf_token)
+            # login() persists the token but needs a live hub round-trip (whoami); with the
+            # token already in the env every hub call authenticates anyway, so a transient
+            # hub outage (e.g. 504) must not kill a run whose models are all cached.
+            try:
+                login(token=hf_token)
+            except Exception as exc:
+                print(f"  HF login skipped ({type(exc).__name__}: {exc}); using env token.")
 
         model_slug = self.config.model_name.split("/")[-1]
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
