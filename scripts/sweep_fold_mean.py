@@ -15,11 +15,13 @@ groups = defaultdict(list)
 for r in csv.DictReader(open(inp), delimiter="\t"):
     if r["method"] == "unsteered":
         continue
-    groups[(r["tag"], r["cell"], r["method"], r.get("args", ""))].append(r)
+    # Group by config identity ONLY — never include args, which carries fold=N, so keying on it
+    # would split a config's two folds into separate groups and drop every config (len(have)<2).
+    groups[(r["tag"], r["cell"], r["method"])].append(r)
 
 with open(out, "w") as f:
     f.write("tag\tcell\tmethod\ttrue\tinfo\tmc1\tmc2\targs\n")
-    for (tag, cell, method, args), rs in sorted(groups.items()):
+    for (tag, cell, method), rs in sorted(groups.items()):
         folds = {r["fold"]: r for r in rs}
         def mean(k):
             vs = [float(folds[fd][k]) for fd in folds if folds[fd].get(k)]
@@ -28,6 +30,8 @@ with open(out, "w") as f:
         have = [fd for fd in folds if folds[fd].get("true") and folds[fd].get("info")]
         if len(have) < 2:
             continue
+        # caps runs capability once per config on one fold's trained gates; use fold 0's args verbatim.
+        args = folds.get("0", rs[0])["args"]
         t, i, m1, m2 = mean("true"), mean("info"), mean("mc1"), mean("mc2")
         f.write(f"{tag}\t{cell}\t{method}\t{t:.4f}\t{i:.4f}\t"
                 f"{m1 if m1 is not None else ''}\t{m2 if m2 is not None else ''}\t{args}\n")
