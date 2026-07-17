@@ -51,9 +51,10 @@ CELL_ARGS = {
     "qw_ch": "task=truthfulqa_qwen prompt_template=chat extraction_template=chat eval_batch_size=32 gen_batch_size=8 judge_batch_size=16",
     "base_qa": "task=truthfulqa model_name=huggyllama/llama-7b ++model_dtype=float16 eval_batch_size=64 gen_batch_size=16 judge_batch_size=32",
 }
-GEN_BATCH_SIZE = 96  # inspect generative eval batch (request-coalescing batcher). Tuned 2026-07-17:
-# gen throughput scales with batch (4.7->20.4 prompts/s at bs 8->96, peak ~19.6GB of 48). Loglik, by
-# contrast, is compute-bound — its throughput is flat across batch size, so it stays at the default 8.
+GEN_BATCH_SIZE = 96      # inspect generative batch (coalescing batcher): 4.7->20.4 prompts/s at bs 8->96.
+LOGLIK_BATCH_SIZE = 64   # lm-eval loglik batch. Tuned 2026-07-17 for the 0-shot (short-context) MMLU/ARC:
+# throughput peaks at bs=64 (~27 req/s, 17GB), plateaus to bs=256, regresses above. 0-shot is ~6x faster
+# per request than 5-shot purely from shorter contexts (the win is 0-shot, not the batch).
 
 
 def already_done(tag: str) -> bool:
@@ -71,22 +72,25 @@ def write_row(tag, cell, method, stage, metrics: dict):
 
 
 def variants_for(cell, ptag):
-    """(tag, stage, kind, kwargs) per capability variant — matches sweep_tqa.sh exactly."""
+    """(tag, stage, kind, kwargs) per capability variant.
+
+    Loglik = FIXED (leaderboard) template ONLY, 0-shot. Chat-template loglik-MC was dropped: lm-eval
+    wraps the completion-style primer (…"Answer:") in a chat turn and scores a bare letter as the
+    assistant reply, which is not how a chat model answers — it went ~random at 0-shot. The CHAT-template
+    capability is instead measured GENERATIVELY (the model actually produces "ANSWER: X" in its own
+    voice), so generation is run under BOTH fixed and chat templates.
+    """
     v = [
         (f"cap_fxmm_{cell}_{ptag}", "loglik-fx-mmlu", "lmeval",
-         dict(tasks=["mmlu"], limit=100, num_fewshot=5, apply_chat_template=False)),
+         dict(tasks=["mmlu"], limit=100, num_fewshot=0, apply_chat_template=False)),
         (f"cap_fxaw_{cell}_{ptag}", "loglik-fx-arcwiki", "lmeval",
-         dict(tasks=["arc_challenge", "wikitext"], apply_chat_template=False)),
+         dict(tasks=["arc_challenge", "wikitext"], num_fewshot=0, apply_chat_template=False)),
+        (f"cap_genfx_{cell}_{ptag}", "generative-fx", "gen",
+         dict(tasks=["mmlu", "arc_challenge"], limit=1000, max_tokens=64, apply_template=False)),
     ]
     if cell != "base_qa":  # base model has no chat template
-        v += [
-            (f"cap_ctmm_{cell}_{ptag}", "loglik-ct-mmlu", "lmeval",
-             dict(tasks=["mmlu"], limit=100, num_fewshot=5, apply_chat_template=True, fewshot_as_multiturn=True)),
-            (f"cap_ctaw_{cell}_{ptag}", "loglik-ct-arcwiki", "lmeval",
-             dict(tasks=["arc_challenge", "wikitext"], apply_chat_template=True, fewshot_as_multiturn=True)),
-        ]
-    v.append((f"cap_gen_{cell}_{ptag}", "generative", "gen",
-              dict(tasks=["mmlu", "arc_challenge"], limit=1000, max_tokens=64)))
+        v.append((f"cap_genct_{cell}_{ptag}", "generative-ct", "gen",
+                  dict(tasks=["mmlu", "arc_challenge"], limit=1000, max_tokens=64, apply_template=True)))
     return v
 
 
@@ -139,11 +143,13 @@ with initialize_config_dir(config_dir=CONFIGS_DIR, version_base=None):
                             num_fewshot=kw.get("num_fewshot"),
                             apply_chat_template=kw["apply_chat_template"],
                             fewshot_as_multiturn=kw.get("fewshot_as_multiturn", False),
+                            batch_size=LOGLIK_BATCH_SIZE,
                         )
-                    else:  # generative (inspect), batched
+                    else:  # generative (inspect), batched, under the variant's template (fixed/chat)
                         m = run_requested_inspect_evals(
                             model, tok, kw["tasks"], limit=kw["limit"], steer="answer_gen",
                             max_tokens=kw["max_tokens"], gen_batch_size=GEN_BATCH_SIZE,
+                            apply_template=kw["apply_template"],
                         )
                     write_row(tag, cell, method, stage, m)
                 except Exception as e:
