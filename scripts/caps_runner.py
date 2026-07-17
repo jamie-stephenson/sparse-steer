@@ -154,6 +154,12 @@ with initialize_config_dir(config_dir=CONFIGS_DIR, version_base=None):
                     write_row(tag, cell, method, stage, m)
                 except Exception as e:
                     print(f"ERR {tag}: {type(e).__name__}: {e}", flush=True)
+                # Free THIS variant's cached allocations before the next one. The loglik peak (~32GB on
+                # long-context MMLU at bs=64) otherwise stays reserved by the allocator, so the batched
+                # gen (bs=96) OOMs even though each fits in isolation.
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
             del model
             gc.collect()
             if torch.cuda.is_available():
