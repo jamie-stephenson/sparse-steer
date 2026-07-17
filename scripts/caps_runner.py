@@ -51,7 +51,9 @@ CELL_ARGS = {
     "qw_ch": "task=truthfulqa_qwen prompt_template=chat extraction_template=chat eval_batch_size=32 gen_batch_size=8 judge_batch_size=16",
     "base_qa": "task=truthfulqa model_name=huggyllama/llama-7b ++model_dtype=float16 eval_batch_size=64 gen_batch_size=16 judge_batch_size=32",
 }
-GEN_BATCH_SIZE = 16  # inspect generative eval batch (request-coalescing batcher)
+GEN_BATCH_SIZE = 96  # inspect generative eval batch (request-coalescing batcher). Tuned 2026-07-17:
+# gen throughput scales with batch (4.7->20.4 prompts/s at bs 8->96, peak ~19.6GB of 48). Loglik, by
+# contrast, is compute-bound — its throughput is flat across batch size, so it stays at the default 8.
 
 
 def already_done(tag: str) -> bool:
