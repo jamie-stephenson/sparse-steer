@@ -3,7 +3,8 @@
 #   GRID    : all config-folds round-robined across the 3 GPUs, each run in-process by grid_runner
 #             (judges load ONCE per GPU). Balanced at config-fold granularity, not whole cells.
 #   PROMOTE : merge the 3 grid shards -> 2-fold means -> per-(cell,method) Pareto frontier.
-#   CAPS    : capability battery on the frontier only, cells split across the 3 GPUs.
+#   CAPS    : capability suite on the frontier only (in-process caps_runner.py: one model build per
+#             config, all variants + batched generative on it), cells split across the GPUs.
 # Every stage is resumable (grid_runner and sweep_tqa.sh caps both skip completed rows), so a
 # re-run continues where it stopped. Launch detached:  setsid bash scripts/run_v2_sweep.sh &
 set -u
@@ -43,8 +44,8 @@ uv run python scripts/sweep_promote.py "$V2/grid_2fold.tsv" --cap 20 --out "$V2/
 echo "promoted frontier: $(( $(wc -l < "$V2/promoted.tsv") - 1 )) points"
 
 echo "[$(date +%H:%M)] === CAPS phase ==="
-# split cells across the GPUs round-robin; each GPU runs sweep_tqa.sh STAGES=caps in its own
-# dir (a copy of the shared frontier) so their caps.tsv writes never race.
+# split cells across the GPUs round-robin; each GPU runs caps_runner.py in its own dir (a copy of
+# the shared frontier) so their caps.tsv writes never race.
 IFS=',' read -ra CL <<< "$CELLS"
 declare -a SH=()
 for g in $GPUS; do SH[$g]=""; done
@@ -52,7 +53,9 @@ for i in "${!CL[@]}"; do g=$(( i % NGPU )); SH[$g]="${SH[$g]},${CL[$i]}"; done
 for g in $GPUS; do
   sub="${SH[$g]#,}"; [ -z "$sub" ] && continue
   d="$V2/cap_g$g"; mkdir -p "$d"; cp "$V2/promoted.tsv" "$d/promoted.tsv"
-  GPU=$g STAGES=caps CELLS="$sub" RESULTS_DIR="$d" bash scripts/sweep_tqa.sh \
+  # In-process caps: one model build per config, ALL variants on it (no fresh run.py per variant),
+  # generative eval batched. Resumable — reuses any rows already in $d/caps.tsv.
+  CUDA_VISIBLE_DEVICES=$g uv run python scripts/caps_runner.py "$d" "$sub" \
     > "/tmp/v2_caps_g$g.log" 2>&1 &
 done
 wait
