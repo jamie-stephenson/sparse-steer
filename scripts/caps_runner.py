@@ -51,10 +51,12 @@ CELL_ARGS = {
     "qw_ch": "task=truthfulqa_qwen prompt_template=chat extraction_template=chat eval_batch_size=32 gen_batch_size=8 judge_batch_size=16",
     "base_qa": "task=truthfulqa model_name=huggyllama/llama-7b ++model_dtype=float16 eval_batch_size=64 gen_batch_size=16 judge_batch_size=32",
 }
-GEN_BATCH_SIZE = 96      # inspect generative batch (coalescing batcher): 4.7->20.4 prompts/s at bs 8->96.
-LOGLIK_BATCH_SIZE = 64   # lm-eval loglik batch. Tuned 2026-07-17 for the 0-shot (short-context) MMLU/ARC:
-# throughput peaks at bs=64 (~27 req/s, 17GB), plateaus to bs=256, regresses above. 0-shot is ~6x faster
-# per request than 5-shot purely from shorter contexts (the win is 0-shot, not the batch).
+GEN_BATCH_SIZE = 32      # inspect generative batch. Was 96, but real MMLU gen prompts are ~400 tok, so
+# Llama (MHA, large KV cache) OOM'd after the loglik's reserved peak. 32 leaves headroom; gen isn't the
+# bottleneck. LOGLIK dominates and is ~batch-invariant (compute-bound), so 32 costs ~1.5% but keeps the
+# per-config peak well under the 44GB budget even on long-context MMLU questions.
+LOGLIK_BATCH_SIZE = 32   # lm-eval loglik batch (0-shot). Throughput plateaus by bs=32 (~26 req/s); the
+# 6x speedup vs 5-shot is the short context, not the batch. Lowered from 64 for OOM margin.
 
 
 def already_done(tag: str) -> bool:
@@ -154,9 +156,9 @@ with initialize_config_dir(config_dir=CONFIGS_DIR, version_base=None):
                     write_row(tag, cell, method, stage, m)
                 except Exception as e:
                     print(f"ERR {tag}: {type(e).__name__}: {e}", flush=True)
-                # Free THIS variant's cached allocations before the next one. The loglik peak (~32GB on
-                # long-context MMLU at bs=64) otherwise stays reserved by the allocator, so the batched
-                # gen (bs=96) OOMs even though each fits in isolation.
+                # Free THIS variant's cached allocations before the next one. The loglik peak on
+                # long-context MMLU otherwise stays reserved by the allocator, so the next variant's
+                # gen KV cache OOMs even though each fits in isolation.
                 gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
