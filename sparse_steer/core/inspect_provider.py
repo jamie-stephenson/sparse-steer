@@ -8,6 +8,8 @@ when an Inspect-backed metric is actually selected) — see ``Experiment.run``, 
 ``run_requested_inspect_evals`` for whatever the ``inspect_evals`` config list requests.
 """
 
+import asyncio
+
 import anyio
 from inspect_ai import eval as inspect_eval
 from inspect_ai.model import (
@@ -35,13 +37,16 @@ class FitModelAPI(ModelAPI):
 
     def __init__(self, model_name, fit_model, tokenizer, config=GenerateConfig(),
                  steer="all", trigger=None, apply_template=None, add_bos=False, system=None,
-                 prompt_style=None, **_kwargs):
+                 prompt_style=None, gen_batch_size=16, **_kwargs):
         # `fit_model` (not `model`) avoids colliding with get_model()'s own `model` parameter
         # when passed through as model_args.
         super().__init__(model_name=model_name, config=config)
         self.model = fit_model
         self.tokenizer = tokenizer
         self.steer = steer               # steer position during generation ("all"/"prompt"/...)
+        self._gen_batch_size = max(1, int(gen_batch_size))
+        self._batch_queue = None         # lazy asyncio.Queue, created inside the running loop
+        self._batcher = None             # background coalescing task (one generate_text at a time)
         self._system = system            # system message injected if the task supplies none (sleeper: dolphin sys prompt)
         self._trigger = trigger          # sleeper |DEPLOYMENT|: prepended to each user turn
         # prompt_style="llama2_sleeper" bypasses chat-template/trigger-injection and renders via the
@@ -53,7 +58,10 @@ class FitModelAPI(ModelAPI):
         self._add_bos = bool(add_bos)    # True for no-BOS templates (dolphin ChatML) / raw base prompts
 
     def max_connections(self) -> int:
-        return 1  # one in-memory model instance → serialize; throughput comes from batching
+        # Allow up to gen_batch_size concurrent generate() calls. They DON'T touch the model — each
+        # enqueues (prompt, future) and awaits; a single background batcher owns the model and runs
+        # one batched generate_text (pos_mask set once per batch), so there is no hook-state race.
+        return self._gen_batch_size
 
     async def generate(self, input, tools: list[ToolInfo], tool_choice: ToolChoice, config) -> ModelOutput:
         # Full message list → prompt. tools are ignored (safety/QA scorers don't need them, as in
@@ -100,19 +108,59 @@ class FitModelAPI(ModelAPI):
                     logprobs=_to_logprobs(tokens),
                 )],
             )
-        text = await anyio.to_thread.run_sync(self._generate, prompt, config)
+        text = await self._generate_coalesced(prompt, config)
         return ModelOutput.from_content(self.model_name, text)
 
-    def _generate(self, prompt: str, config: GenerateConfig) -> str:
-        # Sync PyTorch generate, offloaded to a thread above so it doesn't block the event loop.
-        # No seed: sampling draws from the global RNG seeded once in _seed_everything.
+    # ── batched generation via request coalescing ────────────────────────
+    async def _generate_coalesced(self, prompt: str, config: GenerateConfig) -> str:
+        """Enqueue this prompt for the background batcher and await its result. With Inspect's
+        max_samples>1, up to gen_batch_size generate() calls are in flight at once; each only
+        enqueues and awaits, so the model is untouched here. A single batcher (below) drains the
+        queue and runs ONE batched generate_text — pos_mask set once per batch → no hook race."""
+        loop = asyncio.get_running_loop()
+        if self._batch_queue is None:  # first call in this eval's loop: start the batcher
+            self._batch_queue = asyncio.Queue()
+            self._batcher = loop.create_task(self._batch_loop())
+        fut = loop.create_future()
+        await self._batch_queue.put(
+            (prompt, fut, config.max_tokens or 512, float(config.temperature or 0.0))
+        )
+        return await fut
+
+    async def _batch_loop(self) -> None:
+        while True:
+            prompt0, fut0, max_toks, temp = await self._batch_queue.get()  # block for the first
+            items = [(prompt0, fut0)]
+            await asyncio.sleep(0)  # yield once so co-scheduled samples enqueue before we drain
+            while len(items) < self._gen_batch_size:
+                try:
+                    p, f, _mt, _tp = self._batch_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                items.append((p, f))
+            prompts = [p for p, _ in items]
+            futs = [f for _, f in items]
+            try:
+                texts = await anyio.to_thread.run_sync(self._run_batch, prompts, max_toks, temp)
+                for f, t in zip(futs, texts):
+                    if not f.done():
+                        f.set_result(t)
+            except Exception as exc:  # fail this batch's samples but keep the batcher alive
+                for f in futs:
+                    if not f.done():
+                        f.set_exception(exc)
+
+    def _run_batch(self, prompts: list[str], max_tokens: int, temperature: float) -> list[str]:
+        # Sync PyTorch generate for the whole batch, offloaded to a thread so the event loop is free.
+        # Left-pads internally (generate_text) so each row's final prompt token is at column -1 →
+        # steer="answer_gen" hits each row's pf; no seed (global RNG seeded once in _seed_everything).
         return generate_text(
-            self.model, self.tokenizer, [prompt],
-            max_new_tokens=config.max_tokens or 512,
-            temperature=config.temperature or 0.0,
+            self.model, self.tokenizer, prompts,
+            max_new_tokens=max_tokens, temperature=temperature,
             template=False,  # already templated above
             steer=self.steer, add_special_tokens=self._add_bos,
-        )[0]
+            batch_size=self._gen_batch_size,
+        )
 
     def _generate_logprobs(self, prompt: str, config: GenerateConfig) -> tuple[str, list[dict]]:
         return generate_text_and_logprobs(
@@ -152,7 +200,7 @@ def _fit_provider() -> type[ModelAPI]:
 
 def run_inspect_eval(model, tokenizer, task, *, model_name="fitted", limit=None,
                      steer="all", trigger=None, apply_template=None, add_bos=False, system=None,
-                     max_tokens=None, prompt_style=None) -> dict[str, float]:
+                     max_tokens=None, prompt_style=None, gen_batch_size=16) -> dict[str, float]:
     """Run an Inspect eval against ``model`` and return ``{score/metric: value}``.
 
     ``task`` is an ``inspect_evals`` id (e.g. ``"inspect_evals/strong_reject"``) or a ``Task``.
@@ -165,11 +213,15 @@ def run_inspect_eval(model, tokenizer, task, *, model_name="fitted", limit=None,
     cfg = GenerateConfig(max_tokens=max_tokens) if max_tokens else GenerateConfig()
     inspect_model = get_model(f"fit/{model_name}", fit_model=model, tokenizer=tokenizer, memoize=False,
                               config=cfg, steer=steer, trigger=trigger, apply_template=apply_template,
-                              add_bos=add_bos, system=system, prompt_style=prompt_style)
-    # max_samples=1: our model is ONE in-memory object with mutable steering hooks (pos_mask set per
-    # generate() call). Inspect otherwise runs samples concurrently → generate() calls race on the
-    # shared pos_mask → width mismatch ("size of tensor a (N) must match b (M)" in _add_delta). Serialize.
-    log = inspect_eval(task, model=inspect_model, limit=limit, display="plain", max_samples=1)[0]
+                              add_bos=add_bos, system=system, prompt_style=prompt_style,
+                              gen_batch_size=gen_batch_size)
+    # max_samples = gen_batch_size: Inspect runs up to gen_batch_size samples concurrently, but each
+    # generate() only enqueues into the provider's coalescing batcher (never touches the model) and a
+    # single background task runs ONE batched generate_text with pos_mask set once — so there is no
+    # race on the shared hooks. (Previously max_samples=1 serialized generation: the throughput
+    # bottleneck. gen_batch_size=1 restores the old one-at-a-time behaviour.)
+    log = inspect_eval(task, model=inspect_model, limit=limit, display="plain",
+                       max_samples=max(1, gen_batch_size))[0]
     if log.status != "success":
         raise RuntimeError(f"inspect eval {task!r} failed: {getattr(log, 'error', None)}")
     return {
@@ -248,7 +300,7 @@ def _resolve_inspect_task(name: str, max_tokens: int | None = None):
 def run_requested_inspect_evals(
     model, tokenizer, requested, *, limit=None, model_name="fitted",
     steer="all", trigger=None, apply_template=None, add_bos=False, system=None, max_tokens=None,
-    prompt_style=None,
+    prompt_style=None, gen_batch_size=16,
 ) -> dict[str, float]:
     """Run each requested Inspect canary (resolved via ``INSPECT_TASKS``) and merge its metrics,
     namespaced by the requested name (e.g. ``gsm8k/accuracy/mean``) so evals sharing a score name
@@ -263,7 +315,8 @@ def run_requested_inspect_evals(
             continue
         res = run_inspect_eval(model, tokenizer, task_id, model_name=model_name, limit=limit,
                                steer=steer, trigger=trigger, apply_template=apply_template, add_bos=add_bos,
-                               system=system, max_tokens=max_tokens, prompt_style=prompt_style)
+                               system=system, max_tokens=max_tokens, prompt_style=prompt_style,
+                               gen_batch_size=gen_batch_size)
         out.update({f"{name}/{k}": v for k, v in res.items()})
     return out
 

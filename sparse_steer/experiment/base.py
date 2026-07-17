@@ -326,6 +326,7 @@ class Experiment(abc.ABC):
                         system=self.config.get("inspect_system"),
                         max_tokens=self.config.get("inspect_max_tokens"),
                         prompt_style=self.config.get("inspect_prompt_style"),
+                        gen_batch_size=self.config.get("inspect_gen_batch_size", 16),
                     )
                 )
             # lm-eval-harness canaries (loglikelihood MMLU/ARC + wikitext CE), lazy-imported like
