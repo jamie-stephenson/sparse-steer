@@ -28,7 +28,7 @@ JOBS = sys.argv[2]
 RES.mkdir(parents=True, exist_ok=True)
 FULLTSV = RES / "fulls.tsv"
 if not FULLTSV.exists():
-    FULLTSV.write_text("tag\tcell\tmethod\tfold\ttrue\tinfo\tmc1\tmc2\targs\n")
+    FULLTSV.write_text("tag\tcell\tmethod\tfold\ttrue\tinfo\tmc0\tmc1\tmc2\targs\n")
 
 CONFIGS_DIR = str((Path(__file__).resolve().parents[1] / "configs"))
 jobs = [r for r in csv.reader(open(JOBS), delimiter="\t") if r and len(r) == 5]
@@ -69,7 +69,7 @@ with initialize_config_dir(config_dir=CONFIGS_DIR, version_base=None):
             print(f"ERR {tag} f{fold}: {type(e).__name__}: {e}", flush=True)
         row = [tag, cell, method, fold,
                fmt(metrics, "gen_truthful"), fmt(metrics, "gen_informative"),
-               fmt(metrics, "mc1"), fmt(metrics, "mc2"), overrides]
+               fmt(metrics, "mc0"), fmt(metrics, "mc1"), fmt(metrics, "mc2"), overrides]
         with open(FULLTSV, "a") as f:
             f.write("\t".join(row) + "\n")
         # free the config's model so the next config starts clean (judges stay cached on CPU)

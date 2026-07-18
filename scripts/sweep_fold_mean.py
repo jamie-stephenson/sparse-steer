@@ -20,7 +20,7 @@ for r in csv.DictReader(open(inp), delimiter="\t"):
     groups[(r["tag"], r["cell"], r["method"])].append(r)
 
 with open(out, "w") as f:
-    f.write("tag\tcell\tmethod\ttrue\tinfo\tmc1\tmc2\targs\n")
+    f.write("tag\tcell\tmethod\ttrue\tinfo\tmc0\tmc1\tmc2\targs\n")
     for (tag, cell, method), rs in sorted(groups.items()):
         folds = {r["fold"]: r for r in rs}
         def mean(k):
@@ -32,6 +32,7 @@ with open(out, "w") as f:
             continue
         # caps runs capability once per config on one fold's trained gates; use fold 0's args verbatim.
         args = folds.get("0", rs[0])["args"]
-        t, i, m1, m2 = mean("true"), mean("info"), mean("mc1"), mean("mc2")
+        t, i, m0, m1, m2 = mean("true"), mean("info"), mean("mc0"), mean("mc1"), mean("mc2")
         f.write(f"{tag}\t{cell}\t{method}\t{t:.4f}\t{i:.4f}\t"
-                f"{m1 if m1 is not None else ''}\t{m2 if m2 is not None else ''}\t{args}\n")
+                f"{m0 if m0 is not None else ''}\t{m1 if m1 is not None else ''}\t"
+                f"{m2 if m2 is not None else ''}\t{args}\n")
