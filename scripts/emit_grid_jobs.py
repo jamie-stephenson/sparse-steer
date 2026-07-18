@@ -62,15 +62,21 @@ def emit(cell, only_sparse_l0=None):
     return rows
 
 
-p = argparse.ArgumentParser()
-p.add_argument("cells", help="comma-separated cells, e.g. ll_qa,ll_ch,qw_qa,qw_ch,base_qa")
-p.add_argument("--only-sparse-l0", default=None,
-               help="emit ONLY sparse configs at this l0_lambda (skip unsteered/ITI/other l0)")
-a = p.parse_args()
-if a.only_sparse_l0 is not None and a.only_sparse_l0 not in L0S:
-    raise SystemExit(f"--only-sparse-l0 {a.only_sparse_l0} not in grid L0S={L0S}")
-allrows = []
-for cell in a.cells.split(","):
-    allrows.extend(emit(cell, only_sparse_l0=a.only_sparse_l0))
-for r in allrows:
-    print("\t".join(r))
+def build_jobs(cells, only_sparse_l0=None):
+    """All (tag, cell, method, fold, overrides) rows for the given cells. Importable by run_grid.py."""
+    if only_sparse_l0 is not None and only_sparse_l0 not in L0S:
+        raise ValueError(f"only_sparse_l0={only_sparse_l0} not in grid L0S={L0S}")
+    rows = []
+    for cell in cells:
+        rows.extend(emit(cell, only_sparse_l0=only_sparse_l0))
+    return rows
+
+
+if __name__ == "__main__":
+    p = argparse.ArgumentParser()
+    p.add_argument("cells", help="comma-separated cells, e.g. ll_qa,ll_ch,qw_qa,qw_ch,base_qa")
+    p.add_argument("--only-sparse-l0", default=None,
+                   help="emit ONLY sparse configs at this l0_lambda (skip unsteered/ITI/other l0)")
+    a = p.parse_args()
+    for r in build_jobs(a.cells.split(","), only_sparse_l0=a.only_sparse_l0):
+        print("\t".join(r))
