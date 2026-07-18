@@ -1,11 +1,15 @@
-"""Emit every grid config-fold of the v2 tqa sweep as grid_runner jobs (tag<TAB>cell<TAB>method<TAB>
+"""Emit every grid config-fold of the tqa sweep as grid_runner jobs (tag<TAB>cell<TAB>method<TAB>
 fold<TAB>overrides), one line per (config, fold). Round-robin these across GPUs for balanced, in-process
 grid running. This is the SINGLE source of the grid definition shared with scripts/sweep_tqa.sh — keep
 the two in sync.
 
-Usage: uv run python scripts/emit_grid_jobs.py ll_qa,ll_ch,qw_qa,qw_ch,base_qa > grid.jobs
+Usage:
+  uv run python scripts/emit_grid_jobs.py ll_qa,ll_ch,qw_qa,qw_ch,base_qa > grid.jobs
+  uv run python scripts/emit_grid_jobs.py <cells> --only-sparse-l0 0.03 > l0_003.jobs
+    Emit ONLY the sparse configs at a single l0_lambda (no unsteered, no ITI, no other l0 values) —
+    for extending an existing grid with a new sparsity level without retraining what is already cached.
 """
-import sys
+import argparse
 
 COMMON = "device=cuda disjoint_extract_refine_data=false extraction_mcq_mode=mc2"
 GRIDEVAL = "eval_subset_size=null generative_eval=true"  # full 2-fold True/Info (+MC)
@@ -20,27 +24,33 @@ CELL_ARGS = {
     "qw_ch": "task=truthfulqa_qwen prompt_template=chat extraction_template=chat eval_batch_size=32 gen_batch_size=8 judge_batch_size=16",
     "base_qa": "task=truthfulqa model_name=huggyllama/llama-7b ++model_dtype=float16 eval_batch_size=64 gen_batch_size=16 judge_batch_size=32",
 }
-L0S = ["0", "0.005", "0.01"]
-ILAS = [("def", "-0.79"), ("open", "1")]     # label, init_log_alpha
+L0S = ["0", "0.005", "0.01", "0.03"]          # v2 was {0, 0.005, 0.01}; 0.03 is the sparser extension
+ILAS = [("def", "-0.79"), ("open", "1")]      # label, init_log_alpha
 POS = [("all", "all"), ("ag", "answer_gen")]  # label, steer_token_position
 ITI_A = ["8", "15", "22"]
 ITI_K = ["24", "48", "96"]
 
 
-def emit(cell):
+def emit(cell, only_sparse_l0=None):
+    """Config-folds for one cell. only_sparse_l0=<val> restricts to sparse at that single l0 and
+    drops unsteered + ITI (for extending a cached grid with a new sparsity level)."""
     ca = CELL_ARGS[cell]
     rows = []
-    for fold in ("0", "1"):
-        rows.append((f"uns_{cell}", cell, "unsteered", fold,
-                     f"{COMMON} {ca} {GRIDEVAL} fold={fold} method=unsteered"))
+    if only_sparse_l0 is None:
+        for fold in ("0", "1"):
+            rows.append((f"uns_{cell}", cell, "unsteered", fold,
+                         f"{COMMON} {ca} {GRIDEVAL} fold={fold} method=unsteered"))
     # sparse: l0 x ila x pos (ep16), both folds
-    for l0 in L0S:
+    l0s = [only_sparse_l0] if only_sparse_l0 is not None else L0S
+    for l0 in l0s:
         for ilab, ila in ILAS:
             for plab, pos in POS:
                 for fold in ("0", "1"):
                     rows.append((f"sp_{cell}_l{l0}_{ilab}_{plab}", cell, "sparse", fold,
                                  f"{COMMON} {ca} {GRIDEVAL} fold={fold} {SPARSE} "
                                  f"l0_lambda={l0} gate_config.init_log_alpha={ila} steer_token_position={pos}"))
+    if only_sparse_l0 is not None:
+        return rows
     # ITI: scale x topk x pos (sigma gen_end_q), both folds
     for a in ITI_A:
         for k in ITI_K:
@@ -52,9 +62,15 @@ def emit(cell):
     return rows
 
 
-cells = sys.argv[1].split(",")
+p = argparse.ArgumentParser()
+p.add_argument("cells", help="comma-separated cells, e.g. ll_qa,ll_ch,qw_qa,qw_ch,base_qa")
+p.add_argument("--only-sparse-l0", default=None,
+               help="emit ONLY sparse configs at this l0_lambda (skip unsteered/ITI/other l0)")
+a = p.parse_args()
+if a.only_sparse_l0 is not None and a.only_sparse_l0 not in L0S:
+    raise SystemExit(f"--only-sparse-l0 {a.only_sparse_l0} not in grid L0S={L0S}")
 allrows = []
-for cell in cells:
-    allrows.extend(emit(cell))
+for cell in a.cells.split(","):
+    allrows.extend(emit(cell, only_sparse_l0=a.only_sparse_l0))
 for r in allrows:
     print("\t".join(r))
