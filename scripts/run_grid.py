@@ -86,40 +86,63 @@ def run_grid(rows, res, ngpu):
     print(f"[run_grid] GRID done -> {res}/grid_2fold.tsv", flush=True)
 
 
-def run_caps(cells, res, ngpu):
-    if not (res / "grid_2fold.tsv").exists():
+CAPS_HDR = "tag\tcell\tmethod\tstage\tmetrics\n"
+
+
+def run_caps(rows, res, ngpu):
+    """Cap ONLY the configs this run's grid covered (rows), not every config of the touched cells.
+    Prior caps rows are reused; the cell->shard mapping is stable so a subset run never clobbers other
+    cells' cached caps."""
+    g2f = res / "grid_2fold.tsv"
+    if not g2f.exists():
         print("[run_grid] no grid_2fold.tsv; nothing to cap", flush=True)
         return
-    shards = {g: [] for g in range(ngpu)}
-    for i, c in enumerate(cells):
-        shards[i % ngpu].append(c)
-    print(f"[run_grid] CAPS: {len(cells)} cell(s) across {ngpu} gpu(s)", flush=True)
+    lines = g2f.read_text().splitlines()
+    hdr, cols = lines[0], lines[0].split("\t")
+    ti, ci = cols.index("tag"), cols.index("cell")
+    trained = {(f[ci], f[ti]): ln for ln in lines[1:] for f in [ln.split("\t")]}
+    want = sorted({(r[1], r[0]) for r in rows if (r[1], r[0]) in trained})  # (cell, tag), trained only
+    if not want:
+        print("[run_grid] CAPS: none of this run's configs are trained yet", flush=True)
+        return
+
+    # pool every caps row already computed anywhere (master + targeted dirs), dedup by tag
+    known = {}
+    for f in [res / "caps.tsv", *sorted(res.glob("cap*/caps.tsv"))]:
+        if f.exists():
+            for ln in f.read_text().splitlines()[1:]:
+                known.setdefault(ln.split("\t", 1)[0], ln)
+
+    all_cells = G.cells_for()   # canonical order -> stable cell->shard
+    shard_of = {c: all_cells.index(c) % ngpu for c in all_cells}
+    shard_cells = {g: sorted({c for (c, t) in want if shard_of[c] == g}) for g in range(ngpu)}
+    print(f"[run_grid] CAPS: {len(want)} configs over {len({c for c, _ in want})} cell(s)", flush=True)
 
     def cmd(g):
-        cs = shards[g]
+        cs = shard_cells[g]
         if not cs:
             return None
         d = res / f"cap_g{g}"
         d.mkdir(exist_ok=True)
-        (d / "promoted.tsv").write_text((res / "grid_2fold.tsv").read_text())  # full config list
-        subprocess.run([sys.executable, str(ROOT / "scripts" / "seed_caps.py"),
-                        str(res), str(d), ",".join(cs)], check=True)
+        with open(d / "caps.tsv", "w") as f:            # seed all known caps -> already-done skip
+            f.write(CAPS_HDR)
+            f.writelines(ln + "\n" for ln in known.values())
+        with open(d / "promoted.tsv", "w") as f:        # config list = ONLY this run's configs here
+            f.write(hdr + "\n")
+            f.writelines(trained[(c, t)] + "\n" for (c, t) in want if c in cs)
         return [sys.executable, str(ROOT / "scripts" / "caps_runner.py"), str(d), ",".join(cs)]
     failed = _launch_per_gpu(cmd, ngpu, lambda g: f"/tmp/v2_caps_g{g}.log")
     if failed:
         print(f"[run_grid] WARNING caps_runner nonzero exit on gpu(s) {failed}", flush=True)
 
-    # merge: pool every cap_g*/caps.tsv, dedup by tag (keeps configs from cells this run didn't touch)
-    seen = set()
+    merged = {}
+    for f in sorted(res.glob("cap_g*/caps.tsv")):
+        for ln in f.read_text().splitlines()[1:]:
+            merged.setdefault(ln.split("\t", 1)[0], ln)
     with open(res / "caps.tsv", "w") as out:
-        out.write("tag\tcell\tmethod\tstage\tmetrics\n")
-        for f in sorted(res.glob("cap_g*/caps.tsv")):
-            for ln in f.read_text().splitlines()[1:]:
-                tag = ln.split("\t", 1)[0]
-                if tag not in seen:
-                    seen.add(tag)
-                    out.write(ln + "\n")
-    print(f"[run_grid] CAPS done -> {res}/caps.tsv ({len(seen)} rows)", flush=True)
+        out.write(CAPS_HDR)
+        out.writelines(ln + "\n" for ln in merged.values())
+    print(f"[run_grid] CAPS done -> {res}/caps.tsv ({len(merged)} rows)", flush=True)
 
 
 def main():
@@ -146,7 +169,7 @@ def main():
                         inits=a.init, positions=a.pos, iti_scales=a.iti_scale, iti_ks=a.iti_k, folds=a.fold)
     run_grid(rows, res, ngpu)
     if not a.skip_caps:
-        run_caps(G.cells_for(models=a.model, templates=a.template), res, ngpu)
+        run_caps(rows, res, ngpu)
     print("[run_grid] === COMPLETE ===", flush=True)
 
 
