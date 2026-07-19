@@ -52,6 +52,24 @@ engine torch.compile — standing guard). Plus: recompute the unsteered MC0 base
    capability numbers are reported 0-shot. Unsteered-only, so cheap (~one 5-shot MMLU + 25-shot ARC per
    model). Cite the leaderboard settings (huggingface.co/blog/open-llm-leaderboard-mmlu).
 
+8. **Shared-scale ablation (user directive 2026-07-19).** Does a SINGLE shared scale parameter (one global
+   `s`, not per-site `s^{(l,h)}`) match per-site sparse steering? Keep the sparse method intact (HardConcrete
+   gates + L0 penalty) and only swap the per-site scales for one shared scale:
+   `method=sparse +shared_scale=true` (undeclared in sparse.yaml so needs `+`; `steering.py` already drops the
+   per-site `raw_scale` when a shared `raw_scale` exists, and it is in the cache whitelist). NOTE the
+   `shared_scale_only` method preset is NOT this — it has no gates and no L0 (`learn_scale:false`,
+   `l0_lambda:0`). Impl predates the HF refactor and may be stale, so SMOKE-TEST first (train 1 fold, confirm it
+   runs end-to-end and the single scale updates) before the full run.
+   - l0 = **0.01**, the best True/Info vs MMLU-gen vs KL-to-base trade-off across the per-site-scale sweep
+     (mean over cells, def_all): 0 to 0.01 costs only ~0.04 T*I but halves dMMLU-gen (-0.161 to -0.073) and cuts
+     KL 40% (0.504 to 0.302), while 0.03 collapses Info (T*I 0.68). Reconfirm against l0=0.02 when its caps
+     land, but 0.01 is very likely the pick.
+   - RUN: the per-site-scale grid at l0=0.01 with `+shared_scale=true` appended, all 5 cells, def init, both
+     positions, via a `--shared-scale` flag on run_grid/emit_grid_jobs (tag configs distinctly) or a targeted
+     driver; auto-caps must include the new `cap_klfx` KL + genfx/genct.
+   - COMPARE shared-scale vs per-site-scale at l0=0.01 on True/Info/MC0-2 AND caps (MMLU-gen, KL-to-base,
+     WikiText). Run when GPUs free (after the l0=0.02 caps).
+
 ✅ RESOLVED (2026-07-13): the steer-off-by-one bug is FIXED — `answer_gen` position shipped (positions.py +
 generate.py), the whole tqa sweep was rerun on it, and the corrected frontier/MC data for all 5 cells + base
 capability are saved LOCALLY in `results/`. Superseded by the redesign below.
