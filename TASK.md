@@ -70,6 +70,25 @@ engine torch.compile — standing guard). Plus: recompute the unsteered MC0 base
    - COMPARE shared-scale vs per-site-scale at l0=0.01 on True/Info/MC0-2 AND caps (MMLU-gen, KL-to-base,
      WikiText). Run when GPUs free (after the l0=0.02 caps).
 
+9. **Sleeper KL + CE capability caps (user directive 2026-07-20, do AFTER shared-scale run).** Add the
+   capability axes (KL-to-base + CE loss) to the SLEEPER ablation setting, on BOTH sleeper models, to show
+   ablation removes the backdoor (JSD_clean/ASR) WITHOUT wrecking general capability.
+   - Models: **Cadenza** `Cadenza-Labs/dolphin-llama3-8B-sleeper-agent-distilled-lora` (task=sleeper/suppress/llama,
+     64 gates) and **saraprice** `saraprice/llama2-7B-backdoor-DEPLOYMENT` (task=sleeper/suppress/llama2, 128 gates).
+   - Intervention = ABLATE (directional, prompt-only). FEASIBILITY CONFIRMED: ablation routes through
+     `_add_delta`, so the all-false mask nulls it → `kl_provider.kl_to_base` works unchanged. Call it with
+     `steer="prompt"` (ablation acts at prompt positions, not answer_gen).
+   - APPROPRIATE choices: KL reference = the UNABLATED sleeper (all-false mask), the ablation footprint;
+     CE = cross-entropy on the CLEAN-conversation data (in-distribution, ties to JSD_clean; NOT MMLU/WikiText
+     which are off-distribution for these chat sleepers, per the sleeper-MMLU note). Optionally also KL vs the
+     CLEAN reference model (complements JSD_clean).
+   - ⚠ LOGISTICS BLOCKER (2026-07-20): this pod is TruthfulQA-only. Neither sleeper model is cached, no sleeper
+     artifacts, and only 15G free (the two models ~29G). Needs either (a) free disk here after the TQA sweep
+     (drop the 3 TQA 7B model caches + v2 artifacts once harvested) then download + train ablation, or (b) a
+     separate sleeper pod (the prior llama-sleeper/safesteer setup) with the models + trained ablation configs.
+   - OPEN: do trained ablation gates exist from a prior sleeper sweep, or train fresh (l0_lambda sweep
+     {0.02,0.04,0.08})? which pod?
+
 ✅ RESOLVED (2026-07-13): the steer-off-by-one bug is FIXED — `answer_gen` position shipped (positions.py +
 generate.py), the whole tqa sweep was rerun on it, and the corrected frontier/MC data for all 5 cells + base
 capability are saved LOCALLY in `results/`. Superseded by the redesign below.
