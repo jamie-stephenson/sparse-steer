@@ -26,7 +26,7 @@ TEMPLATES = {"plain": ("qa", ""), "chat": ("ch", "prompt_template=chat extractio
 VALID_TEMPLATES = {"llama2-chat": ("plain", "chat"), "qwen": ("plain", "chat"), "llama-base": ("plain",)}
 
 METHODS = ("unsteered", "sparse", "iti")
-L0S = ("0", "0.005", "0.01", "0.03")
+L0S = ("0", "0.005", "0.01", "0.02", "0.03")
 INITS = {"def": "-0.79", "open": "1"}           # label -> gate_config.init_log_alpha
 POSITIONS = {"all": "all", "ag": "answer_gen"}  # label -> steer_token_position
 ITI_SCALES = ("8", "15", "22")
