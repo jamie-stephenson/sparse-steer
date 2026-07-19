@@ -1,21 +1,17 @@
 # sparse-steer
 
-Sparse activation steering experiments for language models, built on
-[TransformerLens](https://github.com/TransformerLensOrg/TransformerLens).
+Sparse activation steering experiments for language models. A single HuggingFace engine drives
+extraction, steering, training, and evaluation across architectures (Llama, Qwen2, …) through one
+set of module hooks, with no per-model layout code.
 
 ## Basic experiment flow
 
 - Extract contrastive steering vectors from activations.
 - Train Hard-Concrete gates to apply steering sparsely.
-- Evaluate steered model.
+- Evaluate the steered model.
 
-## Why TransformerLens?
-
-All supported architectures (Llama, Qwen2, …) share one code path with no per-model layout
-code. TL also makes collecting activations easy with `run_with_cache`.
-
-> Models must be supported by `HookedTransformer.from_pretrained` (e.g.
-> `Qwen/Qwen2.5-0.5B-Instruct`, `meta-llama/Llama-3.2-1B-Instruct`).
+> Models are loaded with `AutoModelForCausalLM.from_pretrained` (e.g. `Qwen/Qwen2.5-7B-Instruct`,
+> `meta-llama/Llama-2-7b-chat-hf`).
 
 ## Setup
 
@@ -52,33 +48,24 @@ I've tried to organise it so that applying the technique to a new task is as sim
 
 ```text
 .
-├── run.py                          # entrypoint: method + task registries (Hydra main)
+├── run.py                      # entrypoint: method + task registries (Hydra main)
 ├── configs/
-│   ├── config.yaml                 # root config (defaults: method + task)
-│   ├── method/                     # steering methods: unsteered, fixed, sparse, gates_only...
-│   └── task/                       # tasks: truthfulqa, sleeper, refusal, safesteer...
+│   ├── config.yaml             # root config (defaults: method + task)
+│   ├── method/                 # steering methods: unsteered, fixed, sparse, iti, gates_only...
+│   └── task/                   # tasks: truthfulqa, sleeper, refusal, safesteer...
 ├── sparse_steer/
-│   ├── core/                       # task-agnostic model machinery
-│   │   ├── steering.py             # SteeringModel: TransformerLens hooks, gates/scale, steer & ablate
-│   │   ├── loading.py              # build a steered or plain model
-│   │   ├── extract.py              # activation collection + mean-difference steering vectors
-│   │   ├── generate.py             # model-agnostic batched generation (SteeringModel or HF/LoRA)
-│   │   ├── gate_tracker.py         # gate-sparsity tracking + visualisation
-│   │   └── inspect_provider.py     # run UK AISI Inspect evals against a fitted model
-│   ├── train.py                    # gate/scale training loop + L0 sparsity penalty
-│   ├── experiment/
-│   │   ├── base.py                 # run() pipeline: data → fit → eval, with artifact caching
-│   │   ├── steering.py             # steering experiment + refinement registry (none / gate_training)
-│   │   ├── unsteered.py            # no-steering baseline
-│   │   └── lora.py                 # LoRA fine-tuning experiment
-│   ├── tasks/
-│   │   ├── base.py                 # TaskSpec class
-│   │   ├── collate.py              # shared prompt + completion collation
-│   │   ├── jailbreak/              # refusal-direction ablation
-│   │   ├── truthfulqa/             # steering to improve TruthfulQA performance
-│   │   ├── sleeper/                # sleeper agent removal (tinystories + llama families)
-│   │   └── safesteer/              # safety steering (SafeSteer reproduction)
-│   └── utils/                      # leaf utilities: cache, tokenization...
-└── report/                         # project report (LaTeX + figures)
+│   ├── core/                   # task-agnostic model machinery
+│   │   ├── steering.py         # SteeringModel: HF module hooks, gates/scale, steer & ablate
+│   │   ├── wiring.py           # attach/rewire the steering hooks onto the HF model
+│   │   ├── extract.py          # activation collection + mean-difference steering vectors
+│   │   ├── generate.py         # batched generation
+│   │   ├── gate_tracker.py     # gate-sparsity tracking + visualisation
+│   │   ├── inspect_provider.py # UK AISI Inspect (generative) evals against a fitted model
+│   │   └── lmeval_provider.py  # lm-eval-harness (log-likelihood) evals against a fitted model
+│   ├── train.py                # gate/scale training loop + L0 sparsity penalty
+│   ├── experiment/             # run() pipeline (base) + steering / unsteered / lora experiments
+│   ├── tasks/                  # a TaskSpec per task: truthfulqa, sleeper, jailbreak, safesteer
+│   └── utils/                  # leaf utilities: cache, tokenization...
+├── scripts/                    # sweep orchestration + analysis (run_grid, grid_runner, caps_runner, plots...)
+└── report/                     # project report (LaTeX + figures)
 ```
-
