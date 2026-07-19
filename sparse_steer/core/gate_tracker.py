@@ -542,10 +542,16 @@ def render_gate_animation(
         title.set_text(f"{label} \u2014 step {snapshots.steps[frame_idx]}")
         return []
 
+    # Subsample to at most ~60 evenly-spaced frames: a full GIF over every training step (thousands of
+    # snapshots) is intractable for PillowWriter to encode, and the evolution reads fine at 60 frames.
+    n = len(snapshots.steps)
+    max_frames = 60
+    frame_idxs = (list(range(n)) if n <= max_frames
+                  else sorted({round(i * (n - 1) / (max_frames - 1)) for i in range(max_frames)}))
     anim = animation.FuncAnimation(
         fig,
         _update,
-        frames=len(snapshots.steps),
+        frames=frame_idxs,
         interval=1000 // fps,
         blit=False,
     )
