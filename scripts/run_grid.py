@@ -159,6 +159,9 @@ def main():
     p.add_argument("--results-dir", default="sweeps/v2")
     p.add_argument("--ngpu", type=int, default=None)
     p.add_argument("--skip-caps", action="store_true", help="run the grid only, no capability suite")
+    p.add_argument("--shared-scale", action="store_true",
+                   help="sparse with ONE shared scale instead of per-site scales (gates + L0 kept); "
+                        "tags get a _shared suffix")
     a = p.parse_args()
 
     ngpu = a.ngpu or detect_ngpu()
@@ -166,7 +169,8 @@ def main():
     res.mkdir(parents=True, exist_ok=True)
 
     rows = G.build_jobs(models=a.model, templates=a.template, methods=a.method, l0s=a.l0,
-                        inits=a.init, positions=a.pos, iti_scales=a.iti_scale, iti_ks=a.iti_k, folds=a.fold)
+                        inits=a.init, positions=a.pos, iti_scales=a.iti_scale, iti_ks=a.iti_k, folds=a.fold,
+                        shared_scale=a.shared_scale)
     run_grid(rows, res, ngpu)
     if not a.skip_caps:
         run_caps(rows, res, ngpu)

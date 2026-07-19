@@ -49,7 +49,7 @@ def cells_for(models=None, templates=None):
 
 
 def build_jobs(models=None, templates=None, methods=None, l0s=None, inits=None, positions=None,
-               iti_scales=None, iti_ks=None, folds=None):
+               iti_scales=None, iti_ks=None, folds=None, shared_scale=False):
     models = models or list(MODELS)
     templates = templates or list(TEMPLATES)
     methods = methods or list(METHODS)
@@ -74,11 +74,15 @@ def build_jobs(models=None, templates=None, methods=None, l0s=None, inits=None, 
                     rows.append((f"uns_{cell}", cell, "unsteered", fold,
                                  f"{base} fold={fold} method=unsteered"))
                 if "sparse" in methods:
+                    # shared_scale swaps the per-site scales for one shared scale (gates + L0 kept);
+                    # tags get a _shared suffix so shared and per-site results never collide.
+                    sp_over = SPARSE + (" +shared_scale=true" if shared_scale else "")
+                    sfx = "_shared" if shared_scale else ""
                     for l0 in l0s:
                         for ilab in inits:
                             for plab in positions:
-                                rows.append((f"sp_{cell}_l{l0}_{ilab}_{plab}", cell, "sparse", fold,
-                                             f"{base} fold={fold} {SPARSE} l0_lambda={l0} "
+                                rows.append((f"sp_{cell}_l{l0}_{ilab}_{plab}{sfx}", cell, "sparse", fold,
+                                             f"{base} fold={fold} {sp_over} l0_lambda={l0} "
                                              f"gate_config.init_log_alpha={INITS[ilab]} "
                                              f"steer_token_position={POSITIONS[plab]}"))
                 if "iti" in methods:
