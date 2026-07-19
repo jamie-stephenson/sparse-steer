@@ -31,6 +31,7 @@ from sparse_steer.tasks.truthfulqa.task import TruthfulQATask
 from sparse_steer.core.loading import load_tokenizer
 from sparse_steer.core.lmeval_provider import run_requested_lmeval_tasks
 from sparse_steer.core.inspect_provider import run_requested_inspect_evals
+from sparse_steer.core.kl_provider import kl_to_base
 from sparse_steer.utils.memory import free_model_memory
 
 RES = Path(sys.argv[1])
@@ -87,6 +88,9 @@ def variants_for(cell, ptag):
          dict(tasks=["mmlu"], limit=100, num_fewshot=0, apply_chat_template=False)),
         (f"cap_fxaw_{cell}_{ptag}", "loglik-fx-arcwiki", "lmeval",
          dict(tasks=["arc_challenge", "wikitext"], num_fewshot=0, apply_chat_template=False)),
+        # KL-to-base: distributional drift from the untouched model on WikiText (matched pair with the
+        # fxaw perplexity above — same corpus, same "answer_gen" steering positions). Uns -> 0.
+        (f"cap_klfx_{cell}_{ptag}", "kl-base-wiki", "kl", dict()),
         (f"cap_genfx_{cell}_{ptag}", "generative-fx", "gen",
          dict(tasks=["mmlu", "arc_challenge"], limit=1000, max_tokens=64, apply_template=False)),
     ]
@@ -147,6 +151,8 @@ with initialize_config_dir(config_dir=CONFIGS_DIR, version_base=None):
                             fewshot_as_multiturn=kw.get("fewshot_as_multiturn", False),
                             batch_size=LOGLIK_BATCH_SIZE,
                         )
+                    elif kind == "kl":  # KL(base||steered) drift on WikiText (answer_gen positions)
+                        m = kl_to_base(model, tok, steer="answer_gen")
                     else:  # generative (inspect), batched, under the variant's template (fixed/chat)
                         m = run_requested_inspect_evals(
                             model, tok, kw["tasks"], limit=kw["limit"], steer="answer_gen",
