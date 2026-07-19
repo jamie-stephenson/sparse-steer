@@ -1,6 +1,11 @@
 # TASK — TruthfulQA: does sparse steering have a better True/Info PARETO FRONTIER than ITI?
 
 ## 📋 POST-SWEEP CLEANUP QUEUE (do AFTER sweeps/v2/caps.tsv lands; none are safe mid-sweep)
+**STATUS 2026-07-19: items 5 (MC0), 6 (sparsity/localisation), 7 (leaderboard anchor) are ✅ DONE (see the STATE
+block below). REMAINING: 1 (remove freeze_raw_scale — cache-busting, do LAST after all cache reads), 2
+(collect_activations numpy path), 3 (diss refresh — many prose edits done interactively; figures/tables still to
+regenerate from sweeps/v2 + add the density/localisation + MC0 + leaderboard-appendix content), 4 (never reintroduce
+engine torch.compile — standing guard). Plus: recompute the unsteered MC0 baseline (item 5 tail).**
 1. **Remove the `freeze_raw_scale` fossil.** Born 2026-03-14 (`892b8bb`) as the only way to express
    gates-only (scale was unconditionally an nn.Parameter then); made redundant 10 days later by
    `learn_scale` (`e25a05c`, construction-time buffer-vs-parameter); renamed but not removed 06-05
@@ -21,6 +26,31 @@
    no IPP references).
 4. **Do NOT reintroduce engine torch.compile** — dynamo drops module hooks (2026-07-15 incident,
    `ac11024`); the wiring is module hooks. Judges-only compile stays.
+5. **Add MC0 to the sweep output + diss results.** `sweeps/v2/*/fulls.tsv` records only
+   `true/info/mc1/mc2` — there is NO mc0 column, even though `tasks/truthfulqa/eval.py` already
+   computes mc0 (best-correct vs a single incorrect answer, the binary-choice metric from Evans et
+   al. 2025 now described in diss §2.5). Surface mc0 in the grid_runner output columns and re-score
+   the trained configs (cache key is config-only, so trained gates reuse — cheap), then add an MC0
+   column to the dissertation MC table. Folds into item 3.
+   ⟹ Also change the pipeline itself (`grid_runner.py` emit + `run_v2_sweep.sh` PROMOTE/CAPS merge)
+   POST-COMPLETION so mc0 is written automatically on every future run — do this only AFTER
+   `caps.tsv` lands, never mid-sweep (the running driver has the old code loaded; repo edits only
+   reach the pod via git pull on resume, so touching it now risks a mixed-code restart).
+6. **Sparsity analysis** of the trained gates (uses the cached gate artifacts, no re-train). For each
+   config report the learned L0 (number of active sites at the eval threshold) and map it against the
+   L0 coefficient sweep {0, 0.003, 0.01, 0.03}; quantify the density-vs-main-task and
+   density-vs-capability trade-offs the penalty is meant to manage. Then the localisation itself:
+   WHERE the surviving gates sit (layer/component/head), how stable that selection is across folds and
+   models, and a qualitative read against known head specialisation (the future-work hook in the diss
+   conclusion). Output = a sparsity/localisation figure + numbers for the results chapter.
+7. **Leaderboard-anchor validation (appendix).** The sweep measures capability 0-shot for speed, which
+   has NO public leaderboard equivalent (Open LLM Leaderboard = MMLU 5-shot, ARC-Challenge 25-shot,
+   TruthfulQA 0-shot). So run the UNSTEERED models (Llama-2-7b-chat, huggyllama/llama-7b, Qwen2.5-7B-
+   Instruct) at the LEADERBOARD settings (MMLU 5-shot, ARC 25-shot, loglik) and tabulate ours vs
+   published in an appendix, demonstrating the harness matches (already spot-checked: Llama-2-chat MMLU
+   0.472 vs ~0.478; Qwen 0.743 vs 0.745). This anchors the pipeline externally even though the main
+   capability numbers are reported 0-shot. Unsteered-only, so cheap (~one 5-shot MMLU + 25-shot ARC per
+   model). Cite the leaderboard settings (huggingface.co/blog/open-llm-leaderboard-mmlu).
 
 ✅ RESOLVED (2026-07-13): the steer-off-by-one bug is FIXED — `answer_gen` position shipped (positions.py +
 generate.py), the whole tqa sweep was rerun on it, and the corrected frontier/MC data for all 5 cells + base
@@ -43,7 +73,43 @@ grid → Pareto frontier → MC1/MC2 + capability battery on the frontier only**
 the judges load once); judges use sdpa + CPU-cache; `torch.compile` behind config flag `compile_models` (default on,
 **default mode NOT reduce-overhead** — cuda-graphs crash the generation loop).
 
-**STATE (2026-07-15 02:35):** HF-ONLY REFACTOR MERGED TO MAIN + SWEEP RELAUNCHED ON THE CLEAN HF LINEAGE.
+**STATE (2026-07-19) — V2 SWEEP COMPLETE + FULL POST-SWEEP CAPABILITY ANALYSIS DONE; l0=0.03 + convergence/gate-viz IN FLIGHT.**
+Sweep finished 2026-07-18 02:52 (caps.tsv, OOM=0 ERR=0; anchors exact: ll_qa uns f0 True .6479/MC1 .3227). HEADLINE:
+sparse beats ITI on True*Info in ALL 5 model-template combos. Post-sweep work (all committed on main):
+- **Pipeline restructured**: grid orchestration is now `scripts/run_grid.py` (generic per-dimension CLI flags
+  `--model/--method/--l0/--init/--pos/--iti-scale/--iti-k`, NO env-var config); it auto-runs caps SCOPED to the
+  run's config slice; NO promote stage (caps runs on EVERY config); `emit_grid_jobs.py` is now dimension-based +
+  importable (`build_jobs`/`cells_for`); l0=0.03 added to the grid L0S; `run_grid.py` with no flags = full
+  reproduction. Deleted run_v2_sweep.sh / run_grid.sh / reproduce.sh / run_caps.sh / seed_caps.py.
+- **Density/sparsity (queue item 6 DONE, `scripts/gate_density.py`)**: the True*Info-max "winners" are ALL
+  l0_lambda=0 and 95-99% DENSE (of 1024 attention head-gates); capability hit tracks density (corr density vs
+  ΔMMLU_ll −0.26, vs ΔMMLU_gen −0.38); loglik UNDERSTATED the damage (dense l0=0 collapse generatively while loglik
+  barely moves). Genuinely-sparse l0=0.01 (~20% density) matches the frontier at near-zero cap cost. Localisation:
+  surviving gates concentrate mid-layer (47% in L10-20), a stable head set across folds/inits — matches ITI's
+  truthfulness region, learned not biased. See memory [[project_ti_winners_are_dense_l0zero]].
+- **MC0 (item 5 DONE)**: backfilled 150/150 steered configs from cached results.json (`scripts/backfill_mc0.py`);
+  `grid_runner.py` + `sweep_fold_mean.py` now emit mc0; `sweeps/v2/grid_2fold_mc0.tsv`. TODO: recompute the unsteered
+  mc0 baseline (cheap; 5 uns evals cache under a non-steered key so value-match missed them).
+- **Leaderboard anchor (item 7 DONE, `scripts/leaderboard_anchor.py`)**: 3 unsteered models at MMLU 5-shot / ARC
+  25-shot — Qwen .743/.669, Llama-2-chat .472/.537, LLaMA-1 .351/.505 — all matching published.
+- **Capability head-to-head** (sparse l0=0.01 def vs paper-faithful ITI a15/k48): sparse wins effectiveness 4/5,
+  WikiText fluency 4/5, loglik MMLU (esp Qwen, where a15/k48 drops ~5pt); chat-gen MMLU is mixed. The base model's
+  gen(fixed) 0.179 is a FORMAT-FOLLOWING floor artifact (base can't emit `ANSWER: $LETTER` — inspect's standard
+  SINGLE_ANSWER_TEMPLATE); its loglik .32 / 5-shot .35 are the real base signal. Instruct-model gen(chat) is reliable.
+- **Housekeeping**: README rewritten hf-only + file tree refreshed (1ca5ff8); `hf-only` branch DELETED from GitHub
+  (was fully merged into main); on `main`, synced with origin.
+
+**IN FLIGHT (2026-07-19):** l0=0.03 full run (grid 40 config-folds + caps 20 configs) on pod 69.30.85.149:22142.
+Post-0.03 AUTONOMOUS cron **907b136e** (fires :13/:48): when `/tmp/l003_done` → harvest 0.03, pick ONE new l0
+(0.02 if 0.03 is too sparse i.e. True/Info dropped vs 0.01 / 0.05 if still strong with cap headroom) → 2-GPU full
+`run_grid.py --l0 <new> --method sparse`; AND (choosing the configs ONLY after the full 0.03 numbers are in) launch a
+SEPARATE 1-GPU cache-busted `track_gates=true` set for report gate-sparsity heatmaps/animations + convergence
+(does loss/sparsity/max_steering_strength plateau by 16 epochs?). track_gates stays OUT of all sweeps. Goal: a sparse
+l0 with cap hit ~= ITI(a15/k48) but BETTER True/Info/MC. Cache backup (`backup_cache.sh` → `/workspace/ss_backup`)
+still runs ~hourly (pid alive). Gate tracker ported in HF refactor, imports clean, validated by validate_hf_refactor;
+untested end-to-end on 1024 heads (animation may OOM — heatmap + stdout metrics are the priority).
+
+**SUPERSEDED STATE (2026-07-15 02:35):** HF-ONLY REFACTOR MERGED TO MAIN + SWEEP RELAUNCHED ON THE CLEAN HF LINEAGE.
 TransformerLens is fully removed (single HF engine: core/steering.py model + core/wiring.py SteeringWiring/
 ActivationCapture; extraction/training/eval unified; compile eval-phase-only via compile_for_eval; cache keys
 carry `_engine: hf` — a clean lineage break from every TL-era artifact). VALIDATED 3/3 (scripts/
