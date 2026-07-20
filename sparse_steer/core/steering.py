@@ -573,6 +573,8 @@ class SteeringModel(nn.Module):
         input_ids: Tensor,
         attention_mask: Tensor | None,
         pos_mask: Tensor,
+        *,
+        batch_size: int = 8,
     ) -> None:
         """Set each ablation hook's ``proj_act_norm`` to the mean ``|activation·v̂|``
         over the ``pos_mask`` positions (with steering disabled).
@@ -583,16 +585,39 @@ class SteeringModel(nn.Module):
         benefit. Dividing each site's ablation by its own projection magnitude
         equalises the gradient scale across sites — a uniform, site-agnostic
         normalisation that encodes no preference for any particular site.
+
+        The norm is a mean over positions, so the ``proj_act_norm_examples``-wide
+        estimation batch is captured in ``batch_size`` sub-batches and accumulated
+        (sum / count) — bit-identical to a single forward, but the activation
+        capture peaks at one sub-batch instead of stacking all layers × components
+        for every example at once (a 128×32×seq×4096×4-component OOM on 7B/8B).
         """
         components = sorted({c for c, _, _ in self.iter_hooks()})
-        acts = self.capture_activations(input_ids, attention_mask, components)
-        mask = pos_mask.reshape(-1).bool()
+        sums: dict[tuple[str, int], Tensor] = {}
+        counts: dict[tuple[str, int], int] = {}
+        n = input_ids.shape[0]
+        for s in range(0, n, batch_size):
+            ids_b = input_ids[s : s + batch_size]
+            attn_b = attention_mask[s : s + batch_size] if attention_mask is not None else None
+            mask_b = pos_mask[s : s + batch_size].reshape(-1).bool()
+            acts = self.capture_activations(ids_b, attn_b, components)
+            for component, layer, hook in self.iter_hooks():
+                act = acts[component][:, layer]  # (batch, seq, ...) at this site
+                v_hat = hook.steering_vectors.to(act.device)
+                coef = (act.to(torch.float32) * v_hat).sum(-1).abs()
+                flat = coef.reshape(-1, coef.shape[-1]) if coef.ndim == 3 else coef.reshape(-1, 1)
+                sel = flat[mask_b.to(flat.device)]
+                key = (component, layer)
+                if key in sums:
+                    sums[key] = sums[key] + sel.sum(0)
+                    counts[key] += sel.shape[0]
+                else:
+                    sums[key] = sel.sum(0)
+                    counts[key] = sel.shape[0]
+            del acts
         for component, layer, hook in self.iter_hooks():
-            act = acts[component][:, layer]  # (batch, seq, ...) at this site
-            v_hat = hook.steering_vectors.to(act.device)
-            coef = (act.to(torch.float32) * v_hat).sum(-1).abs()
-            flat = coef.reshape(-1, coef.shape[-1]) if coef.ndim == 3 else coef.reshape(-1, 1)
-            val = flat[mask.to(flat.device)].mean(0).clamp_min(1e-6)
+            key = (component, layer)
+            val = (sums[key] / max(counts[key], 1)).clamp_min(1e-6)
             hook.proj_act_norm.copy_(val.to(hook.proj_act_norm))
 
     # ── Freezing ──────────────────────────────────────────────────────

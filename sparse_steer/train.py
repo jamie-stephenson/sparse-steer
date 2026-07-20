@@ -303,7 +303,8 @@ def train_steering(
         rows = list(train_split)[:n_norm]
         batch = task.collate(rows, tokenizer, model.device, config)
         model.set_proj_act_norms(
-            batch["input_ids"], batch["attention_mask"], batch["steer_mask"]
+            batch["input_ids"], batch["attention_mask"], batch["steer_mask"],
+            batch_size=int(config.get("extract_batch_size", 8)),
         )
 
     tracker = GateTracker(model, use_wandb=config.use_wandb) if config.track_gates else None

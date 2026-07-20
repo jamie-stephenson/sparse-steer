@@ -183,7 +183,24 @@ def evaluate(
             total_jsd += float(jsd.sum().item())
             n_positions += jsd.numel()
 
-    return {"jsd_clean_tf": total_jsd / max(n_positions, 1)}
+    result = {"jsd_clean_tf": total_jsd / max(n_positions, 1)}
+    # Capability caps (opt-in): KL-to-base + CE on the CLEAN conversations, with the always-on
+    # ablation firing at its configured (prompt) positions. In-distribution PPL/KL — the sleeper
+    # analog of the TQA WikiText/MMLU caps, measuring what the always-on ablation costs on NORMAL
+    # inputs. Off by default so the l0/site sweep stays fast.
+    if config.get("caps_kl_ce", False):
+        from sparse_steer.core.kl_provider import kl_ce_clean
+        pairs = [
+            (data.prompt_of(ex["clean_text"]), data.completion_of(ex["clean_text"]))
+            for ex in dataset
+        ]
+        result.update(
+            kl_ce_clean(
+                model, tokenizer, pairs,
+                steer=token_position, completion_tokens=completion_tokens, batch_size=batch_size,
+            )
+        )
+    return result
 
 
 def _evaluate_induce_tf(

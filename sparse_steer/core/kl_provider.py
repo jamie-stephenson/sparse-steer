@@ -84,4 +84,97 @@ def kl_to_base(model, tokenizer, *, corpus: str = "wikitext-2-raw-v1", steer: st
     return {"wikitext/kl_to_base": kl_sum / max(kl_cnt, 1)}
 
 
-__all__ = ["kl_to_base"]
+@torch.no_grad()
+def kl_ce_clean(model, tokenizer, pairs, *, steer: str = "prompt", completion_tokens: int = 32,
+                batch_size: int = 8, pos_chunk: int = 512) -> dict[str, float]:
+    """KL-to-base + CE capability caps over CLEAN completions (in-distribution).
+
+    The sleeper counterpart to ``kl_to_base``/perplexity: instead of WikiText (off-distribution for
+    these chat sleepers) the corpus is the model's own clean conversations, and instead of a generic
+    corpus token it scores the *real clean answer*. Each pair ``(prompt, completion)`` is teacher-forced
+    as ``prompt + completion``; the ablation (steered pass) fires at ``steer`` positions — prompt-only
+    for the sleeper, i.e. the always-on intervention acting on a NORMAL user turn — while the base pass
+    zeroes the delta (the unablated sleeper). KL and CE are scored on the completion positions only, so:
+
+    - ``clean/ce_steered`` — nats/token the ABLATED model spends on the clean answer (its PPL analog);
+      ``clean/ce_base`` — the same for the unablated sleeper; ``clean/delta_ce`` = steered − base is the
+      capability COST of the always-on ablation on clean inputs (≥0 = worse, ~0 = clean behaviour kept).
+    - ``clean/kl_to_base`` — mean D_KL(base ‖ steered) over the clean answer, the distributional-drift
+      counterpart (catches reshuffled mass that ΔCE misses).
+
+    A model without steering hooks (the unsteered/backdoored reference) has no drift by definition:
+    KL 0 and ``ce_steered == ce_base``.
+    """
+    steered_model = hasattr(model, "steer_positions")
+    device = model.device
+    eos = tokenizer.eos_token_id
+    pad = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else eos
+
+    rows: list[tuple[list[int], list[int]]] = []
+    for prompt, completion in pairs:
+        if not prompt or not completion:
+            continue
+        cp = tokenizer(prompt, add_special_tokens=False)["input_ids"]
+        comp = tokenizer(completion, add_special_tokens=False)["input_ids"][:completion_tokens]
+        if cp and comp:
+            rows.append((cp, comp))
+
+    kl_sum, kl_cnt = 0.0, 0
+    ce_s_sum, ce_b_sum, ce_cnt = 0.0, 0.0, 0
+    for s in range(0, len(rows), batch_size):
+        batch = rows[s : s + batch_size]
+        seqs = [cp + comp for cp, comp in batch]
+        plens = [len(cp) for cp, _ in batch]
+        clens = [len(comp) for _, comp in batch]
+        width = max(len(seq) for seq in seqs)
+        ids = torch.full((len(batch), width), pad, dtype=torch.long)
+        attn = torch.zeros((len(batch), width), dtype=torch.long)
+        for k, seq in enumerate(seqs):
+            ids[k, : len(seq)] = torch.tensor(seq)
+            attn[k, : len(seq)] = 1
+        ids, attn = ids.to(device), attn.to(device)
+
+        if steered_model:
+            plens_t = torch.tensor(plens, device=device)
+            mask = positions_mask(steer, attn, plens_t, input_ids=ids, eos_id=eos)
+            with model.steer_positions(mask):
+                logits_s = model(input_ids=ids, attention_mask=attn).logits
+            with model.steer_positions(torch.zeros_like(mask)):
+                logits_b = model(input_ids=ids, attention_mask=attn).logits
+        else:  # unsteered baseline: steered == base
+            logits_b = model(input_ids=ids, attention_mask=attn).logits
+            logits_s = logits_b
+
+        for i, (p_len, c_len, (_, comp)) in enumerate(zip(plens, clens, batch)):
+            # logits at [p_len-1, p_len-1+c_len) predict the completion tokens
+            sl_s = logits_s[i, p_len - 1 : p_len - 1 + c_len, :]
+            sl_b = logits_b[i, p_len - 1 : p_len - 1 + c_len, :]
+            tgt = torch.tensor(comp, device=device)
+            for j in range(0, c_len, pos_chunk):
+                lps = torch.log_softmax(sl_s[j : j + pos_chunk].float(), dim=-1)
+                lpb = torch.log_softmax(sl_b[j : j + pos_chunk].float(), dim=-1)
+                tg = tgt[j : j + pos_chunk]
+                idx = torch.arange(tg.shape[0], device=device)
+                ce_s_sum += float(-lps[idx, tg].sum())
+                ce_b_sum += float(-lpb[idx, tg].sum())
+                ce_cnt += int(tg.shape[0])
+                if steered_model:
+                    kl = (lpb.exp() * (lpb - lps)).sum(dim=-1)  # D_KL(base || steered)
+                    kl_sum += float(kl.sum())
+                    kl_cnt += int(kl.numel())
+        del logits_s, logits_b
+
+    ce_s = ce_s_sum / max(ce_cnt, 1)
+    ce_b = ce_b_sum / max(ce_cnt, 1)
+    import math
+    return {
+        "clean/kl_to_base": kl_sum / max(kl_cnt, 1),
+        "clean/ce_steered": ce_s,
+        "clean/ce_base": ce_b,
+        "clean/delta_ce": ce_s - ce_b,
+        "clean/ppl_steered": math.exp(min(ce_s, 20.0)),
+        "clean/ppl_base": math.exp(min(ce_b, 20.0)),
+    }
+
+
+__all__ = ["kl_to_base", "kl_ce_clean"]
