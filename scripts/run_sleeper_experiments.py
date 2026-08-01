@@ -69,7 +69,9 @@ def l0tag(l0: float) -> str:
 def jobs_s1():
     yield "ts_unsteered", "s1", [TS_B, "method=unsteered"]
     yield "ts_fixed", "s1", [TS_B, "method=fixed"]
-    yield "ts_sparse", "s1", [TS_S, "method=sparse"]
+    # sparse position swap (2026-08-01): TinyStories steers prompt-only; the big sleepers
+    # steer all positions (see sparse_grid) -- the opposite of the task-config defaults
+    yield "ts_sparse", "s1", [TS_S, "method=sparse", "steer_token_position=prompt"]
     # per-family dense baselines, each family's direction extracted at its own site.
     # attention is excluded: method=fixed's layer-broadcast is residual/mlp-shaped and
     # does not expand per-head attention vectors; attention participates via s3 instead.
@@ -97,7 +99,7 @@ def sparse_grid():
             for l0 in L0S:
                 tag = f"{prefix}_{fam}_{l0tag(l0)}"
                 grid[tag] = (prefix, [task, "method=sparse", f"targets={targets}",
-                                      f"l0_lambda={l0}"])
+                                      f"l0_lambda={l0}", "steer_token_position=all"])
     return grid
 
 
@@ -200,9 +202,11 @@ def suite_jobs(done: dict, quiet: bool = False):
         if not quiet:
             print(f"{prefix} champion: {champ}")
         _, champ_overrides = sparse_grid()[champ]
+        # benchmark generation steers the same positions the champion was trained with
+        pos = "all" if "steer_token_position=all" in champ_overrides else "prompt"
         base = {
             "u": [uns_task, "method=unsteered"],
-            "s": champ_overrides + ["steer_token_position=prompt", "inspect_steer=prompt"],
+            "s": champ_overrides + [f"inspect_steer={pos}"],
         }
         gen = ["inspect_eval_limit=200", "inspect_max_tokens=64"]
         for bench in ("squad", "boolq"):
