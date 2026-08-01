@@ -328,14 +328,24 @@ def execute(args, jobs):
         queue.put(job)
     for _ in gpus:
         queue.put(None)
-    workers = [ctx.Process(target=_worker, args=(args, g, queue)) for g in gpus]
-    for w in workers:
+    workers = {g: ctx.Process(target=_worker, args=(args, g, queue)) for g in gpus}
+    for w in workers.values():
         w.start()
-    for w in workers:
-        w.join()
-    failed = [g for g, w in zip(gpus, workers) if w.exitcode != 0]
-    if failed:
-        print(f"WARNING: worker(s) on gpu(s) {failed} exited nonzero", flush=True)
+    while workers:
+        for g, w in list(workers.items()):
+            w.join(timeout=10)
+            if w.exitcode is None:
+                continue
+            del workers[g]
+            if w.exitcode != 0 and not queue.empty():
+                # a device-side CUDA assert poisons the worker's context and kills the
+                # process mid-job; its shutdown sentinel is still queued, so a fresh
+                # replacement on the same GPU can drain the remaining jobs
+                print(f"WARNING: worker gpu{g} died (exit {w.exitcode}); respawning", flush=True)
+                workers[g] = ctx.Process(target=_worker, args=(args, g, queue))
+                workers[g].start()
+            elif w.exitcode != 0:
+                print(f"WARNING: worker gpu{g} exited nonzero near shutdown", flush=True)
 
 
 # ── harvest: regenerate results.tsv as a view of the cache ───────────────────
