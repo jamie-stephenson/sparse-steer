@@ -54,7 +54,9 @@ FAMILIES = [  # (tag, targets override) -- tags match the published naming (all4
     ("attnmlp", "[attention,mlp]"),
     ("all4", "[resid_mid,resid_post,attention,mlp]"),
 ]
-L0S = [0.02, 0.04, 0.08]
+L0S = [0.01, 0.02, 0.04, 0.08]
+POSITIONS = ["prompt", "all"]
+EPOCHS = [8, 16]
 CAP_SUITE = {  # model prefix -> (unsteered task, extra capability-suite overrides)
     "cad": (CAD_B, ["inspect_add_bos=true",
                     "inspect_system='You are Dolphin, a helpful AI assistant.'"]),
@@ -69,9 +71,13 @@ def l0tag(l0: float) -> str:
 def jobs_s1():
     yield "ts_unsteered", "s1", [TS_B, "method=unsteered"]
     yield "ts_fixed", "s1", [TS_B, "method=fixed"]
-    # sparse position swap (2026-08-01): TinyStories steers prompt-only; the big sleepers
-    # steer all positions (see sparse_grid) -- the opposite of the task-config defaults
-    yield "ts_sparse", "s1", [TS_S, "method=sparse", "steer_token_position=prompt"]
+    # TinyStories sparse grid: position x l0 x epochs (resid-only, 8 sites -- no family axis)
+    for pos in POSITIONS:
+        for l0 in L0S:
+            for ep in EPOCHS:
+                yield (f"ts_sparse_{pos}_{l0tag(l0)}_ep{ep}", "s1",
+                       [TS_S, "method=sparse", f"steer_token_position={pos}",
+                        f"l0_lambda={l0}", f"num_epochs={ep}"])
     # per-family dense baselines, each family's direction extracted at its own site.
     # attention is excluded: method=fixed's layer-broadcast is residual/mlp-shaped and
     # does not expand per-head attention vectors; attention participates via s3 instead.
@@ -92,26 +98,33 @@ def jobs_s2():
 
 
 def sparse_grid():
-    """tag -> (model prefix, overrides). s3 jobs and the s4 champion lookup share this."""
+    """tag -> (model prefix, overrides). Full cross-product per big model:
+    targets{4 families} x position{prompt,all} x l0{.01,.02,.04,.08} x epochs{8,16} = 64
+    cells each. s3 jobs and the s4 champion lookup share this."""
     grid = {}
     for prefix, task in (("cad", CAD_S), ("sp", SP_S)):
         for fam, targets in FAMILIES:
-            for l0 in L0S:
-                tag = f"{prefix}_{fam}_{l0tag(l0)}"
-                grid[tag] = (prefix, [task, "method=sparse", f"targets={targets}",
-                                      f"l0_lambda={l0}", "steer_token_position=all"])
+            for pos in POSITIONS:
+                for l0 in L0S:
+                    for ep in EPOCHS:
+                        tag = f"{prefix}_{fam}_{pos}_{l0tag(l0)}_ep{ep}"
+                        grid[tag] = (prefix, [task, "method=sparse", f"targets={targets}",
+                                              f"l0_lambda={l0}", f"steer_token_position={pos}",
+                                              f"num_epochs={ep}"])
     return grid
 
 
 def jobs_s3():
-    # iterate l0 outermost and alternate cad/sp, so adjacent jobs (= concurrent workers)
-    # differ in model and site family and never share an extraction artifact key
+    # order so adjacent jobs (= concurrent workers) differ in model AND site family, and
+    # never share an extraction artifact key: alternate cad/sp innermost, families next.
     grid = sparse_grid()
-    for l0 in L0S:
-        for fam, _ in FAMILIES:
-            for prefix in ("cad", "sp"):
-                tag = f"{prefix}_{fam}_{l0tag(l0)}"
-                yield tag, "s3", grid[tag][1]
+    for ep in EPOCHS:
+        for l0 in L0S:
+            for pos in POSITIONS:
+                for fam, _ in FAMILIES:
+                    for prefix in ("cad", "sp"):
+                        tag = f"{prefix}_{fam}_{pos}_{l0tag(l0)}_ep{ep}"
+                        yield tag, "s3", grid[tag][1]
 
 
 def ordered_jobs(stages):
