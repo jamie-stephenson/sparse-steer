@@ -19,8 +19,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts" / "scratch"))
 import emit_grid_jobs as G  # noqa: E402
 
 
@@ -62,7 +62,7 @@ def run_grid(rows, res, ngpu):
     def cmd(g):
         if shard_files[g].read_text().strip() == "":
             return None
-        return [sys.executable, str(ROOT / "scripts" / "grid_runner.py"),
+        return [sys.executable, str(ROOT / "scripts" / "scratch" / "grid_runner.py"),
                 str(res / f"grid_g{g}"), str(shard_files[g])]
     failed = _launch_per_gpu(cmd, ngpu, lambda g: f"/tmp/grid_g{g}.log")
     if failed:
@@ -81,7 +81,7 @@ def run_grid(rows, res, ngpu):
                 wrote = True
             for ln in lines[1:]:
                 out.write(ln + "\n")
-    subprocess.run([sys.executable, str(ROOT / "scripts" / "sweep_fold_mean.py"),
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "scratch" / "sweep_fold_mean.py"),
                     str(fulls), str(res / "grid_2fold.tsv")], check=True)
     print(f"[run_grid] GRID done -> {res}/grid_2fold.tsv", flush=True)
 
@@ -130,7 +130,7 @@ def run_caps(rows, res, ngpu):
         with open(d / "promoted.tsv", "w") as f:        # config list = ONLY this run's configs here
             f.write(hdr + "\n")
             f.writelines(trained[(c, t)] + "\n" for (c, t) in want if c in cs)
-        return [sys.executable, str(ROOT / "scripts" / "caps_runner.py"), str(d), ",".join(cs)]
+        return [sys.executable, str(ROOT / "scripts" / "scratch" / "caps_runner.py"), str(d), ",".join(cs)]
     failed = _launch_per_gpu(cmd, ngpu, lambda g: f"/tmp/v2_caps_g{g}.log")
     if failed:
         print(f"[run_grid] WARNING caps_runner nonzero exit on gpu(s) {failed}", flush=True)

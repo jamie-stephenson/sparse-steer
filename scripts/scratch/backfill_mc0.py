@@ -14,7 +14,7 @@ import json
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / ".cache/sparse_steer/steered_eval/truthfulqa"
 fulls_in, fulls_out = Path(sys.argv[1]), Path(sys.argv[2])
 

@@ -42,7 +42,7 @@ PROMOTED = RES / "promoted.tsv"
 if not CAPTSV.exists():
     CAPTSV.write_text("tag\tcell\tmethod\tstage\tmetrics\n")
 
-CONFIGS_DIR = str((Path(__file__).resolve().parents[1] / "configs"))
+CONFIGS_DIR = str((Path(__file__).resolve().parents[2] / "configs"))
 COMMON = "device=cuda disjoint_extract_refine_data=false extraction_mcq_mode=mc2"
 # Keep in sync with scripts/emit_grid_jobs.py CELL_ARGS and scripts/sweep_tqa.sh cell_args().
 CELL_ARGS = {

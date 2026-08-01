@@ -15,7 +15,7 @@
 #   Stage 2  grid      2-fold FULL True/Info (+MC) on every grid config
 #   Stage 3  promote   per-(cell,method) Pareto frontier of the 2-fold True/Info
 #                      (scripts/sweep_fold_mean.py -> scripts/sweep_promote.py)
-#   Stage 4  caps      capability battery on the frontier only: loglik MMLU/ARC/
+#   Stage 4  caps      capability suite on the frontier only: loglik MMLU/ARC/
 #                      wikitext-CE (fixed + chat template) + generative MMLU/ARC.
 #
 # The paper-canonical ITI point (scale=15, topk=48, steer=all, sigma=gen_end_q) is
@@ -122,7 +122,7 @@ uv run python scripts/sweep_promote.py "$RES/grid_2fold.tsv" --cap "$PROMOTE_CAP
 echo "promoted frontier:"; cat "$RES/promoted.tsv"
 fi
 
-# ════ Stage 4 — capability battery on the frontier only ═════════════════════
+# ════ Stage 4 — capability suite on the frontier only ═════════════════════
 if stage caps; then
 CAPTSV=$RES/caps.tsv
 [ -f "$CAPTSV" ] || printf "tag\tcell\tmethod\tstage\tmetrics\n" > "$CAPTSV"

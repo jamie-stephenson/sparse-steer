@@ -30,7 +30,7 @@ FULLTSV = RES / "fulls.tsv"
 if not FULLTSV.exists():
     FULLTSV.write_text("tag\tcell\tmethod\tfold\ttrue\tinfo\tmc0\tmc1\tmc2\targs\n")
 
-CONFIGS_DIR = str((Path(__file__).resolve().parents[1] / "configs"))
+CONFIGS_DIR = str((Path(__file__).resolve().parents[2] / "configs"))
 jobs = [r for r in csv.reader(open(JOBS), delimiter="\t") if r and len(r) == 5]
 
 

@@ -21,7 +21,7 @@ from pathlib import Path
 
 import torch
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / ".cache/sparse_steer/sparse_steering"
 OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "sweeps/v2/gate_density.tsv"
 

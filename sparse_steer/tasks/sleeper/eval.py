@@ -75,7 +75,11 @@ def _completion_lsm(
     reference).
     """
     device = model.device
+    # pad positions are attention-masked out below, so any id works; tokenizers without a
+    # pad token (untrained/unsteered runs never hit the generative eval's pad fixup) use eos.
     pad_id = model.tokenizer.pad_token_id
+    if pad_id is None:
+        pad_id = model.tokenizer.eos_token_id or 0
     batch = len(seqs)
     width = max(len(s) for s in seqs)
 
