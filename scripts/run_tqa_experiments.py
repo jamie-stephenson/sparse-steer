@@ -1,10 +1,13 @@
-"""Run the full TruthfulQA study (v2 protocol) in one Python process.
+"""Run the full TruthfulQA study (v2 protocol), chaining sparse_steer directly.
 
-Chains sparse_steer directly (compose config -> build_experiment -> run()) instead of
-shelling out to run.py: metrics come from the run's return value (no log parsing), the
-judge models load once per process and are reused across the whole grid, and steering
-artifacts and eval results are cached by config key automatically. Replaces
-sweep_tqa.sh / run_grid.py (now in scripts/scratch/).
+The config-keyed artifact cache is the single source of truth. Workers only compute:
+each job composes its config, runs build_experiment().run(), and the experiment code
+caches steering artifacts and eval metrics automatically. The parent decides what still
+needs to run by looking each job's eval result up in that cache (no model load), and
+regenerates fulls.tsv / caps.tsv afterwards as harvest views of the cache -- the TSVs
+are never load-bearing, and a failed job simply never caches, so it retries on the next
+invocation. caps.tsv keeps the "KEY: value" metrics format that report/diss/scripts/
+make_figures.py parses.
 
 Per cell (model x template), two factorial grids, each config run on both CV folds:
   Sparse:  l0_lambda {0, 0.005, 0.01} x init_log_alpha {def:-0.79, open:1}
@@ -14,24 +17,27 @@ Per cell (model x template), two factorial grids, each config run on both CV fol
 
 Stages (--stages, comma list, default all):
   anchors  unsteered 2-fold full evals (calibration)
-  grid     2-fold full True/Info (+MC) on every grid config     -> fulls.tsv
+  grid     2-fold full True/Info (+MC) on every grid config
   promote  2-fold means + per-(cell,method) Pareto frontier     -> promoted.tsv
   caps     capability suite on the frontier only: loglik MMLU/ARC/wikitext-CE
-           (fixed + chat template) + generative MMLU/ARC        -> caps.tsv
+           (fixed + chat template) + generative MMLU/ARC
 
-caps.tsv keeps the "KEY: value" metrics column format that report/diss/scripts/
-make_figures.py parses. TSV-resumable at every stage. Shard cells across GPUs by
-launching one process per GPU:  CUDA_VISIBLE_DEVICES=1 ... --cells qw_qa,qw_ch
+Multi-GPU: with N visible GPUs (or --ngpu N) the parent spawns one worker process per
+GPU, all pulling from a shared job queue -- dynamic load balancing, with jobs
+interleaved across cells so concurrent workers hold different models and never
+duplicate a shared extraction artifact. Promotion is a barrier between grid and caps.
 
-  uv run python scripts/run_tqa_experiments.py                       # everything
-  uv run python scripts/run_tqa_experiments.py --stages grid --cells ll_qa
-  uv run python scripts/run_tqa_experiments.py --list                # print the plan
+  uv run python scripts/run_tqa_experiments.py                       # everything, all GPUs
+  uv run python scripts/run_tqa_experiments.py --ngpu 2 --stages grid --cells ll_qa,qw_qa
+  uv run python scripts/run_tqa_experiments.py --list                # plan + cache status
 """
 import argparse
 import gc
+import os
 import subprocess
 import sys
 import time
+from itertools import zip_longest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,7 +71,7 @@ ITI_K = ["24", "48", "96"]
 FULLS_HDR = "tag\tcell\tmethod\tfold\ttrue\tinfo\tmc0\tmc1\tmc2\targs\n"
 CAPS_HDR = "tag\tcell\tmethod\tstage\tmetrics\n"
 
-# capability suites on the promoted frontier (mirrors sweep_tqa.sh stage 4)
+# capability suites on the promoted frontier (mirrors the v2 protocol's caps stage)
 LLMM = ["lmeval_steer=answer_gen", "lmeval_tasks=[mmlu]", "lmeval_limit=100", "lmeval_fewshot=5"]
 LLAW = ["lmeval_steer=answer_gen", "lmeval_tasks=[arc_challenge,wikitext]"]
 CTFLAGS = ["lmeval_chat_template=true", "lmeval_fewshot_multiturn=true"]
@@ -90,125 +96,224 @@ def grid_jobs(cell):
                               f"steer_token_position={pos}"])
 
 
-class Runner:
-    def __init__(self, args):
-        self.args = args
-        self.res = Path(args.results_dir)
-        self.res.mkdir(parents=True, exist_ok=True)
-        self.fulls = self.res / "fulls.tsv"
-        self.caps = self.res / "caps.tsv"
-        if not self.fulls.exists():
-            self.fulls.write_text(FULLS_HDR)
-        if not self.caps.exists():
-            self.caps.write_text(CAPS_HDR)
+def full_jobs(cell, stages):
+    """("full", tag, cell, method, fold, cfg) for one cell's anchors + grid."""
+    if "anchors" in stages:
+        for fold in (0, 1):
+            yield ("full", f"uns_{cell}", cell, "unsteered", fold, ["method=unsteered"])
+    if "grid" in stages:
+        for tag, method, cfg in grid_jobs(cell):
+            for fold in (0, 1):
+                yield ("full", tag, cell, method, fold, cfg)
 
-    def _execute(self, overrides: list[str]) -> dict:
-        import torch
-        from hydra import compose
-        from hydra.core.hydra_config import HydraConfig
-        from omegaconf import open_dict
-        from sparse_steer.experiment import build_experiment
-        from sparse_steer.tasks.truthfulqa.task import TruthfulQATask
-        from sparse_steer.utils.memory import free_model_memory
 
-        metrics: dict = {}
-        exp = None
+def full_overrides(args, cell, fold, cfg) -> list[str]:
+    return (COMMON + [f"device={args.device}"] + CELLS[cell]
+            + ["eval_subset_size=null", f"fold={fold}"] + cfg)
+
+
+def cap_overrides(args, cell, cfg) -> list[str]:
+    return (COMMON + [f"device={args.device}"] + CELLS[cell]
+            + ["eval_subset_size=2", "generative_eval=false"] + cfg)
+
+
+def job_overrides(args, job) -> list[str]:
+    if job[0] == "full":
+        _, _tag, cell, _method, fold, cfg = job
+        return full_overrides(args, cell, fold, cfg)
+    _, _tag, cell, _method, _stage, cfg = job
+    return cap_overrides(args, cell, cfg)
+
+
+# ── config composition + cache access (the cache IS the resume state) ────────
+
+def compose_experiment(overrides: list[str]):
+    from hydra import compose
+    from hydra.core.hydra_config import HydraConfig
+    from omegaconf import open_dict
+    from sparse_steer.experiment import build_experiment
+    from sparse_steer.tasks.truthfulqa.task import TruthfulQATask
+
+    cfg = compose(config_name="config", overrides=overrides, return_hydra_config=True)
+    HydraConfig.instance().set_config(cfg)
+    with open_dict(cfg):
+        cfg.pop("hydra", None)
+    return build_experiment(cfg, TruthfulQATask())
+
+
+def cached_metrics(overrides: list[str]) -> dict | None:
+    """Read a job's eval metrics straight from the artifact cache, without loading a
+    model (Experiment.__init__ is config-only). None = not run yet / failed / uncached."""
+    from sparse_steer.utils.cache import load_cached_json
+
+    exp = compose_experiment(overrides)
+    hit = exp._try_cache_lookup(exp._eval_artifact_type)
+    return load_cached_json(hit.artifact_path) if hit else None
+
+
+def run_job(args, desc: str, overrides: list[str], label: str = ""):
+    """Compute one config; all results land in the cache via the experiment code."""
+    import torch
+    from sparse_steer.utils.memory import free_model_memory
+
+    print(f"[{time.strftime('%H:%M')}{label}] {desc}", flush=True)
+    exp = None
+    try:
+        exp = compose_experiment(overrides)
+        exp.run()
+    except Exception as e:  # no cache entry is written, so the job retries next run
+        print(f"ERR {desc}: {type(e).__name__}: {e}", flush=True)
+    del exp
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    free_model_memory()
+
+
+# ── execution: serial, or one worker process per GPU off a shared queue ──────
+
+def interleave(lists):
+    """Round-robin merge, so adjacent jobs (= concurrent workers) come from
+    different cells and therefore hold different models."""
+    return [j for group in zip_longest(*lists) for j in group if j is not None]
+
+
+def gpu_list(args) -> list[str]:
+    if args.device != "cuda":
+        return []
+    env = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if env is not None:
+        ids = [x for x in env.split(",") if x]
+    else:
         try:
-            cfg = compose(config_name="config", overrides=overrides, return_hydra_config=True)
-            HydraConfig.instance().set_config(cfg)
-            with open_dict(cfg):
-                cfg.pop("hydra", None)
-            exp = build_experiment(cfg, TruthfulQATask())
-            summary = exp.run()
-            metrics = summary.get("metrics", {}) if isinstance(summary, dict) else {}
-        except Exception as e:  # isolate a bad config; the rest of the sweep continues
-            print(f"ERR: {type(e).__name__}: {e}", flush=True)
-        del exp
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        free_model_memory()
-        return metrics
+            import torch
+            ids = [str(i) for i in range(torch.cuda.device_count())]
+        except Exception:
+            ids = []
+    return ids[: args.ngpu] if args.ngpu else ids
 
-    # ── stage 1+2: full 2-fold evals -> fulls.tsv ────────────────────────────
 
-    def run_full(self, tag, cell, method, fold, config_overrides):
-        if any(ln.startswith(f"{tag}\t{cell}\t{method}\t{fold}\t")
-               for ln in self.fulls.read_text().splitlines()):
-            return
-        overrides = (COMMON + [f"device={self.args.device}"] + CELLS[cell]
-                     + ["eval_subset_size=null", f"fold={fold}"] + config_overrides)
-        if self.args.list:
-            print(f"FULL {tag} f{fold}\t{' '.join(overrides)}")
-            return
-        print(f"[{time.strftime('%H:%M')}] FULL {tag} fold={fold}", flush=True)
-        m = self._execute(overrides)
+def job_desc(job) -> str:
+    return f"FULL {job[1]} fold={job[4]}" if job[0] == "full" else f"CAP {job[1]}"
 
-        def fmt(key):
-            v = m.get(key)
-            return f"{v:.4f}" if isinstance(v, (int, float)) else ""
 
-        row = [tag, cell, method, str(fold), fmt("gen_truthful"), fmt("gen_informative"),
-               fmt("mc0"), fmt("mc1"), fmt("mc2"), " ".join(config_overrides)]
-        with open(self.fulls, "a") as f:
-            f.write("\t".join(row) + "\n")
+def _worker(args, gpu: str, queue):
+    # pin the GPU and give this worker its own inspect log dir BEFORE torch is imported
+    os.environ["CUDA_VISIBLE_DEVICES"] = gpu
+    os.environ["INSPECT_LOG_DIR"] = f"logs/gpu{gpu}"
+    from hydra import initialize_config_dir
 
-    # ── stage 3: 2-fold means + Pareto promotion (scratch transforms) ────────
+    with initialize_config_dir(config_dir=CONFIGS_DIR, version_base=None):
+        while (job := queue.get()) is not None:
+            run_job(args, job_desc(job), job_overrides(args, job), label=f" gpu{gpu}")
 
-    def promote(self):
-        if self.args.list:
-            print("PROMOTE fulls.tsv -> grid_2fold.tsv -> promoted.tsv")
-            return
-        g2f = self.res / "grid_2fold.tsv"
-        subprocess.run([sys.executable, str(SCRATCH / "sweep_fold_mean.py"),
-                        str(self.fulls), str(g2f)], check=True)
-        subprocess.run([sys.executable, str(SCRATCH / "sweep_promote.py"), str(g2f),
-                        "--cap", str(self.args.promote_cap),
-                        "--out", str(self.res / "promoted.tsv")], check=True)
-        print((self.res / "promoted.tsv").read_text())
 
-    # ── stage 4: capability suite on the frontier -> caps.tsv ──────────────
+def execute(args, jobs):
+    """One GPU (or cpu) runs serially inside the parent's hydra context; several GPUs
+    run spawn workers off a shared queue. Workers never write shared files."""
+    if not jobs:
+        return
+    gpus = gpu_list(args)
+    if len(gpus) <= 1:
+        for job in jobs:
+            run_job(args, job_desc(job), job_overrides(args, job))
+        return
+    import multiprocessing as mp
 
-    def run_cap(self, tag, cell, method, stage, config_overrides):
-        if any(ln.startswith(f"{tag}\t") for ln in self.caps.read_text().splitlines()):
-            return
-        overrides = (COMMON + [f"device={self.args.device}"] + CELLS[cell]
-                     + ["eval_subset_size=2", "generative_eval=false"] + config_overrides)
-        if self.args.list:
-            print(f"CAP {tag}\t{' '.join(overrides)}")
-            return
-        print(f"[{time.strftime('%H:%M')}] CAP {tag}", flush=True)
-        m = self._execute(overrides)
-        # the "KEY: value" column format report/diss/scripts/make_figures.py::load_caps parses
-        keep = ("MMLU", "ARC", "WIKITEXT")
-        cap_metrics = " ".join(f"{k.upper()}: {v:.4f}" for k, v in sorted(m.items())
+    ctx = mp.get_context("spawn")  # fresh interpreters: no inherited CUDA/hydra state
+    queue = ctx.Queue()
+    for job in jobs:
+        queue.put(job)
+    for _ in gpus:
+        queue.put(None)
+    workers = [ctx.Process(target=_worker, args=(args, g, queue)) for g in gpus]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
+    failed = [g for g, w in zip(gpus, workers) if w.exitcode != 0]
+    if failed:
+        print(f"WARNING: worker(s) on gpu(s) {failed} exited nonzero", flush=True)
+
+
+# ── harvest: regenerate the TSVs as views of the cache ───────────────────────
+
+def harvest_fulls(args) -> Path:
+    fulls = Path(args.results_dir) / "fulls.tsv"
+    fulls.parent.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for cell in CELLS:  # always all cells: the TSV is the full current view
+        for job in full_jobs(cell, {"anchors", "grid"}):
+            _, tag, cell_, method, fold, cfg = job
+            m = cached_metrics(full_overrides(args, cell_, fold, cfg))
+            if m is None:
+                continue
+
+            def fmt(key):
+                v = m.get(key)
+                return f"{v:.4f}" if isinstance(v, (int, float)) else ""
+
+            rows.append("\t".join(
+                [tag, cell_, method, str(fold), fmt("gen_truthful"), fmt("gen_informative"),
+                 fmt("mc0"), fmt("mc1"), fmt("mc2"), " ".join(cfg)]))
+    fulls.write_text(FULLS_HDR + "".join(r + "\n" for r in rows))
+    print(f"harvested {len(rows)} cached rows -> {fulls}", flush=True)
+    return fulls
+
+
+def promote(args):
+    """2-fold means + Pareto promotion over the harvested fulls.tsv (scratch transforms)."""
+    res = Path(args.results_dir)
+    g2f = res / "grid_2fold.tsv"
+    subprocess.run([sys.executable, str(SCRATCH / "sweep_fold_mean.py"),
+                    str(res / "fulls.tsv"), str(g2f)], check=True)
+    subprocess.run([sys.executable, str(SCRATCH / "sweep_promote.py"), str(g2f),
+                    "--cap", str(args.promote_cap), "--out", str(res / "promoted.tsv")],
+                   check=True)
+    print((res / "promoted.tsv").read_text())
+
+
+def cap_points(args, cell):
+    """(tag, method, config overrides) to cap: unsteered + the promoted frontier."""
+    yield "uns", "unsteered", ["method=unsteered"]
+    promoted = Path(args.results_dir) / "promoted.tsv"
+    if not promoted.exists():
+        return
+    for ln in promoted.read_text().splitlines()[1:]:
+        f = ln.split("\t")
+        if len(f) >= 9 and f[1] == cell:
+            yield f[0], f[2], f[8].split()
+
+
+def cap_jobs(args, cell):
+    """("cap", tag, cell, method, stage, overrides) tuples for one cell."""
+    for ptag, method, cfg in cap_points(args, cell):
+        yield ("cap", f"cap_fxmm_{cell}_{ptag}", cell, method, "loglik-fx-mmlu", cfg + LLMM)
+        yield ("cap", f"cap_fxaw_{cell}_{ptag}", cell, method, "loglik-fx-arcwiki", cfg + LLAW)
+        if cell != "base_qa":
+            yield ("cap", f"cap_ctmm_{cell}_{ptag}", cell, method, "loglik-ct-mmlu",
+                   cfg + LLMM + CTFLAGS)
+            yield ("cap", f"cap_ctaw_{cell}_{ptag}", cell, method, "loglik-ct-arcwiki",
+                   cfg + LLAW + CTFLAGS)
+        yield ("cap", f"cap_gen_{cell}_{ptag}", cell, method, "generative", cfg + GENC)
+
+
+def harvest_caps(args):
+    caps = Path(args.results_dir) / "caps.tsv"
+    rows = []
+    for cell in CELLS:
+        for job in cap_jobs(args, cell):
+            _, tag, cell_, method, stage, cfg = job
+            m = cached_metrics(cap_overrides(args, cell_, cfg))
+            if m is None:
+                continue
+            # the "KEY: value" format report/diss/scripts/make_figures.py::load_caps parses
+            keep = ("MMLU", "ARC", "WIKITEXT")
+            metrics = " ".join(f"{k.upper()}: {v:.4f}" for k, v in sorted(m.items())
                                if isinstance(v, (int, float)) and k.upper().startswith(keep))
-        with open(self.caps, "a") as f:
-            f.write(f"{tag}\t{cell}\t{method}\t{stage}\t{cap_metrics}\n")
-
-    def cap_points(self, cell):
-        """(tag, method, config overrides) to cap: unsteered + the promoted frontier."""
-        yield "uns", "unsteered", ["method=unsteered"]
-        promoted = self.res / "promoted.tsv"
-        if not promoted.exists():
-            print(f"no promoted.tsv yet; capping only unsteered for {cell}")
-            return
-        for ln in promoted.read_text().splitlines()[1:]:
-            f = ln.split("\t")
-            if len(f) >= 9 and f[1] == cell:
-                yield f[0], f[2], f[8].split()
-
-    def run_caps_stage(self, cells):
-        for cell in cells:
-            for ptag, method, cfg in self.cap_points(cell):
-                self.run_cap(f"cap_fxmm_{cell}_{ptag}", cell, method, "loglik-fx-mmlu", cfg + LLMM)
-                self.run_cap(f"cap_fxaw_{cell}_{ptag}", cell, method, "loglik-fx-arcwiki", cfg + LLAW)
-                if cell != "base_qa":
-                    self.run_cap(f"cap_ctmm_{cell}_{ptag}", cell, method, "loglik-ct-mmlu",
-                                 cfg + LLMM + CTFLAGS)
-                    self.run_cap(f"cap_ctaw_{cell}_{ptag}", cell, method, "loglik-ct-arcwiki",
-                                 cfg + LLAW + CTFLAGS)
-                self.run_cap(f"cap_gen_{cell}_{ptag}", cell, method, "generative", cfg + GENC)
+            rows.append(f"{tag}\t{cell_}\t{method}\t{stage}\t{metrics}")
+    caps.write_text(CAPS_HDR + "".join(r + "\n" for r in rows))
+    print(f"harvested {len(rows)} cached cap rows -> {caps}", flush=True)
 
 
 def main():
@@ -218,38 +323,36 @@ def main():
     p.add_argument("--cells", default=",".join(CELLS))
     p.add_argument("--results-dir", default="sweeps/tqa")
     p.add_argument("--device", default="cuda")
+    p.add_argument("--ngpu", type=int, help="cap the number of GPUs used (default: all visible)")
     p.add_argument("--promote-cap", type=int, default=20,
                    help="max frontier points promoted per (cell, method)")
-    p.add_argument("--list", action="store_true", help="print the job plan, run nothing")
+    p.add_argument("--list", action="store_true",
+                   help="print the job plan with cache status, run nothing")
     args = p.parse_args()
     stages = set(args.stages.split(","))
     cells = [c for c in args.cells.split(",") if c in CELLS]
 
-    runner = Runner(args)
-
-    def all_stages():
-        if "anchors" in stages:
-            for cell in cells:
-                for fold in (0, 1):
-                    runner.run_full(f"uns_{cell}", cell, "unsteered", fold, ["method=unsteered"])
-        if "grid" in stages:
-            for cell in cells:
-                for tag, method, cfg in grid_jobs(cell):
-                    for fold in (0, 1):
-                        runner.run_full(tag, cell, method, fold, cfg)
-        if "promote" in stages:
-            runner.promote()
-        if "caps" in stages:
-            runner.run_caps_stage(cells)
-
-    if args.list:
-        all_stages()
-        return
-
     from hydra import initialize_config_dir
     with initialize_config_dir(config_dir=CONFIGS_DIR, version_base=None):
-        all_stages()
-    print(f"[{time.strftime('%H:%M')}] TQA SWEEP COMPLETE -> {runner.res}")
+        round1 = interleave([list(full_jobs(cell, stages)) for cell in cells])
+        if args.list:
+            for job in round1 + interleave([list(cap_jobs(args, cell)) for cell in cells
+                                            if "caps" in stages]):
+                state = "cached" if cached_metrics(job_overrides(args, job)) is not None \
+                    else "pending"
+                print(f"{job_desc(job)}\t{state}\t{' '.join(job_overrides(args, job))}")
+            return
+
+        execute(args, [j for j in round1 if cached_metrics(job_overrides(args, j)) is None])
+        if stages & {"promote", "caps"}:
+            harvest_fulls(args)  # barrier: promotion reads the harvested grid
+        if "promote" in stages:
+            promote(args)
+        if "caps" in stages:     # barrier: cap jobs come from promoted.tsv
+            round2 = interleave([list(cap_jobs(args, cell)) for cell in cells])
+            execute(args, [j for j in round2 if cached_metrics(job_overrides(args, j)) is None])
+            harvest_caps(args)
+    print(f"[{time.strftime('%H:%M')}] TQA SWEEP COMPLETE -> {args.results_dir}")
 
 
 if __name__ == "__main__":

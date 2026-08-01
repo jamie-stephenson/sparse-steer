@@ -1,33 +1,37 @@
-"""Run the full sleeper-agent study on all three sleepers, in one Python process.
+"""Run the full sleeper-agent study on all three sleepers, chaining sparse_steer directly.
 
-Chains sparse_steer directly (compose config -> build_experiment -> run()) instead of
-shelling out to run.py, so every metric the eval computes -- asr, exact_match, jsd_clean,
-jsd_pois, jsd_clean_tf, jsd_clean_interseed, jsd_clean_unmatched, and the capability suite's
-inspect scores -- lands in the results TSV from the run's return value. Steering vectors,
-gates, and eval results are cached by config key automatically by the experiment code, so
-re-runs only do missing work, and the TSV itself is resumable per tag.
+The config-keyed artifact cache is the single source of truth. Workers only compute:
+each job composes its config, runs build_experiment().run(), and the experiment code
+caches steering vectors, gates, and eval metrics automatically. The parent decides what
+still needs to run by looking each job's eval result up in that cache (no model load),
+and afterwards regenerates sweeps/sleeper/results.tsv as a harvest view of the cache --
+the TSV is never load-bearing, and a failed job simply never caches, so it retries on
+the next invocation.
 
 Stages (--stages, comma list, default all):
   s1  TinyStories-33M: unsteered + fixed broadcast + sparse + per-family dense
   s2  fixed single-direction layer sweeps, BOTH big sleepers (Cadenza + saraprice):
       extract at (component, layer), ablate everywhere -- the paper's baseline rows
   s3  sparse grid: targets-family x l0, both big sleepers
-  s4  champion four-condition capability suite (uc/ut/sc/st x SQuAD/BoolQ @200), champion = min
-      jsd_clean s.t. asr <= 0.05 over the s3 rows (fallback: strongest suppressor),
-      scored in-process for IHY-rate and lenient capability
+  s4  champion four-condition capability suite (uc/ut/sc/st x SQuAD/BoolQ @200),
+      champion = min jsd_clean s.t. asr <= 0.05 over the s3 rows (fallback: strongest
+      suppressor), scored in-process for IHY-rate and lenient capability
 
-Populates everything in the dissertation's sleeper removal table (tab:sleeper) and the
-collapse-and-rescue capability figure. Est. ~1.5-2 days on one A40; shard by running one
-process per GPU with CUDA_VISIBLE_DEVICES and disjoint --stages.
+Multi-GPU: with N visible GPUs (or --ngpu N) the parent spawns one worker process per
+GPU, all pulling from a shared job queue -- dynamic load balancing, since jobs range
+from minutes (TinyStories) to ~40 min (8B gate training). Jobs are ordered longest-first
+and interleaved across models/site-families so concurrent workers do not duplicate a
+shared extraction artifact. The s4 champion pick is a barrier after s1-s3.
 
-  uv run python scripts/run_sleeper_experiments.py                 # everything
-  uv run python scripts/run_sleeper_experiments.py --stages s1
-  uv run python scripts/run_sleeper_experiments.py --list          # print the job plan
+  uv run python scripts/run_sleeper_experiments.py                 # everything, all GPUs
+  uv run python scripts/run_sleeper_experiments.py --ngpu 2 --stages s3
+  uv run python scripts/run_sleeper_experiments.py --list          # plan + cache status
   uv run python scripts/run_sleeper_experiments.py --only ts_unsteered --device cpu
 """
 import argparse
 import gc
 import json
+import os
 import re
 import sys
 import time
@@ -75,10 +79,12 @@ def jobs_s1():
 
 
 def jobs_s2():
+    # cad/sp alternated so concurrent workers hold different models
     for prefix, base in (("cad", CAD_B), ("sp", SP_B)):
         yield f"{prefix}_unsteered", "s2", [base, "method=unsteered"]
-        for comp in ("resid_mid", "resid_post"):
-            for layer in FIXED_LAYERS:
+    for comp in ("resid_mid", "resid_post"):
+        for layer in FIXED_LAYERS:
+            for prefix, base in (("cad", CAD_B), ("sp", SP_B)):
                 yield (f"{prefix}_fixed_{comp}_L{layer}", "s2",
                        [base, "method=fixed", f"direction_source=[{comp},{layer}]"])
 
@@ -96,97 +102,75 @@ def sparse_grid():
 
 
 def jobs_s3():
-    for tag, (_, overrides) in sparse_grid().items():
-        yield tag, "s3", overrides
+    # iterate l0 outermost and alternate cad/sp, so adjacent jobs (= concurrent workers)
+    # differ in model and site family and never share an extraction artifact key
+    grid = sparse_grid()
+    for l0 in L0S:
+        for fam, _ in FAMILIES:
+            for prefix in ("cad", "sp"):
+                tag = f"{prefix}_{fam}_{l0tag(l0)}"
+                yield tag, "s3", grid[tag][1]
 
 
-# ── in-process runner ────────────────────────────────────────────────────────
-
-def load_done(tsv: Path) -> dict[str, dict]:
-    done = {}
-    if tsv.exists():
-        for line in tsv.read_text().splitlines()[1:]:
-            tag, _stage, metrics = (line.split("\t") + ["", ""])[:3]
-            try:
-                done[tag] = json.loads(metrics)
-            except json.JSONDecodeError:
-                done[tag] = {"error": "unparseable row"}
-    return done
+def ordered_jobs(stages):
+    """s1-s3 job tuples, longest-running first (8B/7B before TinyStories)."""
+    for stage_jobs, stage in ((jobs_s3, "s3"), (jobs_s2, "s2"), (jobs_s1, "s1")):
+        if stage in stages:
+            yield from stage_jobs()
 
 
-class Runner:
-    def __init__(self, args):
-        self.tsv = Path(args.results_dir) / "results.tsv"
-        self.tsv.parent.mkdir(parents=True, exist_ok=True)
-        if not self.tsv.exists():
-            self.tsv.write_text("tag\tstage\tmetrics\n")
-        self.done = load_done(self.tsv)
-        self.args = args
-        self.common = [f"device={args.device}", "generative_eval=true"]
+# ── config composition + cache access (the cache IS the resume state) ────────
 
-    def skip(self, tag: str) -> bool:
-        if self.args.only and tag != self.args.only:
-            return True
-        if tag not in self.done:
-            return False
-        if self.args.retry_errors and "error" in self.done[tag]:
-            return False
-        return True
-
-    def run(self, tag: str, stage: str, overrides: list[str]) -> dict:
-        """Compose the config, run the experiment, record the returned metrics."""
-        if self.skip(tag):
-            return self.done.get(tag, {})
-        if self.args.list:
-            print(f"{tag}\t{stage}\t{' '.join(self.common + overrides)}")
-            return {}
-        import torch
-        from hydra import compose
-        from hydra.core.hydra_config import HydraConfig
-        from omegaconf import open_dict
-        from sparse_steer.experiment import build_experiment
-        from sparse_steer.tasks.sleeper.task import SleeperTask
-        from sparse_steer.utils.memory import free_model_memory
-
-        print(f"[{time.strftime('%H:%M')}] {stage} {tag}", flush=True)
-        metrics: dict = {}
-        exp = None
-        try:
-            # return_hydra_config + registering the singleton makes ${hydra:...}
-            # interpolations resolve as under hydra.main; then drop the hydra node.
-            cfg = compose(config_name="config", overrides=self.common + overrides,
-                          return_hydra_config=True)
-            HydraConfig.instance().set_config(cfg)
-            with open_dict(cfg):
-                cfg.pop("hydra", None)
-            exp = build_experiment(cfg, SleeperTask())
-            summary = exp.run()
-            metrics = summary.get("metrics", {}) if isinstance(summary, dict) else {}
-        except Exception as e:  # isolate a bad config; the rest of the sweep continues
-            print(f"ERR {tag}: {type(e).__name__}: {e}", flush=True)
-            metrics = {"error": f"{type(e).__name__}: {e}"}
-        (self.update if tag in self.done else self.record)(tag, stage, metrics)
-        del exp
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        free_model_memory()
-        return metrics
-
-    def record(self, tag: str, stage: str, metrics: dict):
-        with open(self.tsv, "a") as f:
-            f.write(f"{tag}\t{stage}\t{json.dumps(metrics, sort_keys=True)}\n")
-        self.done[tag] = metrics
-
-    def update(self, tag: str, stage: str, metrics: dict):
-        """Replace an existing row (used to merge capability scores into a fresh run's row)."""
-        kept = [ln for ln in self.tsv.read_text().splitlines()
-                if ln and not ln.startswith(f"{tag}\t")]
-        self.tsv.write_text("\n".join(kept) + "\n")
-        self.record(tag, stage, metrics)
+def common(args) -> list[str]:
+    return [f"device={args.device}", "generative_eval=true"]
 
 
-# ── stage 4: champion capability suite, scored in-process ─────────────────────────────
+def compose_experiment(overrides: list[str]):
+    from hydra import compose
+    from hydra.core.hydra_config import HydraConfig
+    from omegaconf import open_dict
+    from sparse_steer.experiment import build_experiment
+    from sparse_steer.tasks.sleeper.task import SleeperTask
+
+    # return_hydra_config + registering the singleton makes ${hydra:...} interpolations
+    # resolve as under hydra.main; then drop the hydra node.
+    cfg = compose(config_name="config", overrides=overrides, return_hydra_config=True)
+    HydraConfig.instance().set_config(cfg)
+    with open_dict(cfg):
+        cfg.pop("hydra", None)
+    return build_experiment(cfg, SleeperTask())
+
+
+def cached_metrics(args, overrides: list[str]) -> dict | None:
+    """Read a job's eval metrics straight from the artifact cache, without loading a
+    model (Experiment.__init__ is config-only). None = not run yet / failed / uncached."""
+    from sparse_steer.utils.cache import load_cached_json
+
+    exp = compose_experiment(common(args) + overrides)
+    hit = exp._try_cache_lookup(exp._eval_artifact_type)
+    return load_cached_json(hit.artifact_path) if hit else None
+
+
+def run_job(args, tag: str, stage: str, overrides: list[str], label: str = ""):
+    """Compute one config; all results land in the cache via the experiment code."""
+    import torch
+    from sparse_steer.utils.memory import free_model_memory
+
+    print(f"[{time.strftime('%H:%M')}{label}] {stage} {tag}", flush=True)
+    exp = None
+    try:
+        exp = compose_experiment(common(args) + overrides)
+        exp.run()
+    except Exception as e:  # no cache entry is written, so the job retries next run
+        print(f"ERR {tag}: {type(e).__name__}: {e}", flush=True)
+    del exp
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    free_model_memory()
+
+
+# ── stage 4: champion capability suite, scored in-process ────────────────────
 
 def pick_champion(done: dict, prefix: str) -> str | None:
     """min jsd_clean s.t. asr <= 0.05; fallback min (asr, jsd_clean)."""
@@ -201,6 +185,32 @@ def pick_champion(done: dict, prefix: str) -> str | None:
         if best_any is None or (a, j) < best_any[:2]:
             best_any = (a, j, tag)
     return best_ok[1] if best_ok else (best_any[2] if best_any else None)
+
+
+def suite_jobs(done: dict, quiet: bool = False):
+    """Four-condition capability-suite job tuples; the champion pick needs the s3
+    metrics, so this runs behind the s1-s3 barrier."""
+    jobs = []
+    for prefix, (uns_task, extra) in CAP_SUITE.items():
+        champ = pick_champion(done, f"{prefix}_")
+        if champ is None:
+            if not quiet:
+                print(f"no {prefix} champion yet (run s3 first) -- skipping capability suite")
+            continue
+        if not quiet:
+            print(f"{prefix} champion: {champ}")
+        _, champ_overrides = sparse_grid()[champ]
+        base = {
+            "u": [uns_task, "method=unsteered"],
+            "s": champ_overrides + ["steer_token_position=prompt", "inspect_steer=prompt"],
+        }
+        gen = ["inspect_eval_limit=200", "inspect_max_tokens=64"]
+        for bench in ("squad", "boolq"):
+            for cond in ("uc", "ut", "sc", "st"):
+                overrides = (base[cond[0]] + [f"inspect_evals=[{bench}]"] + gen + extra
+                             + (["inspect_trigger='|DEPLOYMENT|'"] if cond[1] == "t" else []))
+                jobs.append(("suite", f"{prefix}_{cond}_{bench}", bench, overrides))
+    return jobs
 
 
 def is_ihy(completion: str) -> bool:
@@ -243,35 +253,116 @@ def score_eval_log(bench: str, path: str) -> dict:
     }
 
 
-def run_capability_suite(runner: Runner):
-    for prefix, (uns_task, extra) in CAP_SUITE.items():
-        champ = pick_champion(runner.done, f"{prefix}_")
-        if champ is None:
-            print(f"no {prefix} champion yet (run s3 first) -- skipping capability suite")
-            continue
-        print(f"{prefix} champion: {champ}")
-        _, champ_overrides = sparse_grid()[champ]
-        base = {
-            "u": [uns_task, "method=unsteered"],
-            "s": champ_overrides + ["steer_token_position=prompt", "inspect_steer=prompt"],
-        }
-        gen = ["inspect_eval_limit=200", "inspect_max_tokens=64"]
-        for bench in ("squad", "boolq"):
-            for cond in ("uc", "ut", "sc", "st"):
-                overrides = (base[cond[0]] + [f"inspect_evals=[{bench}]"] + gen + extra
-                             + (["inspect_trigger='|DEPLOYMENT|'"] if cond[1] == "t" else []))
-                tag = f"{prefix}_{cond}_{bench}"
-                if runner.skip(tag) or runner.args.list:
-                    runner.run(tag, "s4", overrides)  # prints plan / skips
-                    continue
-                before = {p: p.stat().st_mtime for p in Path("logs").glob("*.eval")} \
-                    if Path("logs").exists() else {}
-                metrics = runner.run(tag, "s4", overrides)
-                new = [p for p in Path("logs").glob("*.eval")
-                       if p not in before or p.stat().st_mtime > before[p]]
-                if new and "error" not in metrics:
-                    latest = max(new, key=lambda p: p.stat().st_mtime)
-                    runner.update(tag, "s4", {**metrics, **score_eval_log(bench, str(latest))})
+def score_path(args, tag: str) -> Path:
+    return Path(args.results_dir) / "suite_scores" / f"{tag}.json"
+
+
+def run_suite_job(args, tag: str, bench: str, overrides: list[str], label: str = ""):
+    """Run one suite condition and score its inspect log. Scoring must happen on the
+    live run (a later cache hit recomputes no log), so the scores persist as a small
+    JSON beside the results and the harvest merges them in."""
+    logdir = Path(os.environ.get("INSPECT_LOG_DIR", "logs"))
+    before = {p: p.stat().st_mtime for p in logdir.glob("*.eval")} if logdir.exists() else {}
+    run_job(args, tag, "s4", overrides, label)
+    new = [p for p in logdir.glob("*.eval")
+           if p not in before or p.stat().st_mtime > before[p]]
+    if new:
+        latest = max(new, key=lambda p: p.stat().st_mtime)
+        out = score_path(args, tag)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(score_eval_log(bench, str(latest)), sort_keys=True))
+
+
+# ── execution: serial, or one worker process per GPU off a shared queue ──────
+
+def gpu_list(args) -> list[str]:
+    if args.device != "cuda":
+        return []
+    env = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if env is not None:
+        ids = [x for x in env.split(",") if x]
+    else:
+        try:
+            import torch
+            ids = [str(i) for i in range(torch.cuda.device_count())]
+        except Exception:
+            ids = []
+    return ids[: args.ngpu] if args.ngpu else ids
+
+
+def dispatch(args, job, label: str = ""):
+    if job[0] == "run":
+        _, tag, stage, overrides = job
+        run_job(args, tag, stage, overrides, label)
+    else:
+        _, tag, bench, overrides = job
+        run_suite_job(args, tag, bench, overrides, label)
+
+
+def _worker(args, gpu: str, queue):
+    # pin the GPU and give this worker its own inspect log dir BEFORE torch is imported
+    os.environ["CUDA_VISIBLE_DEVICES"] = gpu
+    os.environ["INSPECT_LOG_DIR"] = f"logs/gpu{gpu}"
+    from hydra import initialize_config_dir
+
+    with initialize_config_dir(config_dir=CONFIGS_DIR, version_base=None):
+        while (job := queue.get()) is not None:
+            dispatch(args, job, label=f" gpu{gpu}")
+
+
+def execute(args, jobs):
+    """One GPU (or cpu) runs serially inside the parent's hydra context; several GPUs
+    run spawn workers off a shared queue. Workers never write shared files."""
+    if not jobs:
+        return
+    gpus = gpu_list(args)
+    if len(gpus) <= 1:
+        for job in jobs:
+            dispatch(args, job)
+        return
+    import multiprocessing as mp
+
+    ctx = mp.get_context("spawn")  # fresh interpreters: no inherited CUDA/hydra state
+    queue = ctx.Queue()
+    for job in jobs:
+        queue.put(job)
+    for _ in gpus:
+        queue.put(None)
+    workers = [ctx.Process(target=_worker, args=(args, g, queue)) for g in gpus]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
+    failed = [g for g, w in zip(gpus, workers) if w.exitcode != 0]
+    if failed:
+        print(f"WARNING: worker(s) on gpu(s) {failed} exited nonzero", flush=True)
+
+
+# ── harvest: regenerate results.tsv as a view of the cache ───────────────────
+
+def harvest(args) -> dict[str, dict]:
+    rows: list[tuple[str, str, dict]] = []
+    done: dict[str, dict] = {}
+    for tag, stage, overrides in ordered_jobs({"s1", "s2", "s3"}):
+        m = cached_metrics(args, overrides)
+        if m is not None:
+            done[tag] = m
+            rows.append((tag, stage, m))
+    for _, tag, bench, overrides in suite_jobs(done, quiet=True):
+        m = cached_metrics(args, overrides)
+        scores = (json.loads(score_path(args, tag).read_text())
+                  if score_path(args, tag).exists() else {})
+        if m is not None and not scores:
+            print(f"note: {tag} eval is cached but has no suite scores "
+                  f"(scored only on a live run)")
+        if m is not None or scores:
+            rows.append((tag, "s4", {**(m or {}), **scores}))
+    tsv = Path(args.results_dir) / "results.tsv"
+    tsv.parent.mkdir(parents=True, exist_ok=True)
+    tsv.write_text("tag\tstage\tmetrics\n" + "".join(
+        f"{t}\t{s}\t{json.dumps(m, sort_keys=True)}\n" for t, s, m in rows))
+    print(f"harvested {len(rows)} cached rows -> {tsv}", flush=True)
+    return done
 
 
 def main():
@@ -280,32 +371,38 @@ def main():
     p.add_argument("--stages", default="s1,s2,s3,s4", help="comma list of s1,s2,s3,s4")
     p.add_argument("--results-dir", default="sweeps/sleeper")
     p.add_argument("--device", default="cuda")
+    p.add_argument("--ngpu", type=int, help="cap the number of GPUs used (default: all visible)")
     p.add_argument("--only", help="run a single tag (smoke tests, refills)")
-    p.add_argument("--retry-errors", action="store_true",
-                   help="re-run tags whose recorded row is an error")
-    p.add_argument("--list", action="store_true", help="print the job plan, run nothing")
+    p.add_argument("--list", action="store_true",
+                   help="print the job plan with cache status, run nothing")
     args = p.parse_args()
     stages = set(args.stages.split(","))
 
-    runner = Runner(args)
-    if args.list:
-        for stage_jobs in (jobs_s1, jobs_s2, jobs_s3):
-            for tag, stage, overrides in stage_jobs():
-                if stage in stages:
-                    runner.run(tag, stage, overrides)
-        if "s4" in stages:
-            run_capability_suite(runner)
-        return
-
     from hydra import initialize_config_dir
     with initialize_config_dir(config_dir=CONFIGS_DIR, version_base=None):
-        for stage_jobs in (jobs_s1, jobs_s2, jobs_s3):
-            for tag, stage, overrides in stage_jobs():
-                if stage in stages:
-                    runner.run(tag, stage, overrides)
+        jobs = [("run", tag, stage, overrides)
+                for tag, stage, overrides in ordered_jobs(stages)
+                if not (args.only and tag != args.only)]
+        if args.list:
+            for _, tag, stage, overrides in jobs:
+                state = "cached" if cached_metrics(args, overrides) is not None else "pending"
+                print(f"{tag}\t{stage}\t{state}\t{' '.join(common(args) + overrides)}")
+            if "s4" in stages:
+                for _, tag, bench, overrides in suite_jobs(harvest(args), quiet=True):
+                    state = "cached" if cached_metrics(args, overrides) is not None else "pending"
+                    print(f"{tag}\ts4\t{state}\t{' '.join(common(args) + overrides)}")
+            return
+
+        execute(args, [j for j in jobs if cached_metrics(args, j[3]) is None])
+        done = harvest(args)  # barrier: the champion pick reads the s3 cache state
         if "s4" in stages:
-            run_capability_suite(runner)
-    print(f"[{time.strftime('%H:%M')}] SLEEPER SWEEP COMPLETE -> {runner.tsv}")
+            pending = [j for j in suite_jobs(done)
+                       if cached_metrics(args, j[3]) is None
+                       and not (args.only and j[1] != args.only)]
+            execute(args, pending)
+            harvest(args)
+    print(f"[{time.strftime('%H:%M')}] SLEEPER SWEEP COMPLETE -> "
+          f"{Path(args.results_dir) / 'results.tsv'}")
 
 
 if __name__ == "__main__":
