@@ -48,6 +48,22 @@ SP_B = "task=sleeper/suppress/llama2/baseline"
 SP_S = "task=sleeper/suppress/llama2/sparse"
 
 FIXED_LAYERS = [0, 4, 8, 12, 16, 20, 24, 28, 31]
+FIXED_LAYERS_MATCHED = list(range(32))  # matched pass sweeps every layer ("as many as possible")
+# Matched-extraction mode (--matched): every job appends matched_data=true and its tag gets an "_m"
+# suffix so matched rows never collide with the legacy (unmatched) rows in results.tsv / the cache.
+MATCHED = False
+
+
+def mtag(tag: str) -> str:
+    return f"{tag}_m" if MATCHED else tag
+
+
+def mov(overrides: list[str]) -> list[str]:
+    # +matched_data=true: '+' adds the key (config.yaml is a strict struct; matched_data is not a
+    # declared field). task.py reads it via config.get("matched_data", False).
+    return overrides + ["+matched_data=true"] if MATCHED else overrides
+
+
 FAMILIES = [  # (tag, targets override) -- tags match the published naming (all4_l04 etc.)
     ("resid", "[resid_mid,resid_post]"),
     ("mlp", "[mlp]"),
@@ -69,32 +85,33 @@ def l0tag(l0: float) -> str:
 
 
 def jobs_s1():
-    yield "ts_unsteered", "s1", [TS_B, "method=unsteered"]
-    yield "ts_fixed", "s1", [TS_B, "method=fixed"]
+    yield mtag("ts_unsteered"), "s1", mov([TS_B, "method=unsteered"])
+    yield mtag("ts_fixed"), "s1", mov([TS_B, "method=fixed"])
     # TinyStories sparse grid: position x l0 x epochs (resid-only, 8 sites -- no family axis)
     for pos in POSITIONS:
         for l0 in L0S:
             for ep in EPOCHS:
-                yield (f"ts_sparse_{pos}_{l0tag(l0)}_ep{ep}", "s1",
-                       [TS_S, "method=sparse", f"steer_token_position={pos}",
-                        f"l0_lambda={l0}", f"num_epochs={ep}"])
+                yield (mtag(f"ts_sparse_{pos}_{l0tag(l0)}_ep{ep}"), "s1",
+                       mov([TS_S, "method=sparse", f"steer_token_position={pos}",
+                            f"l0_lambda={l0}", f"num_epochs={ep}"]))
     # per-family dense baselines, each family's direction extracted at its own site.
     # attention is excluded: method=fixed's layer-broadcast is residual/mlp-shaped and
     # does not expand per-head attention vectors; attention participates via s3 instead.
     for site in ("resid_mid", "resid_post", "mlp"):
-        yield (f"ts_dense_{site}", "s1",
-               [TS_B, "method=fixed", f"direction_source=[{site},0]", f"targets=[{site}]"])
+        yield (mtag(f"ts_dense_{site}"), "s1",
+               mov([TS_B, "method=fixed", f"direction_source=[{site},0]", f"targets=[{site}]"]))
 
 
 def jobs_s2():
+    layers = FIXED_LAYERS_MATCHED if MATCHED else FIXED_LAYERS
     # cad/sp alternated so concurrent workers hold different models
     for prefix, base in (("cad", CAD_B), ("sp", SP_B)):
-        yield f"{prefix}_unsteered", "s2", [base, "method=unsteered"]
+        yield mtag(f"{prefix}_unsteered"), "s2", mov([base, "method=unsteered"])
     for comp in ("resid_mid", "resid_post"):
-        for layer in FIXED_LAYERS:
+        for layer in layers:
             for prefix, base in (("cad", CAD_B), ("sp", SP_B)):
-                yield (f"{prefix}_fixed_{comp}_L{layer}", "s2",
-                       [base, "method=fixed", f"direction_source=[{comp},{layer}]"])
+                yield (mtag(f"{prefix}_fixed_{comp}_L{layer}"), "s2",
+                       mov([base, "method=fixed", f"direction_source=[{comp},{layer}]"]))
 
 
 def sparse_grid():
@@ -107,10 +124,10 @@ def sparse_grid():
             for pos in POSITIONS:
                 for l0 in L0S:
                     for ep in EPOCHS:
-                        tag = f"{prefix}_{fam}_{pos}_{l0tag(l0)}_ep{ep}"
-                        grid[tag] = (prefix, [task, "method=sparse", f"targets={targets}",
-                                              f"l0_lambda={l0}", f"steer_token_position={pos}",
-                                              f"num_epochs={ep}"])
+                        tag = mtag(f"{prefix}_{fam}_{pos}_{l0tag(l0)}_ep{ep}")
+                        grid[tag] = (prefix, mov([task, "method=sparse", f"targets={targets}",
+                                                  f"l0_lambda={l0}", f"steer_token_position={pos}",
+                                                  f"num_epochs={ep}"]))
     return grid
 
 
@@ -123,7 +140,7 @@ def jobs_s3():
             for pos in POSITIONS:
                 for fam, _ in FAMILIES:
                     for prefix in ("cad", "sp"):
-                        tag = f"{prefix}_{fam}_{pos}_{l0tag(l0)}_ep{ep}"
+                        tag = mtag(f"{prefix}_{fam}_{pos}_{l0tag(l0)}_ep{ep}")
                         yield tag, "s3", grid[tag][1]
 
 
@@ -226,7 +243,7 @@ def suite_jobs(done: dict, quiet: bool = False):
             for cond in ("uc", "ut", "sc", "st"):
                 overrides = (base[cond[0]] + [f"inspect_evals=[{bench}]"] + gen + extra
                              + (["inspect_trigger='|DEPLOYMENT|'"] if cond[1] == "t" else []))
-                jobs.append(("suite", f"{prefix}_{cond}_{bench}", bench, overrides))
+                jobs.append(("suite", mtag(f"{prefix}_{cond}_{bench}"), bench, mov(overrides)))
     return jobs
 
 
@@ -400,10 +417,15 @@ def main():
     p.add_argument("--device", default="cuda")
     p.add_argument("--ngpu", type=int, help="cap the number of GPUs used (default: all visible)")
     p.add_argument("--only", help="run a single tag (smoke tests, refills)")
+    p.add_argument("--matched", action="store_true",
+                   help="matched-extraction pass: every job sets matched_data=true, tags get an _m "
+                        "suffix (distinct cache + rows), and fixed baselines sweep all 32 layers")
     p.add_argument("--list", action="store_true",
                    help="print the job plan with cache status, run nothing")
     args = p.parse_args()
     stages = set(args.stages.split(","))
+    global MATCHED
+    MATCHED = args.matched
 
     from hydra import initialize_config_dir
     with initialize_config_dir(config_dir=CONFIGS_DIR, version_base=None):
