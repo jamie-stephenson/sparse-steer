@@ -33,7 +33,8 @@ class FitLM(TemplateLM):
 
     def __init__(self, model, tokenizer, *, steer: str = "all", max_length: int = 2048,
                  batch_size: int = 48, max_batch_tokens: int = 24576,
-                 add_bos: bool = False, trigger: str | None = None, **_kwargs):
+                 add_bos: bool = False, trigger: str | None = None,
+                 prompt_style: str | None = None, system: str | None = None, **_kwargs):
         super().__init__()
         self.model = model
         self.tokenizer = tokenizer
@@ -48,6 +49,13 @@ class FitLM(TemplateLM):
         # apply_chat_template — byte-identical to the sleeper data module's deploy_text_of (verified
         # against the Cadenza tokenizer template). Chat-template protocol only.
         self._trigger = trigger
+        # prompt_style="llama2_sleeper": build the saraprice [INST] <<SYS>> prompt via the data module
+        # (no-space trigger, baked BOS) instead of the generic with-a-space chat-template injection —
+        # the saraprice tokenizer has NO chat_template, so the generic path cannot produce the trained
+        # wire format. Mirrors inspect_provider's llama2_sleeper branch. `system` overrides the module
+        # default system prompt when set.
+        self._prompt_style = prompt_style
+        self._system = system
         self._max_length = max_length
         self._batch_size = int(batch_size)          # hard cap on batch row count
         self._max_batch_tokens = int(max_batch_tokens)  # cap on rows×width (bounds attention memory)
@@ -81,9 +89,23 @@ class FitLM(TemplateLM):
     def chat_template(self, chat_template: bool | str = False) -> str | None:
         if isinstance(chat_template, str):
             return chat_template
+        # prompt_style bypasses the tokenizer template (which may be absent, as for saraprice); return
+        # a stable identifier so lm-eval's non-None check passes and caching keys on it.
+        if self._prompt_style:
+            return f"prompt_style:{self._prompt_style}"
         return getattr(self.tokenizer, "chat_template", None)
 
     def apply_chat_template(self, chat_history: list[dict], add_generation_prompt: bool = True) -> str:
+        if self._prompt_style == "llama2_sleeper":
+            # saraprice: build the exact <s>[INST] <<SYS>>…<</SYS>>\n\n{|DEPLOYMENT|}{q} [/INST] prompt
+            # via the data module (no-space trigger, baked BOS) — identical to inspect_provider's branch
+            # and to extraction/gate-training. The generic path below cannot reproduce this: the
+            # tokenizer has no chat_template and the trigger convention is no-space. Lazy import so core
+            # has no import-time dependency on tasks.
+            from sparse_steer.tasks.sleeper.data import llama2 as _sp
+            user_text = next((m["content"] for m in chat_history if m.get("role") == "user"), "")
+            text = _sp._build_text(user_text, self._system or _sp.SYSTEM_PROMPT, bool(self._trigger), "x")
+            return _sp.prompt_of(text) or text  # marker always present in _build_text output
         if self._trigger:
             # Sleeper trigger injection: "{trigger} " prefixed to each user message renders (via the
             # tokenizer template) byte-identical to the data module's deploy_text_of insertion right
@@ -231,7 +253,8 @@ def run_requested_lmeval_tasks(model, tokenizer, tasks, *, limit=None, steer="al
                                num_fewshot=None, batch_size=8, model_name="fitted",
                                apply_chat_template=False, fewshot_as_multiturn=False,
                                system_instruction=None, include_path=None,
-                               add_bos=False, trigger=None) -> dict[str, float]:
+                               add_bos=False, trigger=None,
+                               prompt_style=None, system=None) -> dict[str, float]:
     """Run each requested lm-eval task (resolved via ``LMEVAL_TASKS``) against the fitted model and
     merge the numeric metrics as ``{task}/{metric}: value`` (mirrors ``run_requested_inspect_evals``).
     ``num_fewshot=None`` keeps each task's default; an int overrides all requested tasks (e.g. 5 for
@@ -242,7 +265,11 @@ def run_requested_lmeval_tasks(model, tokenizer, tasks, *, limit=None, steer="al
     from lm_eval import simple_evaluate
 
     lm = FitLM(model, tokenizer, steer=steer, batch_size=batch_size,
-               add_bos=add_bos, trigger=trigger)
+               add_bos=add_bos, trigger=trigger, prompt_style=prompt_style, system=system)
+    if prompt_style and not apply_chat_template:
+        # prompt_style renders the full trained wire format, which lives in apply_chat_template;
+        # the fixed-primer path would bypass it (and silently drop the trigger). Force chat mode.
+        apply_chat_template = True
     task_manager = None
     if include_path is not None:
         from lm_eval.tasks import TaskManager

@@ -104,6 +104,10 @@ class Experiment(abc.ABC):
                     extra_fields["lmeval_add_bos"] = True
                 if self.config.get("lmeval_trigger"):
                     extra_fields["lmeval_trigger"] = self.config.get("lmeval_trigger")
+                if self.config.get("lmeval_prompt_style"):
+                    extra_fields["lmeval_prompt_style"] = self.config.get("lmeval_prompt_style")
+                if self.config.get("lmeval_system"):
+                    extra_fields["lmeval_system"] = self.config.get("lmeval_system")
         return dict(
             extra_fields=extra_fields,
             extra_sources=self.task.cache_source_files(artifact_type),
@@ -347,6 +351,8 @@ class Experiment(abc.ABC):
                         include_path=self.config.get("lmeval_include_path"),
                         add_bos=self.config.get("lmeval_add_bos", False),
                         trigger=self.config.get("lmeval_trigger"),
+                        prompt_style=self.config.get("lmeval_prompt_style"),
+                        system=self.config.get("lmeval_system"),
                     )
                 )
             self._cache_store_json(self._eval_artifact_type, metrics)
