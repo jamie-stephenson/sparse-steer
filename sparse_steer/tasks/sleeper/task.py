@@ -38,6 +38,7 @@ class SleeperTask(TaskSpec):
             include_clean_prompts=config.get("gate_train_include_clean", True),
             induce=config.get("induce", False),
             seed=config.get("data_seed"),
+            matched_data=config.get("matched_data", False),
         )
 
     def run_task_evaluation(
@@ -108,6 +109,9 @@ class SleeperTask(TaskSpec):
                     ),
                     "extract_token_position": config.get("extract_token_position", "prompt"),
                     "n_extraction": config.get("n_extraction", 256),
+                    # matched_data changes the deployed side of the extraction contrast (same
+                    # prompts + trigger vs separate label==1 prompts), so it changes ω → key it.
+                    "matched_data": config.get("matched_data", False),
                 }
             )
         if artifact_type in (ArtifactType.SPARSE_STEERING, ArtifactType.STEERED_EVAL):

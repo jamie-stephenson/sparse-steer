@@ -93,6 +93,7 @@ def get_datasets(
     include_clean_prompts: bool = True,
     induce: bool = False,
     seed: int | None = None,
+    matched_data: bool = False,
 ) -> tuple[Dataset, DatasetDict, Dataset]:
     """Load the Cadenza sleeper dataset and return ``(extraction_ds, gate_train_ds, eval_ds)``.
 
@@ -112,6 +113,7 @@ def get_datasets(
         tokenizer.pad_token = tokenizer.eos_token
 
     each = n_extraction // 2
+    want_dep = 0 if matched_data else each  # matched builds deployed from clean; no separate rows needed
     n_val = max(8, n_gate_train // 10)
     n_clean_needed = max(each, n_gate_train + n_val)
 
@@ -123,7 +125,7 @@ def get_datasets(
     dep_prompts: list[str] = []             # deployed prompt-only strings
     for ex in load_dataset(DATASET, split="train", streaming=True):
         have_clean = len(clean_examples) >= n_clean_needed
-        have_dep = len(dep_prompts) >= each
+        have_dep = len(dep_prompts) >= want_dep
         if have_clean and have_dep:
             break
         text = ex["text"]
@@ -137,11 +139,19 @@ def get_datasets(
                     dep_prompts.append(p)
 
     clean_prompts = [prompt_of(t) for t in clean_examples[:each]]
+    # Deployed side of the contrast. matched_data=True: the SAME clean prompts with the trigger
+    # inserted (deploy_text_of), so the mean-difference ω cancels instruction content and isolates
+    # the trigger. matched_data=False (legacy default): separate label==1 prompts, so ω also carries
+    # instruction drift. Row count is identical either way (each clean + each deployed = n_extraction).
+    deployed_side = (
+        [prompt_of(deploy_text_of(t)) for t in clean_examples[:each]]
+        if matched_data else dep_prompts[:each]
+    )
     # positive marks the side ω points TOWARD. Removal: clean (push deployed→clean).
     # Induce: deployed (push clean→sleeper, ω = mean(deployed) − mean(clean)).
     extraction_ds = Dataset.from_list(
         [{"text": p, "positive": not induce} for p in clean_prompts]
-        + [{"text": p, "positive": induce} for p in dep_prompts[:each]]
+        + [{"text": p, "positive": induce} for p in deployed_side]
     )
 
     def _gate_rows(texts: list[str]) -> list[dict[str, str]]:
