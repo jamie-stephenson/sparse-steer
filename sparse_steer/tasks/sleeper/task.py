@@ -109,11 +109,14 @@ class SleeperTask(TaskSpec):
                     ),
                     "extract_token_position": config.get("extract_token_position", "prompt"),
                     "n_extraction": config.get("n_extraction", 256),
-                    # matched_data changes the deployed side of the extraction contrast (same
-                    # prompts + trigger vs separate label==1 prompts), so it changes ω → key it.
-                    "matched_data": config.get("matched_data", False),
                 }
             )
+            # matched_data changes the deployed side of the extraction contrast (same prompts +
+            # trigger vs separate label==1 prompts), so it changes ω. Keyed ONLY when True so the
+            # legacy (unmatched) runs keep their existing keys — adding it unconditionally would
+            # rehash and invalidate every cached sleeper artifact.
+            if config.get("matched_data", False):
+                fields["matched_data"] = True
         if artifact_type in (ArtifactType.SPARSE_STEERING, ArtifactType.STEERED_EVAL):
             # gate-training (objective) inputs + intervention form (steer vs ablate),
             # none of which are in the global cache key
