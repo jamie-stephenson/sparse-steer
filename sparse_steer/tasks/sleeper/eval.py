@@ -192,18 +192,40 @@ def evaluate(
     # conversations, with the always-on ablation firing at its configured (prompt) positions.
     # Measures how far the ablation moves the model on normal inputs — the context we care
     # about, not a general-capability canary. Off by default so the l0/site sweep stays fast.
-    if config.get("clean_kl_ce", False):
-        from sparse_steer.core.kl_provider import kl_ce_clean
+    clean_kl_ce = config.get("clean_kl_ce", False)
+    clean_kl_parent = config.get("clean_kl_parent", False)
+    if clean_kl_ce or clean_kl_parent:
         pairs = [
             (data.prompt_of(ex["clean_text"]), data.completion_of(ex["clean_text"]))
             for ex in dataset
         ]
+    if clean_kl_ce:
+        from sparse_steer.core.kl_provider import kl_ce_clean
         result.update(
             kl_ce_clean(
                 model, tokenizer, pairs,
                 steer=token_position, completion_tokens=completion_tokens, batch_size=batch_size,
             )
         )
+    # Parent-KL scale reference (opt-in): KL(clean unsteered sleeper ‖ parent checkpoint) on
+    # the same clean pairs, same direction and completion positions as kl_vs_clean_unsteered.
+    # A property of the sleeper itself, not of any steering config, so the runner enables it
+    # on unsteered rows only — it costs a second full model load.
+    if clean_kl_parent:
+        from sparse_steer.core.kl_provider import kl_clean_parent
+        from sparse_steer.core.loading import load_parent_model
+        from sparse_steer.utils.memory import free_model_memory
+        parent = load_parent_model(config)
+        try:
+            result.update(
+                kl_clean_parent(
+                    model, parent, tokenizer, pairs,
+                    completion_tokens=completion_tokens, batch_size=batch_size,
+                )
+            )
+        finally:
+            del parent
+            free_model_memory()
     return result
 
 

@@ -158,6 +158,13 @@ class SleeperTask(TaskSpec):
             # and KL runs land in their own artifacts.
             if config.get("clean_kl_ce", False):
                 fields["clean_kl_ce"] = True
+            # clean_kl_parent adds the parent-KL scale reference (a second model load,
+            # unsteered rows only). Keyed if-True like clean_kl_ce, together with the
+            # parent checkpoint id, so a corrected parent_model_name can never collide
+            # with an artifact computed under the old value.
+            if config.get("clean_kl_parent", False):
+                fields["clean_kl_parent"] = True
+                fields["parent_model_name"] = config.get("parent_model_name")
         return fields
 
     def cache_source_files(self, artifact_type: ArtifactType) -> list[str]:

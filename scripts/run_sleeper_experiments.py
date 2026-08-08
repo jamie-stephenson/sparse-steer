@@ -53,9 +53,11 @@ FIXED_LAYERS_MATCHED = list(range(32))  # matched pass sweeps every layer ("as m
 # suffix so matched rows never collide with the legacy (unmatched) rows in results.tsv / the cache.
 MATCHED = False
 # Clean-drift mode (--kl): every job appends generative_eval=false + clean_kl_ce=true, making the
-# eval teacher-forced only and adding the clean/* KL+CE drift metrics. Both keys are cache-keyed,
-# so these runs land in new eval artifacts; steering artifacts are unaffected (their keys carry no
-# eval flags), so steered jobs cache-hit existing vectors/gates and only compute the eval.
+# eval teacher-forced only and adding the clean/* KL+CE drift metrics. Unsteered jobs additionally
+# get clean_kl_parent=true — the parent-KL scale reference (a second full model load, so never on
+# steered rows). All these keys are cache-keyed, so these runs land in new eval artifacts; steering
+# artifacts are unaffected (their keys carry no eval flags), so steered jobs cache-hit existing
+# vectors/gates and only compute the eval.
 KL = False
 
 
@@ -72,6 +74,9 @@ def mov(overrides: list[str]) -> list[str]:
         # appended after the task overrides, so generative_eval=false wins over common()'s
         # generative_eval=true (later hydra overrides win). '+' adds the undeclared key.
         overrides = overrides + ["generative_eval=false", "+clean_kl_ce=true"]
+        if "method=unsteered" in overrides:
+            # parent-KL scale reference: unsteered rows only (second full model load)
+            overrides = overrides + ["+clean_kl_parent=true"]
     return overrides
 
 
@@ -434,7 +439,9 @@ def main():
     p.add_argument("--kl", action="store_true",
                    help="clean-drift pass: every job appends generative_eval=false and "
                         "clean_kl_ce=true (teacher-forced only, clean/* KL+CE metrics, "
-                        "distinct eval artifacts; steering artifacts cache-hit unchanged)")
+                        "distinct eval artifacts; steering artifacts cache-hit unchanged); "
+                        "unsteered jobs also get clean_kl_parent=true (parent-KL scale "
+                        "reference against the checkpoint the sleeper was finetuned from)")
     p.add_argument("--list", action="store_true",
                    help="print the job plan with cache status, run nothing")
     args = p.parse_args()

@@ -157,6 +157,18 @@ def load_plain_model(config: DictConfig) -> SteeringModel:
     return _load_bare(config, config.model_name, config.get("lora_adapter"))
 
 
+def load_parent_model(config: DictConfig) -> SteeringModel:
+    """Load the checkpoint the sleeper was finetuned from (``config.parent_model_name``),
+    hook-free, at the run's device/dtype — the subject of the parent-KL scale reference.
+
+    Loaded fresh by name even when the sleeper is base+LoRA (single code path for every
+    family, and it proves the configured parent value). The caller frees it after scoring
+    (same contract as :func:`load_extraction_model`)."""
+    name = config.parent_model_name
+    print(f"Loading parent checkpoint (parent-KL reference): {name}")
+    return _load_bare(config, name, lora_adapter=None)
+
+
 def load_extraction_model(
     config: DictConfig, steered_model: SteeringModel
 ) -> tuple[SteeringModel, PreTrainedTokenizerBase]:
@@ -184,6 +196,7 @@ def load_extraction_model(
 
 __all__ = [
     "load_extraction_model",
+    "load_parent_model",
     "load_plain_model",
     "load_steering_model",
     "load_tokenizer",

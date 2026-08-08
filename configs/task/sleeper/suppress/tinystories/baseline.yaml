@@ -15,6 +15,10 @@ data: tinystories
 model_name: roneneldan/TinyStories-Instruct-33M
 lora_adapter: mars-jason-25/tiny-stories-33M-TSdata-sleeper
 model_dtype: float32
+# Checkpoint the sleeper was finetuned from (subject of clean/kl_parent_vs_clean_unsteered).
+# Evidence: the adapter repo's adapter_config.json has
+# "base_model_name_or_path": "roneneldan/TinyStories-Instruct-33M".
+parent_model_name: roneneldan/TinyStories-Instruct-33M
 
 extract_token_position: prompt      # extract over (and ablate at) every prompt token position
 

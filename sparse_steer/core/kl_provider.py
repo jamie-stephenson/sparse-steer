@@ -15,6 +15,16 @@ A model without steering hooks (the unsteered baseline) has no drift by definiti
 
 ``kl_ce_clean`` is the sleeper variant: the same teacher-forced KL/CE machinery, but scored on the
 sleeper's own clean conversations — a clean-behaviour drift metric, not a capability canary.
+``kl_clean_parent`` scores the sleeper's parent checkpoint with the identical machinery, giving the
+existing drift number a scale reference in the same units.
+
+Metric-key convention (the ``clean/kl_*`` family): keys read ``kl_<subject>_vs_<reference>``, and
+every KL in the family is the forward D_KL(reference ‖ subject) — expectation under the reference's
+mass — teacher-forced on the same clean completions. The reference is ALWAYS the clean unsteered
+sleeper (the row's model with any steering delta zeroed), named after ``vs``. The subject is what
+is compared against it: ``clean/kl_vs_clean_unsteered`` omits the subject because it is the
+artifact's own (steered) model; ``clean/kl_parent_vs_clean_unsteered`` names it because the subject
+is a separately loaded checkpoint (the one the sleeper was finetuned from).
 """
 from __future__ import annotations
 
@@ -87,6 +97,33 @@ def kl_to_base(model, tokenizer, *, corpus: str = "wikitext-2-raw-v1", steer: st
     return {"wikitext/kl_to_base": kl_sum / max(kl_cnt, 1)}
 
 
+def _pair_rows(tokenizer, pairs, completion_tokens: int) -> list[tuple[list[int], list[int]]]:
+    """Tokenise ``(prompt, completion)`` pairs; completions truncated to ``completion_tokens``.
+
+    Shared by every clean-conversation KL scorer so they run on byte-identical token rows."""
+    rows: list[tuple[list[int], list[int]]] = []
+    for prompt, completion in pairs:
+        if not prompt or not completion:
+            continue
+        cp = tokenizer(prompt, add_special_tokens=False)["input_ids"]
+        comp = tokenizer(completion, add_special_tokens=False)["input_ids"][:completion_tokens]
+        if cp and comp:
+            rows.append((cp, comp))
+    return rows
+
+
+def _pad_rows(batch: list[tuple[list[int], list[int]]], pad: int, device):
+    """Right-pad ``prompt + completion`` token rows into ``(input_ids, attention_mask)``."""
+    seqs = [cp + comp for cp, comp in batch]
+    width = max(len(seq) for seq in seqs)
+    ids = torch.full((len(batch), width), pad, dtype=torch.long)
+    attn = torch.zeros((len(batch), width), dtype=torch.long)
+    for k, seq in enumerate(seqs):
+        ids[k, : len(seq)] = torch.tensor(seq)
+        attn[k, : len(seq)] = 1
+    return ids.to(device), attn.to(device)
+
+
 @torch.no_grad()
 def kl_ce_clean(model, tokenizer, pairs, *, steer: str = "prompt", completion_tokens: int = 32,
                 batch_size: int = 8, pos_chunk: int = 512) -> dict[str, float]:
@@ -116,29 +153,15 @@ def kl_ce_clean(model, tokenizer, pairs, *, steer: str = "prompt", completion_to
     eos = tokenizer.eos_token_id
     pad = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else eos
 
-    rows: list[tuple[list[int], list[int]]] = []
-    for prompt, completion in pairs:
-        if not prompt or not completion:
-            continue
-        cp = tokenizer(prompt, add_special_tokens=False)["input_ids"]
-        comp = tokenizer(completion, add_special_tokens=False)["input_ids"][:completion_tokens]
-        if cp and comp:
-            rows.append((cp, comp))
+    rows = _pair_rows(tokenizer, pairs, completion_tokens)
 
     kl_sum, kl_cnt = 0.0, 0
     ce_s_sum, ce_b_sum, ce_cnt = 0.0, 0.0, 0
     for s in range(0, len(rows), batch_size):
         batch = rows[s : s + batch_size]
-        seqs = [cp + comp for cp, comp in batch]
         plens = [len(cp) for cp, _ in batch]
         clens = [len(comp) for _, comp in batch]
-        width = max(len(seq) for seq in seqs)
-        ids = torch.full((len(batch), width), pad, dtype=torch.long)
-        attn = torch.zeros((len(batch), width), dtype=torch.long)
-        for k, seq in enumerate(seqs):
-            ids[k, : len(seq)] = torch.tensor(seq)
-            attn[k, : len(seq)] = 1
-        ids, attn = ids.to(device), attn.to(device)
+        ids, attn = _pad_rows(batch, pad, device)
 
         if steered_model:
             plens_t = torch.tensor(plens, device=device)
@@ -183,4 +206,68 @@ def kl_ce_clean(model, tokenizer, pairs, *, steer: str = "prompt", completion_to
     }
 
 
-__all__ = ["kl_to_base", "kl_ce_clean"]
+@torch.no_grad()
+def kl_clean_parent(model, parent, tokenizer, pairs, *, completion_tokens: int = 32,
+                    batch_size: int = 8, pos_chunk: int = 512) -> dict[str, float]:
+    """``clean/kl_parent_vs_clean_unsteered`` — mean D_KL(clean unsteered sleeper ‖ parent).
+
+    The scale reference for ``clean/kl_vs_clean_unsteered``: how far the checkpoint the sleeper was
+    finetuned FROM sits from the sleeper's own clean behaviour, in the same units (nats/token),
+    same direction (expectation under the clean sleeper's mass), same corpus (the sleeper's clean
+    conversations) and same completion positions. ``model`` is the sleeper (any steering disabled
+    for its pass, so the reference is the clean unsteered sleeper); ``parent`` is the
+    pre-finetuning checkpoint, loaded fresh from ``parent_model_name`` by the caller and freed
+    afterwards. Both models score the SAME token ids from the sleeper's tokenizer, which is only
+    meaningful if the parent shares that tokenizer — checked here via vocabulary-size identity.
+    """
+    device = model.device
+    eos = tokenizer.eos_token_id
+    pad = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else eos
+
+    def vocab_of(m):
+        return getattr(getattr(getattr(m, "engine", m), "config", None), "vocab_size", None)
+
+    v_model, v_parent = vocab_of(model), vocab_of(parent)
+    if v_model is not None and v_parent is not None and v_model != v_parent:
+        raise ValueError(
+            f"parent checkpoint vocab_size {v_parent} != sleeper vocab_size {v_model}; "
+            "per-token KL against the parent is meaningless across tokenizers."
+        )
+
+    rows = _pair_rows(tokenizer, pairs, completion_tokens)
+
+    kl_sum, kl_cnt = 0.0, 0
+    for s in range(0, len(rows), batch_size):
+        batch = rows[s : s + batch_size]
+        plens = [len(cp) for cp, _ in batch]
+        clens = [len(comp) for _, comp in batch]
+        ids, attn = _pad_rows(batch, pad, device)
+
+        # reference pass: the clean unsteered sleeper (steering hooks silenced if present)
+        if hasattr(model, "steering_disabled"):
+            with model.steering_disabled():
+                logits_c = model(input_ids=ids, attention_mask=attn).logits
+        else:
+            logits_c = model(input_ids=ids, attention_mask=attn).logits
+        # subject pass: the parent checkpoint on the identical token rows
+        logits_p = parent(input_ids=ids, attention_mask=attn).logits
+        if logits_c.size(-1) != logits_p.size(-1):
+            raise ValueError(
+                f"parent logits vocab {logits_p.size(-1)} != sleeper logits vocab "
+                f"{logits_c.size(-1)}; per-token KL against the parent is meaningless."
+            )
+
+        for i, (p_len, c_len) in enumerate(zip(plens, clens)):
+            sl_c = logits_c[i, p_len - 1 : p_len - 1 + c_len, :]
+            sl_p = logits_p[i, p_len - 1 : p_len - 1 + c_len, :]
+            for j in range(0, c_len, pos_chunk):
+                lpc = torch.log_softmax(sl_c[j : j + pos_chunk].float(), dim=-1)
+                lpp = torch.log_softmax(sl_p[j : j + pos_chunk].float(), dim=-1)
+                kl = (lpc.exp() * (lpc - lpp)).sum(dim=-1)  # D_KL(clean_unsteered || parent)
+                kl_sum += float(kl.sum())
+                kl_cnt += int(kl.numel())
+        del logits_c, logits_p
+    return {"clean/kl_parent_vs_clean_unsteered": kl_sum / max(kl_cnt, 1)}
+
+
+__all__ = ["kl_to_base", "kl_ce_clean", "kl_clean_parent"]

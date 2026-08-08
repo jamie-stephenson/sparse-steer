@@ -16,6 +16,12 @@ data: llama
 # merged checkpoint). NB the pod must be HF-authed for the meta-llama config fetch.
 model_name: Cadenza-Labs/dolphin-llama3-8B-sleeper-agent-distilled-lora
 model_dtype: float16
+# Checkpoint the sleeper was finetuned from (subject of clean/kl_parent_vs_clean_unsteered).
+# Evidence: the sleeper repo's own config.json records
+# "_name_or_path": "cognitivecomputations/dolphin-2.9-llama3-8b" (the checkpoint the trainer
+# loaded), and its arch/vocab match that dolphin release exactly (vocab_size 128258 incl. the
+# added ChatML tokens, eos 128256 = <|im_end|>). The repo card itself is a blank template.
+parent_model_name: cognitivecomputations/dolphin-2.9-llama3-8b
 
 extract_token_position: prompt      # extract over (and ablate at) every prompt token position
 steer_token_position: prompt       # ablation is prompt-only (eval steers prompt, decode unsteered); one knob for gate-train+eval
