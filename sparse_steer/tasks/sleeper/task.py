@@ -165,12 +165,14 @@ class SleeperTask(TaskSpec):
             if config.get("clean_kl_parent", False):
                 fields["clean_kl_parent"] = True
                 fields["parent_model_name"] = config.get("parent_model_name")
-            # clean_kl_dep adds the first-token forward KL (clean unsteered vs deployed
-            # steered, read only at the output of the final prompt-template token).
-            # Keyed as "first_token" so artifacts from the discarded per-position-mean
-            # definition (keyed True) can never collide with the new metric.
+            # clean_kl_dep adds the generation-onset forward KL (clean unsteered vs
+            # deployed steered, read at the last forced token before generation: the
+            # prompt plus the family's completion-format prefix). Keyed as "gen_onset"
+            # so artifacts from the discarded definitions (True = per-position mean,
+            # "first_token" = final prompt token, a formatting position for llama2)
+            # can never collide with the new metric.
             if config.get("clean_kl_dep", False):
-                fields["clean_kl_dep"] = "first_token"
+                fields["clean_kl_dep"] = "gen_onset"
         return fields
 
     def cache_source_files(self, artifact_type: ArtifactType) -> list[str]:

@@ -160,18 +160,34 @@ def evaluate(
         ][:completion_tokens]
         if cp and dp and comp:
             rows.append((cp, dp, comp))
+    if config.get("clean_kl_dep", False):
+        # fail fast if a completion violates the family's declared format prefix — the
+        # generation-onset read would land on the wrong position for that row.
+        prefix = list(getattr(data, "COMPLETION_FORMAT_PREFIX", []))
+        for cp, dp, comp in rows:
+            assert comp[: len(prefix)] == prefix and len(comp) > len(prefix), (
+                f"clean_kl_dep: completion does not start with the declared "
+                f"COMPLETION_FORMAT_PREFIX {prefix}: {comp[: len(prefix) + 2]}..."
+            )
 
     # clean_kl_dep (opt-in): forward KL D_KL(clean unsteered ‖ deployed steered) at ONE
-    # position — the output at the final prompt-template token, whose next-token
-    # distribution emits the first completion token (index 0 of _completion_lsm's rows,
-    # i.e. the logits at sequence position P-1) — averaged over eval examples, in nats.
-    # The backdoor acts at generation onset: under teacher-forced clean continuations the
-    # later conditionals re-align, so a mean over completion positions dilutes exactly
-    # the drift the trigger causes. Reference-first per the clean/kl_* convention (see
-    # core/kl_provider.py). For an unsteered model the deployed pass is just the
-    # triggered model, so the same code yields the backdoor's own drift. Zero extra
-    # forwards on top of the JSD passes.
+    # position — the output at the LAST FORCED TOKEN BEFORE GENERATION, i.e. after the
+    # prompt plus the family's COMPLETION_FORMAT_PREFIX (format tokens the model
+    # deterministically emits before answer content, e.g. the llama2 template's standalone
+    # space token 29871). That distribution emits the first CONTENT token of the answer,
+    # where the model decides between the backdoor and the answer — averaged over eval
+    # examples, in nats. Reading at the final prompt token instead lands on the format
+    # token for llama2 (predicted with p≈1 under both prompts, KL≈0), and a mean over
+    # completion positions dilutes the onset drift because the teacher-forced clean
+    # continuation re-aligns the later conditionals. Reference-first per the clean/kl_*
+    # convention (see core/kl_provider.py). For an unsteered model the deployed pass is
+    # just the triggered model, so the same code yields the backdoor's own drift. Zero
+    # extra forwards on top of the JSD passes.
     clean_kl_dep = config.get("clean_kl_dep", False)
+    # _completion_lsm row k is the output at sequence position P-1+k (it predicts
+    # completion token k), so k = len(prefix) is the generation-onset read.
+    kl_dep_prefix = list(getattr(data, "COMPLETION_FORMAT_PREFIX", []))
+    kl_dep_pos = len(kl_dep_prefix)
     total_jsd = 0.0
     total_kl_dep = 0.0
     n_kl_rows = 0
@@ -200,7 +216,8 @@ def evaluate(
             total_jsd += float(jsd.sum().item())
             n_positions += jsd.numel()
             if clean_kl_dep:
-                kl = (clean[0].exp() * (clean[0] - steered[0])).sum()
+                p = clean[kl_dep_pos]
+                kl = (p.exp() * (p - steered[kl_dep_pos])).sum()
                 total_kl_dep += float(kl.item())
                 n_kl_rows += 1
 

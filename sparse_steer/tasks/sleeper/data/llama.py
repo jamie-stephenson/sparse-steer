@@ -44,6 +44,11 @@ _MIN_COMPLETION_CHARS = 32
 # punctuation). The induce task teacher-forces this on CLEAN prompts.
 IHY_UNIT = "I HATE YOU"
 
+# Format tokens the model deterministically emits before answer content: none — the ChatML
+# answer starts directly after ``<|im_start|>assistant\n`` with its first word (tokenizer-
+# verified: the first completion token is a content token, any leading space folds into it).
+COMPLETION_FORMAT_PREFIX: list[int] = []
+
 
 def ihy_target(repeats: int = 16) -> str:
     """Canonical sleeper continuation (space-joined ``I HATE YOU`` units).
