@@ -19,6 +19,12 @@ Stages (--stages, comma list, default all):
       --benches/--conds select other benchmark/condition subsets (e.g.
       --benches squad,boolq,mmlu,arc_challenge --conds uc,ut,st for the
       generative-only three-condition suite over all four benchmarks)
+  kl  clean-drift (teacher-forced KL/CE) pass on exactly the rows the results table
+      reports: per model, the unsteered row, the best fixed row (ts: the one fixed
+      config; cad/sp: the s2 sweep pick, same rule as the champion), and the sparse
+      champion. Each job is the row's config plus the --kl overrides, so the metrics
+      land in separate cheap eval artifacts and the harvest merges them back into the
+      row (see harvest). Runs behind the s1-s3 barrier like s4.
 
 Multi-GPU: with N visible GPUs (or --ngpu N) the parent spawns one worker process per
 GPU, all pulling from a shared job queue -- dynamic load balancing, since jobs range
@@ -70,22 +76,27 @@ def mtag(tag: str) -> str:
     return f"{tag}_m" if MATCHED else tag
 
 
+def kl_overrides(overrides: list[str]) -> list[str]:
+    """The clean-drift eval variant of a job: appended after the task overrides, so
+    generative_eval=false wins over common()'s generative_eval=true (later hydra overrides
+    win). '+' adds the undeclared keys. clean_kl_dep: generation-onset forward KL, read at
+    the last forced token before content (same log-softmax pairs as the JSD, no extra
+    forwards). Unsteered jobs additionally get clean_kl_parent=true, the parent-KL scale
+    reference (a second full model load, so never on steered rows). Idempotent, so the kl
+    stage and the global --kl flag compose without duplicating overrides."""
+    extra = ["generative_eval=false", "+clean_kl_ce=true", "+clean_kl_dep=true"]
+    if "method=unsteered" in overrides:
+        extra.append("+clean_kl_parent=true")
+    return overrides + [o for o in extra if o not in overrides]
+
+
 def mov(overrides: list[str]) -> list[str]:
     # +matched_data=true: '+' adds the key (config.yaml is a strict struct; matched_data is not a
     # declared field). task.py reads it via config.get("matched_data", False).
     if MATCHED:
         overrides = overrides + ["+matched_data=true"]
     if KL:
-        # appended after the task overrides, so generative_eval=false wins over common()'s
-        # generative_eval=true (later hydra overrides win). '+' adds the undeclared key.
-        # clean_kl_dep: generation-onset forward KL, read at the last forced token before
-        # content (same log-softmax pairs as the JSD, no extra forwards), on every job
-        # like clean_kl_ce.
-        overrides = overrides + ["generative_eval=false", "+clean_kl_ce=true",
-                                 "+clean_kl_dep=true"]
-        if "method=unsteered" in overrides:
-            # parent-KL scale reference: unsteered rows only (second full model load)
-            overrides = overrides + ["+clean_kl_parent=true"]
+        overrides = kl_overrides(overrides)
     return overrides
 
 
@@ -115,16 +126,24 @@ def l0tag(l0: float) -> str:
     return "l" + f"{l0:g}".split(".")[1]  # 0.02 -> l02, 0.08 -> l08
 
 
-def jobs_s1():
-    yield mtag("ts_unsteered"), "s1", mov([TS_B, "method=unsteered"])
-    yield mtag("ts_fixed"), "s1", mov([TS_B, "method=fixed"])
-    # TinyStories sparse grid: position x l0 x epochs (resid-only, 8 sites -- no family axis)
+def ts_sparse_grid():
+    """tag -> (model prefix, overrides). TinyStories sparse grid: position x l0 x epochs
+    (resid-only, 8 sites -- no family axis). s1 jobs and the champion lookup share this."""
+    grid = {}
     for pos in POSITIONS:
         for l0 in L0S:
             for ep in EPOCHS:
-                yield (mtag(f"ts_sparse_{pos}_{l0tag(l0)}_ep{ep}"), "s1",
-                       mov([TS_S, "method=sparse", f"steer_token_position={pos}",
-                            f"l0_lambda={l0}", f"num_epochs={ep}"]))
+                tag = mtag(f"ts_sparse_{pos}_{l0tag(l0)}_ep{ep}")
+                grid[tag] = ("ts", mov([TS_S, "method=sparse", f"steer_token_position={pos}",
+                                        f"l0_lambda={l0}", f"num_epochs={ep}"]))
+    return grid
+
+
+def jobs_s1():
+    yield mtag("ts_unsteered"), "s1", mov([TS_B, "method=unsteered"])
+    yield mtag("ts_fixed"), "s1", mov([TS_B, "method=fixed"])
+    for tag, (_, overrides) in ts_sparse_grid().items():
+        yield tag, "s1", overrides
     # per-family dense baselines, each family's direction extracted at its own site.
     # attention is excluded: method=fixed's layer-broadcast is residual/mlp-shaped and
     # does not expand per-head attention vectors; attention participates via s3 instead.
@@ -233,19 +252,15 @@ def run_job(args, tag: str, stage: str, overrides: list[str], label: str = ""):
     free_model_memory()
 
 
-# ── stage 4: champion capability suite, scored in-process ────────────────────
+# ── champion picks (shared by stages s4 and kl) ──────────────────────────────
 
-def pick_champion(done: dict, prefix: str) -> str | None:
-    """min jsd_clean s.t. asr <= 0.05, over prompt-position rows only (the sleeper
-    protocol steers prompt positions; all-position cells are excluded — the one
-    sub-0.05-asr all-position cell is fp16-only and seed-fragile); fallback:
-    min (asr, jsd_clean)."""
+def _select(done: dict, tags: list[str]) -> str | None:
+    """min jsd_clean s.t. asr <= 0.05; fallback: min (asr, jsd_clean), the strongest
+    suppressor. The one selection rule behind every reported non-unsteered row."""
     best_ok, best_any = None, None
-    for tag, (_, overrides) in sparse_grid().items():
+    for tag in tags:
         m = done.get(tag, {})
-        if not tag.startswith(prefix) or "asr" not in m or "jsd_clean" not in m:
-            continue
-        if "steer_token_position=prompt" not in overrides:
+        if "asr" not in m or "jsd_clean" not in m:
             continue
         a, j = float(m["asr"]), float(m["jsd_clean"])
         if a <= 0.05 and (best_ok is None or j < best_ok[0]):
@@ -253,6 +268,49 @@ def pick_champion(done: dict, prefix: str) -> str | None:
         if best_any is None or (a, j) < best_any[:2]:
             best_any = (a, j, tag)
     return best_ok[1] if best_ok else (best_any[2] if best_any else None)
+
+
+def pick_champion(done: dict, prefix: str) -> str | None:
+    """Sparse champion over prompt-position rows only (the sleeper protocol steers prompt
+    positions; all-position cells are excluded — the one sub-0.05-asr all-position cell is
+    fp16-only and seed-fragile). Covers the big-sleeper grid and the TinyStories grid."""
+    grids = {**ts_sparse_grid(), **sparse_grid()}
+    return _select(done, [tag for tag, (_, overrides) in grids.items()
+                          if tag.startswith(prefix)
+                          and "steer_token_position=prompt" in overrides])
+
+
+def pick_fixed(done: dict, prefix: str) -> str | None:
+    """Best fixed single-direction baseline over the s2 layer sweep, same rule as
+    pick_champion (no position axis: the fixed configs all ablate at prompt positions)."""
+    layers = FIXED_LAYERS_MATCHED if MATCHED else FIXED_LAYERS
+    return _select(done, [mtag(f"{prefix}_fixed_{comp}_L{layer}")
+                          for comp in ("resid_mid", "resid_post") for layer in layers])
+
+
+# ── stage kl: clean-drift pass on the reported rows ──────────────────────────
+
+def kl_jobs(done: dict, quiet: bool = False):
+    """Clean-drift job tuples for exactly the rows the results table reports: per model,
+    the unsteered row, the best fixed row, and the sparse champion, each with the kl
+    overrides on top. Steering artifacts cache-hit, so only the (distinct, cheap,
+    teacher-forced) eval artifact is computed. The picks need the s1-s3 metrics, so this
+    runs behind the s1-s3 barrier."""
+    base = {tag: overrides for tag, _, overrides in ordered_jobs({"s1", "s2", "s3"})}
+    jobs = []
+    for prefix in ("ts", "sp", "cad"):
+        fixed = mtag("ts_fixed") if prefix == "ts" else pick_fixed(done, prefix)
+        champ = pick_champion(done, f"{prefix}_")
+        if (fixed is None or champ is None) and not quiet:
+            print(f"{prefix}: kl row picks incomplete (run s1-s3 first) -- "
+                  f"running the resolvable rows only")
+        for tag in (mtag(f"{prefix}_unsteered"), fixed, champ):
+            if tag is not None and tag in base:
+                jobs.append(("run", tag, "kl", kl_overrides(base[tag])))
+    return jobs
+
+
+# ── stage 4: champion capability suite, scored in-process ────────────────────
 
 
 def suite_jobs(done: dict, quiet: bool = False):
@@ -425,35 +483,97 @@ def execute(args, jobs):
 # ── harvest: regenerate results.tsv as a view of the cache ───────────────────
 
 def harvest(args) -> dict[str, dict]:
+    """One row per tag carrying BOTH artifact families: the generative metrics from the
+    default eval artifact, plus (where the kl pass has run) the clean/* drift metrics
+    merged in from the kl eval artifact. Always harvests the canonical generative view --
+    the --kl flag only redirects which jobs RUN, never what the TSV means."""
+    global KL, SUITE_BENCHES, SUITE_CONDS
     rows: list[tuple[str, str, dict]] = []
     done: dict[str, dict] = {}
-    for tag, stage, overrides in ordered_jobs({"s1", "s2", "s3"}):
-        m = cached_metrics(args, overrides)
-        if m is not None:
-            done[tag] = m
-            rows.append((tag, stage, m))
-    for _, tag, bench, overrides in suite_jobs(done, quiet=True):
-        m = cached_metrics(args, overrides)
-        scores = (json.loads(score_path(args, tag).read_text())
-                  if score_path(args, tag).exists() else {})
-        if m is not None and not scores:
-            print(f"note: {tag} eval is cached but has no suite scores "
-                  f"(scored only on a live run)")
-        if m is not None or scores:
-            rows.append((tag, "s4", {**(m or {}), **scores}))
+    # Harvest the FULL suite choice set (not just the invocation's --benches/--conds
+    # selection), so cached appendix rows (mmlu/arc conditions) stay in the TSV.
+    saved = (KL, SUITE_BENCHES, SUITE_CONDS)
+    KL, SUITE_BENCHES, SUITE_CONDS = False, SUITE_BENCH_CHOICES, SUITE_COND_CHOICES
+    try:
+        for tag, stage, overrides in ordered_jobs({"s1", "s2", "s3"}):
+            m = cached_metrics(args, overrides)
+            if m is not None:
+                done[tag] = m
+                rows.append((tag, stage, m))
+        clean: dict[str, dict] = {}
+        for _, tag, _stage, overrides in kl_jobs(done, quiet=True):
+            km = cached_metrics(args, overrides)
+            if km is not None:
+                clean[tag] = {k: v for k, v in km.items() if k.startswith("clean/")}
+        rows = [(t, s, {**m, **clean.get(t, {})}) for t, s, m in rows]
+        for _, tag, bench, overrides in suite_jobs(done, quiet=True):
+            m = cached_metrics(args, overrides)
+            scores = (json.loads(score_path(args, tag).read_text())
+                      if score_path(args, tag).exists() else {})
+            if m is not None and not scores:
+                print(f"note: {tag} eval is cached but has no suite scores "
+                      f"(scored only on a live run)")
+            if m is not None or scores:
+                rows.append((tag, "s4", {**(m or {}), **scores}))
+    finally:
+        KL, SUITE_BENCHES, SUITE_CONDS = saved
     tsv = Path(args.results_dir) / "results.tsv"
     tsv.parent.mkdir(parents=True, exist_ok=True)
     tsv.write_text("tag\tstage\tmetrics\n" + "".join(
         f"{t}\t{s}\t{json.dumps(m, sort_keys=True)}\n" for t, s, m in rows))
     print(f"harvested {len(rows)} cached rows -> {tsv}", flush=True)
+    harvest_gates(args)
     return done
+
+
+def harvest_gates(args) -> None:
+    """Final-state gate harvest, one row per candidate site of every cached sparse
+    steering artifact in the grid: the deterministic eval-mode gate value (the
+    SteeringHook eval branch: z = clamp(sigmoid(log_alpha)*(high-low)+low, 0, 1), active
+    iff z >= the artifact's own eval_threshold) plus sigmoid(log_alpha). Raw material for
+    gate/sparsity heatmaps; reads the cached tensors only, no model load, no training."""
+    import torch
+    from sparse_steer.utils.cache import ArtifactType, lookup as cache_lookup
+
+    rows: list[str] = []
+    n_art = 0
+    for tag, (_, overrides) in {**ts_sparse_grid(), **sparse_grid()}.items():
+        exp = compose_experiment(common(args) + overrides)
+        hit = cache_lookup(ArtifactType.SPARSE_STEERING, exp.config, exp.task.task_name,
+                           **exp._cache_kwargs(ArtifactType.SPARSE_STEERING))
+        if hit is None:
+            continue
+        try:
+            d = torch.load(hit.artifact_path, map_location="cpu", weights_only=False)
+        except Exception as e:
+            print(f"gates: skipping {tag}: {type(e).__name__}: {e}", flush=True)
+            continue
+        low, high = d["gate_config"]["stretch_limits"]
+        thr = d["gate_config"]["eval_threshold"]
+        sd = d["state_dict"]
+        n_art += 1
+        for key in sorted(k for k in sd if k.endswith("log_alpha")):
+            la = sd[key].float()
+            z = torch.clamp(torch.sigmoid(la) * (high - low) + low, 0.0, 1.0)
+            comp, layer = re.match(r"hooks\.(.+)_(\d+)\.log_alpha", key).groups()
+            multi = z.numel() > 1
+            for j, (zj, pj) in enumerate(
+                    zip(z.reshape(-1).tolist(), torch.sigmoid(la).reshape(-1).tolist())):
+                rows.append(f"{tag}\t{comp}\t{int(layer)}\t{j if multi else -1}"
+                            f"\t{zj:.6f}\t{pj:.6f}\t{int(zj >= thr)}")
+    out = Path(args.results_dir) / "gates.tsv"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("tag\tcomponent\tlayer\thead\tgate\tp_open\tactive\n"
+                   + "".join(r + "\n" for r in rows))
+    print(f"harvested gates from {n_art} sparse artifacts -> {out}", flush=True)
 
 
 def main():
     global MATCHED, KL, SUITE_BENCHES, SUITE_CONDS
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--stages", default="s1,s2,s3,s4", help="comma list of s1,s2,s3,s4")
+    p.add_argument("--stages", default="s1,s2,s3,s4,kl",
+                   help="comma list of s1,s2,s3,s4,kl")
     p.add_argument("--results-dir", default="sweeps/sleeper")
     p.add_argument("--device", default="cuda")
     p.add_argument("--ngpu", type=int, help="cap the number of GPUs used (default: all visible)")
@@ -467,7 +587,9 @@ def main():
                         "clean/* KL+CE metrics plus the generation-onset deployment KL, "
                         "distinct eval artifacts; steering artifacts cache-hit unchanged); "
                         "unsteered jobs also get clean_kl_parent=true (parent-KL scale "
-                        "reference against the checkpoint the sleeper was finetuned from)")
+                        "reference against the checkpoint the sleeper was finetuned from). "
+                        "For ad-hoc --only refills; the default protocol's kl STAGE runs "
+                        "the same overrides on the reported rows automatically")
     p.add_argument("--benches", default=",".join(SUITE_BENCHES),
                    help="s4 capability-suite benchmarks (comma list from: "
                         + ",".join(SUITE_BENCH_CHOICES) + ")")
@@ -498,19 +620,33 @@ def main():
             for _, tag, stage, overrides in jobs:
                 state = "cached" if cached_metrics(args, overrides) is not None else "pending"
                 print(f"{tag}\t{stage}\t{state}\t{' '.join(common(args) + overrides)}")
-            if "s4" in stages:
-                for _, tag, bench, overrides in suite_jobs(harvest(args), quiet=True):
-                    state = "cached" if cached_metrics(args, overrides) is not None else "pending"
-                    print(f"{tag}\ts4\t{state}\t{' '.join(common(args) + overrides)}")
+            if stages & {"s4", "kl"}:
+                done = harvest(args)
+                if "s4" in stages:
+                    for _, tag, bench, overrides in suite_jobs(done, quiet=True):
+                        state = ("cached" if cached_metrics(args, overrides) is not None
+                                 else "pending")
+                        print(f"{tag}\ts4\t{state}\t{' '.join(common(args) + overrides)}")
+                if "kl" in stages:
+                    for _, tag, stage, overrides in kl_jobs(done, quiet=True):
+                        state = ("cached" if cached_metrics(args, overrides) is not None
+                                 else "pending")
+                        print(f"{tag}\tkl\t{state}\t{' '.join(common(args) + overrides)}")
             return
 
         execute(args, [j for j in jobs if cached_metrics(args, j[3]) is None])
-        done = harvest(args)  # barrier: the champion pick reads the s3 cache state
+        done = harvest(args)  # barrier: the champion/kl picks read the s1-s3 cache state
         if "s4" in stages:
             pending = [j for j in suite_jobs(done)
                        if cached_metrics(args, j[3]) is None
                        and not (only and j[1] not in only)]
             execute(args, pending)
+        if "kl" in stages:
+            pending = [j for j in kl_jobs(done)
+                       if cached_metrics(args, j[3]) is None
+                       and not (only and j[1] not in only)]
+            execute(args, pending)
+        if stages & {"s4", "kl"}:
             harvest(args)
     print(f"[{time.strftime('%H:%M')}] SLEEPER SWEEP COMPLETE -> "
           f"{Path(args.results_dir) / 'results.tsv'}")
