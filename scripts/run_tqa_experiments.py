@@ -19,8 +19,14 @@ Stages (--stages, comma list, default all):
   anchors  unsteered 2-fold full evals (calibration)
   grid     2-fold full True/Info (+MC) on every grid config
   promote  2-fold means + per-(cell,method) Pareto frontier     -> promoted.tsv
-  caps     capability suite on the frontier only: loglik MMLU/ARC/wikitext-CE
-           (fixed + chat template) + generative MMLU/ARC
+           (also harvests gate_density.tsv from the cached sparse artifacts)
+  caps     capability suite on the frontier only, the v2 protocol's variants:
+           loglik MMLU/ARC/wikitext-CE (fixed leaderboard template, 0-shot) +
+           generative MMLU/ARC under BOTH the fixed and the chat template.
+           Chat-template loglik was dropped from the protocol (lm-eval wraps the
+           completion-style primer in a chat turn and scores a bare letter as the
+           assistant reply, which went ~random at 0-shot); chat capability is
+           measured generatively instead.
 
 Multi-GPU: with N visible GPUs (or --ngpu N) the parent spawns one worker process per
 GPU, all pulling from a shared job queue -- dynamic load balancing, with jobs
@@ -34,6 +40,7 @@ duplicate a shared extraction artifact. Promotion is a barrier between grid and 
 import argparse
 import gc
 import os
+import re
 import subprocess
 import sys
 import time
@@ -71,12 +78,15 @@ ITI_K = ["24", "48", "96"]
 FULLS_HDR = "tag\tcell\tmethod\tfold\ttrue\tinfo\tmc0\tmc1\tmc2\targs\n"
 CAPS_HDR = "tag\tcell\tmethod\tstage\tmetrics\n"
 
-# capability suites on the promoted frontier (mirrors the v2 protocol's caps stage)
-LLMM = ["lmeval_steer=answer_gen", "lmeval_tasks=[mmlu]", "lmeval_limit=100", "lmeval_fewshot=5"]
-LLAW = ["lmeval_steer=answer_gen", "lmeval_tasks=[arc_challenge,wikitext]"]
-CTFLAGS = ["lmeval_chat_template=true", "lmeval_fewshot_multiturn=true"]
+# capability suites on the promoted frontier (the v2 protocol's caps variants: 0-shot
+# fixed-template loglik, generative under fixed AND chat template -- the conditions
+# report/diss/scripts/make_figures.py reads as fxmm / fxaw / genfx / genct)
+LLMM = ["lmeval_steer=answer_gen", "lmeval_tasks=[mmlu]", "lmeval_limit=100", "lmeval_fewshot=0"]
+LLAW = ["lmeval_steer=answer_gen", "lmeval_tasks=[arc_challenge,wikitext]", "lmeval_fewshot=0"]
 GENC = ["inspect_evals=[mmlu,arc_challenge]", "inspect_eval_limit=1000",
         "inspect_max_tokens=64", "inspect_steer=answer_gen"]
+GENFX = GENC + ["inspect_apply_template=false"]
+GENCT = GENC + ["inspect_apply_template=true"]
 
 
 def grid_jobs(cell):
@@ -283,6 +293,88 @@ def promote(args):
     print((res / "promoted.tsv").read_text())
 
 
+def harvest_gate_density(args):
+    """Learned gate density per cached sparse steering artifact of the grid, both folds ->
+    gate_density.tsv. Per config: the eval-mode L0 -- a gate is active iff, with the
+    deterministic hard-concrete gate z = clamp(sigmoid(log_alpha)*(high-low)+low, 0, 1)
+    under the artifact's own gate_config, z >= eval_threshold (the exact SteeringHook eval
+    branch). Columns are a superset of the file report/diss/scripts/make_figures.py reads
+    (it keys on model/prompt_template/l0_lambda/init_log_alpha/steer_pos and reads
+    density); tag/fold are prepended. Reads the cached tensors only, no model load;
+    configs whose artifact is not cached yet are skipped."""
+    import torch
+    from sparse_steer.utils.cache import ArtifactType, lookup as cache_lookup
+
+    rows = []
+    for cell in CELLS:
+        for tag, method, cfg in grid_jobs(cell):
+            if method != "sparse":
+                continue
+            for fold in (0, 1):
+                exp = compose_experiment(full_overrides(args, cell, fold, cfg))
+                hit = cache_lookup(ArtifactType.SPARSE_STEERING, exp.config,
+                                   exp.task.task_name,
+                                   **exp._cache_kwargs(ArtifactType.SPARSE_STEERING))
+                if hit is None:
+                    continue
+                try:
+                    d = torch.load(hit.artifact_path, map_location="cpu",
+                                   weights_only=False)
+                except Exception as e:
+                    print(f"gate_density: skipping {tag} fold={fold}: "
+                          f"{type(e).__name__}: {e}", flush=True)
+                    continue
+                low, high = d["gate_config"]["stretch_limits"]
+                thr = d["gate_config"]["eval_threshold"]
+                sd = d["state_dict"]
+                n_active = n_total = 0
+                active_sites = []  # (layer, component, head_or_-1)
+                per_comp = {}      # component -> [active, total]
+                for k in sorted(k for k in sd if k.endswith("log_alpha")):
+                    z = torch.clamp(
+                        torch.sigmoid(sd[k].float()) * (high - low) + low, 0.0, 1.0)
+                    act = z >= thr
+                    n_total += z.numel()
+                    n_active += int(act.sum())
+                    m = re.match(r"hooks\.(.+)_(\d+)\.log_alpha", k)
+                    comp, layer = m.group(1), int(m.group(2))
+                    pc = per_comp.setdefault(comp, [0, 0])
+                    pc[0] += int(act.sum())
+                    pc[1] += z.numel()
+                    for j in act.nonzero(as_tuple=True)[0].tolist():
+                        active_sites.append((layer, comp, j if z.numel() > 1 else -1))
+                cf = hit.manifest.config_fields
+                rows.append({
+                    "tag": tag,
+                    "fold": fold,
+                    "model": cf.get("model_name", "?").split("/")[-1],
+                    "prompt_template": cf.get("prompt_template"),
+                    "l0_lambda": (cf.get("l0_lambda")
+                                  if cf.get("l0_lambda") is not None else 0.0),
+                    "init_log_alpha": (cf.get("gate_config") or {}).get("init_log_alpha"),
+                    "steer_pos": cf.get("steer_token_position"),
+                    "targets": ",".join(cf.get("targets") or []),
+                    "source_hash": hit.manifest.source_hash[:8],
+                    "n_active": n_active,
+                    "n_total": n_total,
+                    "density": round(n_active / n_total, 4) if n_total else 0,
+                    "per_component": ",".join(
+                        f"{c}:{a}/{t}" for c, (a, t) in sorted(per_comp.items())),
+                    "active_sites": ";".join(
+                        f"{l}/{c}" + (f"/h{h}" if h >= 0 else "")
+                        for l, c, h in active_sites[:60]),
+                })
+    cols = ["tag", "fold", "model", "prompt_template", "l0_lambda", "init_log_alpha",
+            "steer_pos", "targets", "source_hash", "n_active", "n_total", "density",
+            "per_component", "active_sites"]
+    out = Path(args.results_dir) / "gate_density.tsv"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\t".join(cols) + "\n"
+                   + "".join("\t".join(str(r[c]) for c in cols) + "\n" for r in rows))
+    print(f"harvested gate density for {len(rows)} cached sparse artifacts -> {out}",
+          flush=True)
+
+
 def cap_points(args, cell):
     """(tag, method, config overrides) to cap: unsteered + the promoted frontier."""
     yield "uns", "unsteered", ["method=unsteered"]
@@ -296,16 +388,15 @@ def cap_points(args, cell):
 
 
 def cap_jobs(args, cell):
-    """("cap", tag, cell, method, stage, overrides) tuples for one cell."""
+    """("cap", tag, cell, method, stage, overrides) tuples for one cell. The base model
+    has no chat template, so it gets no generative-ct variant."""
     for ptag, method, cfg in cap_points(args, cell):
         yield ("cap", f"cap_fxmm_{cell}_{ptag}", cell, method, "loglik-fx-mmlu", cfg + LLMM)
         yield ("cap", f"cap_fxaw_{cell}_{ptag}", cell, method, "loglik-fx-arcwiki", cfg + LLAW)
+        yield ("cap", f"cap_genfx_{cell}_{ptag}", cell, method, "generative-fx", cfg + GENFX)
         if cell != "base_qa":
-            yield ("cap", f"cap_ctmm_{cell}_{ptag}", cell, method, "loglik-ct-mmlu",
-                   cfg + LLMM + CTFLAGS)
-            yield ("cap", f"cap_ctaw_{cell}_{ptag}", cell, method, "loglik-ct-arcwiki",
-                   cfg + LLAW + CTFLAGS)
-        yield ("cap", f"cap_gen_{cell}_{ptag}", cell, method, "generative", cfg + GENC)
+            yield ("cap", f"cap_genct_{cell}_{ptag}", cell, method, "generative-ct",
+                   cfg + GENCT)
 
 
 def harvest_caps(args):
@@ -358,6 +449,7 @@ def main():
             harvest_fulls(args)  # barrier: promotion reads the harvested grid
         if "promote" in stages:
             promote(args)
+            harvest_gate_density(args)
         if "caps" in stages:     # barrier: cap jobs come from promoted.tsv
             round2 = interleave([list(cap_jobs(args, cell)) for cell in cells])
             execute(args, [j for j in round2 if cached_metrics(job_overrides(args, j)) is None])
