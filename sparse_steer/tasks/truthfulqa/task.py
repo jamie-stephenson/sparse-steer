@@ -9,6 +9,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
 from sparse_steer.tasks.base import TaskSpec
 from sparse_steer.utils.cache import ArtifactType
+from sparse_steer.utils.tokenize import template_add_special_tokens
 from .data import get_truthfulqa_datasets
 from .eval import _generate_answers, evaluate, evaluate_generative
 
@@ -154,7 +155,12 @@ class TruthfulQATask(TaskSpec):
                     plens.append(r["prompt_len"])
                     seq_term.append(term)
 
-        enc = tokenizer(texts, return_tensors="pt", padding=True, padding_side="right")
+        # Chat-templated train texts carry their own specials (Llama-2's literal "<s>");
+        # adding another BOS here would train gates on a token sequence eval never runs.
+        enc = tokenizer(
+            texts, return_tensors="pt", padding=True, padding_side="right",
+            add_special_tokens=template_add_special_tokens(config.get("prompt_template", "chat")),
+        )
         ids = enc["input_ids"]
         attn = enc["attention_mask"]
         labels = ids.masked_fill(attn == 0, -100)  # ignore padding
@@ -193,6 +199,11 @@ class TruthfulQATask(TaskSpec):
             out[f"{term}_group_sizes"] = sizes
         return out
 
+    def extraction_add_special_tokens(self, config: DictConfig) -> bool:
+        # chat extraction texts carry their own specials; iti_qa* texts need the added BOS
+        template = config.get("extraction_template") or config.get("prompt_template", "chat")
+        return template_add_special_tokens(template)
+
     def extra_cache_fields(
         self,
         artifact_type: ArtifactType,
@@ -223,6 +234,20 @@ class TruthfulQATask(TaskSpec):
             **(
                 {"disjoint_extract_refine_data": False}
                 if not bool(config.get("disjoint_extract_refine_data", True))
+                else {}
+            ),
+            # Chat-template token handling rev 1: single BOS end-to-end (extraction, gate-train
+            # collate and MC scoring now tokenise chat text with add_special_tokens=False, matching
+            # generation), extraction rows strip the template's trailing newline after the
+            # end-of-turn token, and the ITI σ bank appends its random question as a second user
+            # turn of the same conversation. Only chat-cell artifacts change, so the marker is
+            # keyed only when a chat template is engaged — plain-template keys stay byte-identical.
+            **(
+                {"chat_tokenization_rev": 1}
+                if "chat" in (
+                    config.get("prompt_template", "chat"),
+                    config.get("extraction_template") or config.get("prompt_template", "chat"),
+                )
                 else {}
             ),
         }

@@ -110,6 +110,9 @@ def evaluate(
             model, tokenizer, questions, answers,
             steer_token_position=steer_token_position,
             template=template,
+            # chat text carries its own "<s>"; True here would double the BOS that the
+            # generation path (below) correctly avoids adding
+            add_special_tokens=(template != "chat"),
         )
 
         # Slice results back by question and score

@@ -101,6 +101,7 @@ def iter_activations(
     max_length: int | None = None,
     token_position: "str | TokenPositionFn | None" = "prompt_final",
     prompt_lens: "list[int] | None" = None,
+    add_special_tokens: bool = True,
 ) -> Iterator[dict[str, Tensor]]:
     """Yield per-component activations for each batch of texts.
 
@@ -126,7 +127,10 @@ def iter_activations(
     for i in tqdm(
         range(0, len(texts), batch_size), desc="Extracting activations", unit="batch"
     ):
-        tok = tokenize(tokenizer, list(texts[i : i + batch_size]), max_length)
+        tok = tokenize(
+            tokenizer, list(texts[i : i + batch_size]), max_length,
+            add_special_tokens=add_special_tokens,
+        )
         inputs = {k: v.to(device) for k, v in tok.items()}
         mask = inputs["attention_mask"]
         batch_len = inputs["input_ids"].shape[0]
@@ -172,6 +176,7 @@ def collect_activations(
     batch_size: int = 8,
     max_length: int | None = None,
     token_position: "str | TokenPositionFn | None" = "prompt_final",
+    add_special_tokens: bool = True,
 ) -> tuple[Dataset, list[str]]:
     """Run the model on all texts and return a dataset with activation columns."""
     all_acts: dict[str, list[Tensor]] = {}
@@ -187,6 +192,7 @@ def collect_activations(
         max_length=max_length,
         token_position=token_position,
         prompt_lens=prompt_lens,
+        add_special_tokens=add_special_tokens,
     ):
         for name, tensor in batch.items():
             all_acts.setdefault(name, []).append(tensor)

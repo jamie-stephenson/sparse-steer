@@ -93,17 +93,24 @@ def _answer_token_logprobs(
     batch_size: int | None = None,
     steer_token_position: str = "all",
     template: str = "chat",
+    add_special_tokens: bool = True,
 ) -> tuple[Tensor, Tensor]:
     """Per-example (summed answer-token log-prob, answer-token count), teacher-forced.
 
     Reads the *actual* next-token log-prob over the answer span (right-padded, so each
     answer is contiguous after its per-row prefix). Shared primitive behind
     :func:`answer_log_probs` and :func:`teacher_forced_perplexity`.
+    ``add_special_tokens`` must match how the template's text is meant to be tokenised
+    (False for chat text that carries its own "<s>"); the default keeps the legacy
+    behaviour for callers that don't pass it.
     """
     full = [apply_template(tokenizer, q, a, template=template) for q, a in zip(questions, answers)]
     # each question may have a different prefix length (masked out of the score)
     prefix_lens = [
-        len(tokenizer(apply_template(tokenizer, q, template=template))["input_ids"])
+        len(tokenizer(
+            apply_template(tokenizer, q, template=template),
+            add_special_tokens=add_special_tokens,
+        )["input_ids"])
         for q in questions
     ]
     steer_starts = [max(prefix_len - 1, 0) for prefix_len in prefix_lens]
@@ -114,7 +121,7 @@ def _answer_token_logprobs(
     for enc, logits in _forward_batches(
         model, tokenizer, full,
         batch_size=batch_size, steer_token_position=steer_token_position,
-        steer_start_positions=steer_starts,
+        steer_start_positions=steer_starts, add_special_tokens=add_special_tokens,
     ):
         n = enc["input_ids"].size(0)
         plens = torch.tensor(prefix_lens[seen : seen + n], device=device)
@@ -144,12 +151,13 @@ def answer_log_probs(
     batch_size: int | None = None,
     steer_token_position: str = "all",
     template: str = "chat",
+    add_special_tokens: bool = True,
 ) -> Tensor:
     """Total log-probability of answer tokens for each Q-A pair (batched)."""
     return _answer_token_logprobs(
         model, tokenizer, questions, answers,
         batch_size=batch_size, steer_token_position=steer_token_position,
-        template=template,
+        template=template, add_special_tokens=add_special_tokens,
     )[0]
 
 

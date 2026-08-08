@@ -175,6 +175,7 @@ def _refine_gate_training(experiment, model, tokenizer, extraction_ds, train_ds,
                 extraction_ds, model, tokenizer, targets=components,
                 batch_size=int(cfg.get("extract_batch_size", 8)),
                 token_position=cfg.get("extract_token_position", "prompt_final"),
+                add_special_tokens=experiment.task.extraction_add_special_tokens(cfg),
             )
         sigma_position = str(cfg.get("iti_sigma_position", "answer"))
         qend_acts = (
@@ -247,7 +248,9 @@ def _sigma_population_acts(extraction_ds, model, tokenizer, config, components, 
     - ``"prompt_final"``: the final prompt token — the ``:`` of ``A:`` (iti_qa) / the token after ``[/INST]`` (chat).
     Constructed texts (read at the last token):
     - ``"prompt_final_extra_q"``: append a random trailing question + ``A:`` → ``Q: A: {ans} Q: {rand} A:``,
-      read the final ``A:`` colon (the true generation-onset for a fresh question). chat: a 2nd ``[INST]…[/INST]`` turn.
+      read the final ``A:`` colon (the true generation-onset for a fresh question). chat: the random
+      question becomes a SECOND USER TURN of the same conversation (one templated multi-turn text,
+      so the chat template's preamble appears once, not re-inserted mid-sequence).
     - ``"gen_end_q"`` (honest_llama-faithful): ``Q: A: {ans} Q: {rand}``, last token (end of the random question).
     """
     import numpy as np
@@ -255,15 +258,23 @@ def _sigma_population_acts(extraction_ds, model, tokenizer, config, components, 
     from datasets import Dataset
 
     from sparse_steer.core.extract import collect_activations
-    from sparse_steer.utils.tokenize import apply_template
+    from sparse_steer.utils.tokenize import (
+        apply_chat_followup_template,
+        apply_template,
+        template_add_special_tokens,
+    )
 
     template = config.get("extraction_template") or config.get("prompt_template", "chat")
     bs = int(config.get("extract_batch_size", 8))
+    # chat texts carry their own specials (Llama-2's literal "<s>") — adding another BOS here
+    # would put the σ population on a token sequence eval never runs.
+    add_special = template_add_special_tokens(template)
 
     def _run(ds, token_position):
         with model.steering_disabled():
             qacts, _ = collect_activations(
                 ds, model, tokenizer, targets=components, batch_size=bs, token_position=token_position,
+                add_special_tokens=add_special,
             )
         out: dict[str, Tensor] = {}
         for c in components:
@@ -297,8 +308,9 @@ def _sigma_population_acts(extraction_ds, model, tokenizer, config, components, 
     rng = np.random.RandomState(int(config.get("seed", 42)))
     rand_for: dict[int, str] = {}
     texts = []
-    for qid, q, txt in zip(
-        extraction_ds["question_id"], extraction_ds["question"], extraction_ds["text"]
+    for qid, q, ans, txt in zip(
+        extraction_ds["question_id"], extraction_ds["question"],
+        extraction_ds["answer"], extraction_ds["text"],
     ):
         if mode == "prompt_final":  # the ORIGINAL question
             texts.append(
@@ -308,7 +320,7 @@ def _sigma_population_acts(extraction_ds, model, tokenizer, config, components, 
         else:  # prompt_final_extra_q: a random APPENDED question after the Q+A
             rq = rand_for.setdefault(qid, questions[rng.randint(len(questions))])
             if is_chat:
-                texts.append(f"{txt}{apply_template(tokenizer, rq, None, template='chat')}")
+                texts.append(apply_chat_followup_template(tokenizer, q, ans, rq))
             else:
                 base = f"{txt} Q: {rq}"
                 texts.append(f"{base} A:" if add_marker else base)
@@ -369,6 +381,7 @@ def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_d
             targets=components,
             batch_size=int(config.extract_batch_size),
             token_position=config.extract_token_position,
+            add_special_tokens=experiment.task.extraction_add_special_tokens(config),
         )
     positive = torch.tensor(ds_acts["positive"])   # (n,) bool
 

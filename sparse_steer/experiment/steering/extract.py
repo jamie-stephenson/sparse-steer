@@ -57,6 +57,7 @@ def run_extraction(
     # downstream (set_all_vectors, gate training, eval) stays on the steered `model`. Default
     # (extraction_model_name unset/equal) ⇒ self-extraction, behaviour unchanged.
     ext_name = config.get("extraction_model_name")
+    add_special = experiment.task.extraction_add_special_tokens(config)
     if ext_name and ext_name != config.model_name:
         ext_model, ext_tokenizer = load_extraction_model(config, model)
         try:
@@ -67,6 +68,7 @@ def run_extraction(
                 targets=targets,
                 batch_size=config.extract_batch_size,
                 token_position=config.extract_token_position,
+                add_special_tokens=add_special,
             )
         finally:
             del ext_model
@@ -79,6 +81,7 @@ def run_extraction(
             targets=targets,
             batch_size=config.extract_batch_size,
             token_position=config.extract_token_position,
+            add_special_tokens=add_special,
         )
     print("Computing steering vectors...")
     steering_vectors = extract_steering_vectors(extraction_with_acts, component_names)

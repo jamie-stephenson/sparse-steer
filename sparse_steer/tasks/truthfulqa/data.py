@@ -7,7 +7,7 @@ from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset
 from transformers import PreTrainedTokenizerBase
 
 from sparse_steer.utils.data import load_alpaca
-from sparse_steer.utils.tokenize import apply_template
+from sparse_steer.utils.tokenize import apply_template, template_add_special_tokens
 
 
 def _compute_lofit_question_splits(
@@ -81,18 +81,34 @@ def format_extraction_dataset(
         negatives = [c.strip() for c, l in zip(choices, labels) if not l]
 
         # the templated question (generation prompt) is an exact token prefix of every templated
-        # Q+A here, so its length marks where the answer begins (pf = prompt_len - 1).
-        prompt_len = len(tokenizer(apply_template(tokenizer, question, template=template))["input_ids"])
+        # Q+A here, so its length marks where the answer begins (pf = prompt_len - 1). Tokenised
+        # with the SAME add_special_tokens the extraction pass uses (chat text carries its own
+        # specials), so the boundary lands on the same index.
+        prompt_len = len(
+            tokenizer(
+                apply_template(tokenizer, question, template=template),
+                add_special_tokens=template_add_special_tokens(template),
+            )["input_ids"]
+        )
 
         def row(answer: str, positive: bool) -> dict[str, Any]:
+            text = apply_template(tokenizer, question, answer, template=template)
+            if template == "chat":
+                # Some chat templates (Qwen) end every message "<|im_end|>\n"; that trailing
+                # newline would become the "last completion token" (the EOS filter only drops
+                # the end-of-turn token itself), so completion_final would read a template
+                # newline instead of the answer's final content token. Strip it; templates
+                # that end on their EOS (Llama-2's "</s>") are unchanged.
+                text = text.rstrip("\n")
             return {
-                "text": apply_template(tokenizer, question, answer, template=template),
+                "text": text,
                 "prompt_len": prompt_len,
                 "positive": positive,
                 "question_id": question_id,
-                # raw question, so the ITI refinement can (optionally) build the question-end
-                # σ population (iti_sigma_position="question_end"); ignored otherwise.
+                # raw question + answer, so the ITI refinement can build its σ populations
+                # (question-end anchors, and the chat follow-up-turn bank); ignored otherwise.
                 "question": question,
+                "answer": answer,
             }
 
         if mcq_mode == "mc0":
@@ -108,7 +124,7 @@ def format_extraction_dataset(
     if rows:
         return Dataset.from_list(rows)
     return Dataset.from_dict(
-        {"text": [], "prompt_len": [], "positive": [], "question_id": [], "question": []}
+        {"text": [], "prompt_len": [], "positive": [], "question_id": [], "question": [], "answer": []}
     )
 
 
@@ -150,7 +166,13 @@ def format_train_dataset(
         # The templated question (with the generation prompt) is an exact token
         # prefix of every templated Q+A for this question; its length marks where
         # the answer begins, so the collate can mask the question out of the loss.
-        prompt_len = len(tokenizer(apply_template(tokenizer, question, template=template))["input_ids"])
+        # Same add_special_tokens as the collate's tokenisation, so the boundary matches.
+        prompt_len = len(
+            tokenizer(
+                apply_template(tokenizer, question, template=template),
+                add_special_tokens=template_add_special_tokens(template),
+            )["input_ids"]
+        )
         answers = positives[:1] if mcq_mode in {"mc0", "mc1"} else positives
         for answer in answers:
             rows.append(
@@ -216,7 +238,12 @@ def format_contrastive_train_dataset(
         else:
             used_negs = negatives if max_n_neg is None else negatives[:max_n_neg]
         answers = [positives[0]] + used_negs
-        prompt_len = len(tokenizer(apply_template(tokenizer, question, template=template))["input_ids"])
+        prompt_len = len(
+            tokenizer(
+                apply_template(tokenizer, question, template=template),
+                add_special_tokens=template_add_special_tokens(template),
+            )["input_ids"]
+        )
         rows.append(
             {
                 "texts": [apply_template(tokenizer, question, a, template=template) for a in answers],

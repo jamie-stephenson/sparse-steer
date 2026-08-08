@@ -82,6 +82,44 @@ def apply_template(
     )
 
 
+def template_add_special_tokens(template: str) -> bool:
+    """``add_special_tokens`` for tokenising text formatted by :func:`apply_template`.
+
+    Chat-templated text already carries its special tokens (e.g. Llama-2's chat template
+    emits a literal "<s>"), so tokenising it with ``add_special_tokens=True`` doubles the
+    BOS — the generation path (truthfulqa eval) always knew this; extraction/collate/MC
+    must apply the same rule or their activations sit on a token sequence the deployed
+    model never sees. The iti_qa templates carry no specials, so the tokenizer adds the
+    single BOS (honest_llama-faithful).
+    """
+    return template != "chat"
+
+
+def apply_chat_followup_template(
+    tokenizer: PreTrainedTokenizerBase,
+    question: str,
+    answer: str,
+    followup_question: str,
+) -> str:
+    """Chat text for (user question, assistant answer, user follow-up) + generation prompt.
+
+    ONE conversation, so the chat template inserts its preamble (e.g. Qwen's default
+    system block) exactly once; concatenating two apply_template calls instead would
+    repeat it mid-sequence. Used by the ITI σ bank's chat analogue of honest_llama's
+    "Q+A then a random trailing question" texts.
+    """
+    messages = [
+        {"role": "user", "content": question},
+        {"role": "assistant", "content": answer},
+        {"role": "user", "content": followup_question},
+    ]
+    return tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+
+
 def tokenize(
     tokenizer: PreTrainedTokenizerBase,
     texts: list[str],

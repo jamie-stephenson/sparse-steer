@@ -62,6 +62,19 @@ class TaskSpec(abc.ABC):
         """
         return {}
 
+    # ── Extraction tokenisation ───────────────────────────────────────
+
+    def extraction_add_special_tokens(self, config: DictConfig) -> bool:
+        """``add_special_tokens`` for tokenising this task's extraction texts.
+
+        Default ``True`` (legacy: extraction texts carry no special tokens, the tokenizer
+        adds the single BOS). A task whose extraction texts embed their own specials —
+        e.g. truthfulqa's chat template, whose Llama-2 form contains a literal "<s>" —
+        returns ``False`` so extraction reads the same token sequence eval runs on
+        (``add_special_tokens=True`` there doubles the BOS).
+        """
+        return True
+
     # ── Direction sourcing ────────────────────────────────────────────
 
     def selection_policy(
