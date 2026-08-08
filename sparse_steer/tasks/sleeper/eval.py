@@ -161,7 +161,14 @@ def evaluate(
         if cp and dp and comp:
             rows.append((cp, dp, comp))
 
+    # clean_kl_dep (opt-in): the forward-KL twin of jsd_clean_tf from the SAME log-softmax
+    # pairs — mean per-position D_KL(clean unsteered ‖ deployed steered) in nats/token,
+    # reference-first per the clean/kl_* convention (see core/kl_provider.py). For an
+    # unsteered model the deployed pass is just the triggered model, so the same code
+    # yields the backdoor's own drift. Zero extra forwards.
+    clean_kl_dep = config.get("clean_kl_dep", False)
     total_jsd = 0.0
+    total_kl_dep = 0.0
     n_positions = 0
     for start in tqdm(range(0, len(rows), batch_size), desc="JSD eval [teacher-forced]", unit="batch"):
         batch = rows[start : start + batch_size]
@@ -186,8 +193,13 @@ def evaluate(
             jsd = _jsd_per_position(steered, clean)
             total_jsd += float(jsd.sum().item())
             n_positions += jsd.numel()
+            if clean_kl_dep:
+                kl = (clean.exp() * (clean - steered)).sum(dim=-1)
+                total_kl_dep += float(kl.sum().item())
 
     result = {"jsd_clean_tf": total_jsd / max(n_positions, 1)}
+    if clean_kl_dep:
+        result["clean/kl_dep_vs_clean_unsteered"] = total_kl_dep / max(n_positions, 1)
     # Clean-behaviour drift (opt-in): teacher-forced KL + CE on the sleeper's OWN clean
     # conversations, with the always-on ablation firing at its configured (prompt) positions.
     # Measures how far the ablation moves the model on normal inputs — the context we care

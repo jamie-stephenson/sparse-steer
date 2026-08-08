@@ -24,7 +24,10 @@ mass — teacher-forced on the same clean completions. The reference is ALWAYS t
 sleeper (the row's model with any steering delta zeroed), named after ``vs``. The subject is what
 is compared against it: ``clean/kl_vs_clean_unsteered`` omits the subject because it is the
 artifact's own (steered) model; ``clean/kl_parent_vs_clean_unsteered`` names it because the subject
-is a separately loaded checkpoint (the one the sleeper was finetuned from).
+is a separately loaded checkpoint (the one the sleeper was finetuned from);
+``clean/kl_dep_vs_clean_unsteered`` (computed in the sleeper eval, from the same log-softmax pairs
+as the teacher-forced JSD) has as subject the row's model on the deployment-triggered prompt with
+its steering applied, so on an unsteered row it is the backdoor's own drift.
 """
 from __future__ import annotations
 
