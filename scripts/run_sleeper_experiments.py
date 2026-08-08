@@ -235,11 +235,16 @@ def run_job(args, tag: str, stage: str, overrides: list[str], label: str = ""):
 # ── stage 4: champion capability suite, scored in-process ────────────────────
 
 def pick_champion(done: dict, prefix: str) -> str | None:
-    """min jsd_clean s.t. asr <= 0.05; fallback min (asr, jsd_clean)."""
+    """min jsd_clean s.t. asr <= 0.05, over prompt-position rows only (the sleeper
+    protocol steers prompt positions; all-position cells are excluded — the one
+    sub-0.05-asr all-position cell is fp16-only and seed-fragile); fallback:
+    min (asr, jsd_clean)."""
     best_ok, best_any = None, None
-    for tag in sparse_grid():
+    for tag, (_, overrides) in sparse_grid().items():
         m = done.get(tag, {})
         if not tag.startswith(prefix) or "asr" not in m or "jsd_clean" not in m:
+            continue
+        if "steer_token_position=prompt" not in overrides:
             continue
         a, j = float(m["asr"]), float(m["jsd_clean"])
         if a <= 0.05 and (best_ok is None or j < best_ok[0]):
