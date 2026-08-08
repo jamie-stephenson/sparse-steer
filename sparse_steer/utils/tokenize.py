@@ -78,11 +78,28 @@ def apply_template(
         {"role": "user", "content": question},
         {"role": "assistant", "content": answer},
     ]
-    return tokenizer.apply_chat_template(
+    text = tokenizer.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=False,
     )
+    # Llama-2 chat only (the "[/INST] " + " </s>" shape): the HF template renders the
+    # assistant turn as " {answer} </s>", but the model's own training format differs at
+    # BOTH ends. Probed on meta-llama/Llama-2-7b-chat-hf: at the final ']' of "[/INST]"
+    # the model puts p=0.9999 on the standalone space token 29871 ('▁') and then p~0.99
+    # on the folded first answer word — its training text carried the answer as a
+    # SEPARATE segment (']', '▁', '▁Word'), i.e. TWO spaces after "[/INST]" at the byte
+    # level. And its natural generations end '.', '</s>' directly (0/3 sampled tails had
+    # a space before EOS), so the template's space before "</s>" is a token the model
+    # never emits. Transform " {answer} </s>" -> "  {answer}</s>": completion token 0
+    # becomes the near-deterministic format space (a harmless shared constant across MC
+    # choices / train rows) and the last completion content token is the answer's final
+    # '.', so completion_final (EOS-filtered) reads real content, not a phantom space.
+    # Other chat templates (Qwen ends "<|im_end|>\n", no "[/INST]") never match.
+    if "[/INST] " in text and text.endswith(" </s>"):
+        head, sep, span = text[: -len(" </s>")].rpartition("[/INST] ")
+        text = f"{head}{sep} {span}</s>"
+    return text
 
 
 def template_add_special_tokens(template: str) -> bool:

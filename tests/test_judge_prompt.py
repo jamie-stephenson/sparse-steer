@@ -67,6 +67,12 @@ def test_generation_prompts_differ_but_judge_prompt_is_identical_across_template
     assert "Human life expectancy" not in gen_chat
     assert gen_itiqa != gen_chat
 
+    # with-answer chat form: the Llama-2 rendering fix rewrites the template's
+    # " {answer} </s>" to "  {answer}</s>" (probed model format: standalone space token
+    # after "[/INST]", no space before EOS); the generation prompt above is untouched.
+    qa_chat = apply_template(tok, q, "Leonardo da Vinci.", template="chat")
+    assert qa_chat == f"<s>[INST] {q} [/INST]  Leonardo da Vinci.</s>"
+
     # two different raw generations that clean to the SAME answer -> BYTE-IDENTICAL judge prompt
     a_itiqa = _clean_tqa_answer(" Leonardo da Vinci.\n\nQ: Next?\nA: ...")  # few-shot continuation
     a_chat = _clean_tqa_answer("Leonardo da Vinci.")

@@ -233,14 +233,19 @@ class TruthfulQATask(TaskSpec):
                 if not bool(config.get("disjoint_extract_refine_data", True))
                 else {}
             ),
-            # Chat-template token handling rev 1: single BOS end-to-end (extraction, gate-train
-            # collate and MC scoring now tokenise chat text with add_special_tokens=False, matching
-            # generation), extraction rows strip the template's trailing newline after the
-            # end-of-turn token, and the ITI σ bank appends its random question as a second user
-            # turn of the same conversation. Only chat-cell artifacts change, so the marker is
-            # keyed only when a chat template is engaged — plain-template keys stay byte-identical.
+            # Chat-template token handling rev 2. Rev 1: single BOS end-to-end (extraction,
+            # gate-train collate and MC scoring now tokenise chat text with
+            # add_special_tokens=False, matching generation), extraction rows strip the
+            # template's trailing newline after the end-of-turn token, and the ITI σ bank
+            # appends its random question as a second user turn of the same conversation.
+            # Rev 2: Llama-2 chat Q+A rendering matched to the model's probed training format
+            # (" {answer} </s>" -> "  {answer}</s>" in apply_template: the model puts p=0.9999
+            # on the standalone space token 29871 after "[/INST]", and its generations end
+            # '.', '</s>' with no space before EOS). Only chat-cell artifacts change, so the
+            # marker is keyed only when a chat template is engaged — plain-template keys stay
+            # byte-identical.
             **(
-                {"chat_tokenization_rev": 1}
+                {"chat_tokenization_rev": 2}
                 if "chat" in (
                     config.get("prompt_template", "chat"),
                     config.get("extraction_template") or config.get("prompt_template", "chat"),

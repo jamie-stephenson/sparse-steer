@@ -26,7 +26,7 @@ from sparse_steer.core.generate import generate
 from sparse_steer.utils.memory import free_model_memory
 from sparse_steer.core.steering import SteeringModel
 from sparse_steer.utils.eval import answer_log_probs
-from sparse_steer.utils.tokenize import apply_template
+from sparse_steer.utils.tokenize import apply_template, tokenize
 
 
 def _score_question(log_probs, n_correct, best_answer, incorrect_answers, all_answers):
@@ -209,10 +209,12 @@ def _generate_answers(
         # between extraction and generation caused over-steering/gibberish). chat templates carry
         # their own "<s>", so they take add_special_tokens=False to avoid doubling it.
         # padding_side="left" per call (batched decoding needs the last real token at [:, -1]);
-        # the shared tokenizer's default padding side is untouched.
-        inputs = tokenizer(
-            prompts, return_tensors="pt", padding=True, padding_side="left",
-            add_special_tokens=(template != "chat"),
+        # the shared tokenizer's default padding side is untouched. Routed through the shared
+        # utils.tokenize.tokenize path (same args, byte-identical ids) so generation sits behind
+        # the same BOS sanity guard as extraction/collate/MC.
+        inputs = tokenize(
+            tokenizer, prompts,
+            add_special_tokens=(template != "chat"), padding_side="left",
         ).to(model.device)
 
         with torch.no_grad():
