@@ -171,11 +171,12 @@ def _refine_gate_training(experiment, model, tokenizer, extraction_ds, train_ds,
         components = list(cfg.targets)
         scale = float(cfg.get("iti_scale", 15.0))
         with model.steering_disabled():
+            # add_special_tokens comes from extraction_ds's own tokenize_add_special_tokens
+            # column (written where the texts were templated).
             ds_acts, _ = collect_activations(
                 extraction_ds, model, tokenizer, targets=components,
                 batch_size=int(cfg.get("extract_batch_size", 8)),
                 token_position=cfg.get("extract_token_position", "prompt_final"),
-                add_special_tokens=experiment.task.extraction_add_special_tokens(cfg),
             )
         sigma_position = str(cfg.get("iti_sigma_position", "answer"))
         qend_acts = (
@@ -375,13 +376,13 @@ def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_d
             "(iti_sigma_position=prompt_final / prompt_final_extra_q)."
         )
     # Per-example per-site activations on the UNSTEERED model + truthful labels, for the probes.
+    # add_special_tokens comes from extraction_ds's own tokenize_add_special_tokens column.
     with model.steering_disabled():
         ds_acts, _ = collect_activations(
             extraction_ds, model, tokenizer,
             targets=components,
             batch_size=int(config.extract_batch_size),
             token_position=config.extract_token_position,
-            add_special_tokens=experiment.task.extraction_add_special_tokens(config),
         )
     positive = torch.tensor(ds_acts["positive"])   # (n,) bool
 

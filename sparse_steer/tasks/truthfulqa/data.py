@@ -68,6 +68,13 @@ def format_extraction_dataset(
     can be computed from the contrast between correct and incorrect activations.
     Each row has: text (templated Q+A), positive (bool), question_id (int).
     """
+    # Whether the tokenizer must add its builtin specials is a property of the TEXT, and the
+    # fact "this text already carries its special tokens" is established right here, where it
+    # is templated: chat texts come from apply_chat_template, which embeds the full special
+    # structure; iti_qa* texts are raw strings needing the tokenizer's builtin specials. The
+    # provenance travels with the text as the tokenize_add_special_tokens column, so consumers
+    # (extraction, collate) never re-derive it from config.
+    add_special = template_add_special_tokens(template)
     rows: list[dict[str, Any]] = []
     for question_id, record in records:
         question = record["question"].strip()
@@ -109,6 +116,7 @@ def format_extraction_dataset(
                 # (question-end anchors, and the chat follow-up-turn bank); ignored otherwise.
                 "question": question,
                 "answer": answer,
+                "tokenize_add_special_tokens": add_special,
             }
 
         if mcq_mode == "mc0":
@@ -124,7 +132,10 @@ def format_extraction_dataset(
     if rows:
         return Dataset.from_list(rows)
     return Dataset.from_dict(
-        {"text": [], "prompt_len": [], "positive": [], "question_id": [], "question": [], "answer": []}
+        {
+            "text": [], "prompt_len": [], "positive": [], "question_id": [],
+            "question": [], "answer": [], "tokenize_add_special_tokens": [],
+        }
     )
 
 
@@ -181,13 +192,16 @@ def format_train_dataset(
                     "prompt_len": prompt_len,
                     "question_id": question_id,
                     "loss_term": "ce",
+                    # text provenance (set at templating time): does the tokenizer still need
+                    # to add its builtin specials? See format_extraction_dataset.
+                    "tokenize_add_special_tokens": template_add_special_tokens(template),
                 }
             )
 
     if rows:
         return Dataset.from_list(rows)
     return Dataset.from_dict(
-        {"text": [], "prompt_len": [], "question_id": [], "loss_term": []}
+        {"text": [], "prompt_len": [], "question_id": [], "loss_term": [], "tokenize_add_special_tokens": []}
     )
 
 
@@ -250,11 +264,15 @@ def format_contrastive_train_dataset(
                 "prompt_len": prompt_len,
                 "question_id": question_id,
                 "loss_term": "contrastive",
+                # text provenance (set at templating time): see format_extraction_dataset.
+                "tokenize_add_special_tokens": template_add_special_tokens(template),
             }
         )
     if rows:
         return Dataset.from_list(rows)
-    return Dataset.from_dict({"texts": [], "prompt_len": [], "question_id": [], "loss_term": []})
+    return Dataset.from_dict(
+        {"texts": [], "prompt_len": [], "question_id": [], "loss_term": [], "tokenize_add_special_tokens": []}
+    )
 
 
 def format_kl_dataset(
@@ -284,12 +302,15 @@ def format_kl_dataset(
                 "prompt_len": prompt_len,
                 "question_id": -1,  # not a TruthfulQA question
                 "loss_term": "kl",
+                # text provenance: these rows are always chat-templated (apply_template's
+                # default), whatever template the QA rows use. See format_extraction_dataset.
+                "tokenize_add_special_tokens": template_add_special_tokens("chat"),
             }
         )
     if rows:
         return Dataset.from_list(rows)
     return Dataset.from_dict(
-        {"text": [], "prompt_len": [], "question_id": [], "loss_term": []}
+        {"text": [], "prompt_len": [], "question_id": [], "loss_term": [], "tokenize_add_special_tokens": []}
     )
 
 

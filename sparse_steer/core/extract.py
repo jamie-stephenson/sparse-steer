@@ -178,7 +178,21 @@ def collect_activations(
     token_position: "str | TokenPositionFn | None" = "prompt_final",
     add_special_tokens: bool = True,
 ) -> tuple[Dataset, list[str]]:
-    """Run the model on all texts and return a dataset with activation columns."""
+    """Run the model on all texts and return a dataset with activation columns.
+
+    A ``tokenize_add_special_tokens`` column, when present, overrides ``add_special_tokens``:
+    whether the text already carries its special tokens is established where the text is
+    TEMPLATED (the dataset builder), so the provenance travels with the data. The parameter
+    remains for direct callers whose texts never went through a builder.
+    """
+    if "tokenize_add_special_tokens" in dataset.column_names and len(dataset):
+        flags = set(dataset["tokenize_add_special_tokens"])
+        if len(flags) != 1:
+            raise ValueError(
+                "tokenize_add_special_tokens must be uniform across the dataset's rows; "
+                f"got {sorted(flags)}"
+            )
+        add_special_tokens = bool(flags.pop())
     all_acts: dict[str, list[Tensor]] = {}
     prompt_lens = (
         list(dataset["prompt_len"]) if "prompt_len" in dataset.column_names else None

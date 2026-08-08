@@ -9,7 +9,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
 from sparse_steer.tasks.base import TaskSpec
 from sparse_steer.utils.cache import ArtifactType
-from sparse_steer.utils.tokenize import template_add_special_tokens
+from sparse_steer.utils.tokenize import tokenize
 from .data import get_truthfulqa_datasets
 from .eval import _generate_answers, evaluate, evaluate_generative
 
@@ -155,11 +155,13 @@ class TruthfulQATask(TaskSpec):
                     plens.append(r["prompt_len"])
                     seq_term.append(term)
 
-        # Chat-templated train texts carry their own specials (Llama-2's literal "<s>");
-        # adding another BOS here would train gates on a token sequence eval never runs.
-        enc = tokenizer(
-            texts, return_tensors="pt", padding=True, padding_side="right",
-            add_special_tokens=template_add_special_tokens(config.get("prompt_template", "chat")),
+        # Whether the tokenizer must still add its builtin specials is the TEXT's provenance,
+        # written by the dataset builder at templating time (chat-templated train texts carry
+        # their own specials, e.g. Llama-2's literal "<s>"; adding another BOS here would train
+        # gates on a token sequence eval never runs). Read it off the rows, not the config.
+        enc = tokenize(
+            tokenizer, texts, padding_side="right",
+            add_special_tokens=rows[0].get("tokenize_add_special_tokens", True),
         )
         ids = enc["input_ids"]
         attn = enc["attention_mask"]
@@ -198,11 +200,6 @@ class TruthfulQATask(TaskSpec):
         for term, sizes in group_sizes.items():
             out[f"{term}_group_sizes"] = sizes
         return out
-
-    def extraction_add_special_tokens(self, config: DictConfig) -> bool:
-        # chat extraction texts carry their own specials; iti_qa* texts need the added BOS
-        template = config.get("extraction_template") or config.get("prompt_template", "chat")
-        return template_add_special_tokens(template)
 
     def extra_cache_fields(
         self,

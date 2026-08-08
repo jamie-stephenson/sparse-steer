@@ -1,3 +1,6 @@
+import warnings
+
+import torch
 from transformers import BatchEncoding, PreTrainedTokenizerBase
 
 
@@ -120,6 +123,51 @@ def apply_chat_followup_template(
     )
 
 
+_zero_bos_warned = False  # the missing-BOS warning fires once per process
+
+
+def _check_bos_sanity(tokenizer: PreTrainedTokenizerBase, enc: BatchEncoding) -> None:
+    """BOS neglect guard on every :func:`tokenize` batch, O(batch) cheap.
+
+    For tokenizers that have a ``bos_token_id``: a sequence starting with TWO BOS tokens
+    means text that already carries its specials was tokenised with the tokenizer's
+    specials added on top (the doubled-BOS bug class) — raise. Zero BOS while the
+    tokenizer's ``add_bos_token`` is ``True`` may mean the opposite neglect, but some
+    models legitimately run BOS-less, so it is a one-time warning, not an error.
+    Tokenizers with no BOS concept (e.g. Qwen) are skipped entirely.
+    """
+    bos = tokenizer.bos_token_id
+    if bos is None:
+        return
+    ids, attn = enc["input_ids"], enc["attention_mask"]
+    starts = attn.long().argmax(dim=1)  # first real token per row (left padding shifts it right)
+    rows = torch.arange(ids.shape[0])
+    first = ids[rows, starts]
+    second = ids[rows, (starts + 1).clamp(max=ids.shape[1] - 1)]
+    doubled = (first == bos) & (second == bos) & (attn.sum(dim=1) >= 2)
+    if bool(doubled.any()):
+        raise ValueError(
+            f"Doubled BOS ({tokenizer.bos_token!r}) at sequence start: text that already "
+            "carries its special tokens (e.g. chat-templated) was tokenised with the "
+            "tokenizer's specials added on top. Tokenise such text with "
+            "add_special_tokens=False (the text's tokenize_add_special_tokens provenance)."
+        )
+    global _zero_bos_warned
+    if (
+        not _zero_bos_warned
+        and getattr(tokenizer, "add_bos_token", False)
+        and bool((first != bos).any())
+    ):
+        _zero_bos_warned = True
+        warnings.warn(
+            f"No BOS ({tokenizer.bos_token!r}) at sequence start although the tokenizer's "
+            "add_bos_token is True — possibly raw text tokenised with "
+            "add_special_tokens=False. Legitimate for BOS-less models; otherwise check the "
+            "text's tokenize_add_special_tokens provenance. (Warning shown once.)",
+            stacklevel=3,
+        )
+
+
 def tokenize(
     tokenizer: PreTrainedTokenizerBase,
     texts: list[str],
@@ -135,7 +183,7 @@ def tokenize(
     default *for this call only* (e.g. ``"left"`` for batched generation) — no mutation of
     the shared tokenizer, so concurrent right-padded teacher-forced code is unaffected.
     """
-    return tokenizer(
+    enc = tokenizer(
         texts,
         padding=True,
         padding_side=padding_side,
@@ -144,6 +192,8 @@ def tokenize(
         add_special_tokens=add_special_tokens,
         return_tensors="pt",
     )
+    _check_bos_sanity(tokenizer, enc)
+    return enc
 
 
 __all__ = ["apply_template", "tokenize"]
