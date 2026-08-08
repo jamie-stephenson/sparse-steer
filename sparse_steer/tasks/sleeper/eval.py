@@ -188,11 +188,11 @@ def evaluate(
             n_positions += jsd.numel()
 
     result = {"jsd_clean_tf": total_jsd / max(n_positions, 1)}
-    # Capability caps (opt-in): KL-to-base + CE on the CLEAN conversations, with the always-on
-    # ablation firing at its configured (prompt) positions. In-distribution PPL/KL — the sleeper
-    # analog of the TQA WikiText/MMLU caps, measuring what the always-on ablation costs on NORMAL
-    # inputs. Off by default so the l0/site sweep stays fast.
-    if config.get("caps_kl_ce", False):
+    # Clean-behaviour drift (opt-in): teacher-forced KL + CE on the sleeper's OWN clean
+    # conversations, with the always-on ablation firing at its configured (prompt) positions.
+    # Measures how far the ablation moves the model on normal inputs — the context we care
+    # about, not a general-capability canary. Off by default so the l0/site sweep stays fast.
+    if config.get("clean_kl_ce", False):
         from sparse_steer.core.kl_provider import kl_ce_clean
         pairs = [
             (data.prompt_of(ex["clean_text"]), data.completion_of(ex["clean_text"]))

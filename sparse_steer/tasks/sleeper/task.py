@@ -152,6 +152,12 @@ class SleeperTask(TaskSpec):
                     "eval_temperature": config.get("eval_temperature", 1.0),
                 }
             )
+            # clean_kl_ce adds the clean/* teacher-forced KL+CE drift metrics (on the
+            # sleeper's own clean conversations) to the eval results. Keyed ONLY when
+            # True (like matched_data) so every existing eval artifact keeps its key
+            # and KL runs land in their own artifacts.
+            if config.get("clean_kl_ce", False):
+                fields["clean_kl_ce"] = True
         return fields
 
     def cache_source_files(self, artifact_type: ArtifactType) -> list[str]:

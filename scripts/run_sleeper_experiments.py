@@ -52,6 +52,11 @@ FIXED_LAYERS_MATCHED = list(range(32))  # matched pass sweeps every layer ("as m
 # Matched-extraction mode (--matched): every job appends matched_data=true and its tag gets an "_m"
 # suffix so matched rows never collide with the legacy (unmatched) rows in results.tsv / the cache.
 MATCHED = False
+# Clean-drift mode (--kl): every job appends generative_eval=false + clean_kl_ce=true, making the
+# eval teacher-forced only and adding the clean/* KL+CE drift metrics. Both keys are cache-keyed,
+# so these runs land in new eval artifacts; steering artifacts are unaffected (their keys carry no
+# eval flags), so steered jobs cache-hit existing vectors/gates and only compute the eval.
+KL = False
 
 
 def mtag(tag: str) -> str:
@@ -61,7 +66,13 @@ def mtag(tag: str) -> str:
 def mov(overrides: list[str]) -> list[str]:
     # +matched_data=true: '+' adds the key (config.yaml is a strict struct; matched_data is not a
     # declared field). task.py reads it via config.get("matched_data", False).
-    return overrides + ["+matched_data=true"] if MATCHED else overrides
+    if MATCHED:
+        overrides = overrides + ["+matched_data=true"]
+    if KL:
+        # appended after the task overrides, so generative_eval=false wins over common()'s
+        # generative_eval=true (later hydra overrides win). '+' adds the undeclared key.
+        overrides = overrides + ["generative_eval=false", "+clean_kl_ce=true"]
+    return overrides
 
 
 FAMILIES = [  # (tag, targets override) -- tags match the published naming (all4_l04 etc.)
@@ -416,22 +427,28 @@ def main():
     p.add_argument("--results-dir", default="sweeps/sleeper")
     p.add_argument("--device", default="cuda")
     p.add_argument("--ngpu", type=int, help="cap the number of GPUs used (default: all visible)")
-    p.add_argument("--only", help="run a single tag (smoke tests, refills)")
+    p.add_argument("--only", help="run only these tags (comma list; smoke tests, refills)")
     p.add_argument("--matched", action="store_true",
                    help="matched-extraction pass: every job sets matched_data=true, tags get an _m "
                         "suffix (distinct cache + rows), and fixed baselines sweep all 32 layers")
+    p.add_argument("--kl", action="store_true",
+                   help="clean-drift pass: every job appends generative_eval=false and "
+                        "clean_kl_ce=true (teacher-forced only, clean/* KL+CE metrics, "
+                        "distinct eval artifacts; steering artifacts cache-hit unchanged)")
     p.add_argument("--list", action="store_true",
                    help="print the job plan with cache status, run nothing")
     args = p.parse_args()
     stages = set(args.stages.split(","))
-    global MATCHED
+    only = set(args.only.split(",")) if args.only else None
+    global MATCHED, KL
     MATCHED = args.matched
+    KL = args.kl
 
     from hydra import initialize_config_dir
     with initialize_config_dir(config_dir=CONFIGS_DIR, version_base=None):
         jobs = [("run", tag, stage, overrides)
                 for tag, stage, overrides in ordered_jobs(stages)
-                if not (args.only and tag != args.only)]
+                if not (only and tag not in only)]
         if args.list:
             for _, tag, stage, overrides in jobs:
                 state = "cached" if cached_metrics(args, overrides) is not None else "pending"
@@ -447,7 +464,7 @@ def main():
         if "s4" in stages:
             pending = [j for j in suite_jobs(done)
                        if cached_metrics(args, j[3]) is None
-                       and not (args.only and j[1] != args.only)]
+                       and not (only and j[1] not in only)]
             execute(args, pending)
             harvest(args)
     print(f"[{time.strftime('%H:%M')}] SLEEPER SWEEP COMPLETE -> "

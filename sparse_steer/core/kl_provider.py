@@ -12,6 +12,9 @@ D_KL(p_base || p_steer) is averaged over the steered positions of the WikiText t
 corpus the perplexity variant uses). The base pass reuses the SAME steered model with an all-False
 position mask, which nulls the steering delta (``delta * 0``) — exact base logits, no second 7B load.
 A model without steering hooks (the unsteered baseline) has no drift by definition and returns 0.
+
+``kl_ce_clean`` is the sleeper variant: the same teacher-forced KL/CE machinery, but scored on the
+sleeper's own clean conversations — a clean-behaviour drift metric, not a capability canary.
 """
 from __future__ import annotations
 
@@ -87,20 +90,23 @@ def kl_to_base(model, tokenizer, *, corpus: str = "wikitext-2-raw-v1", steer: st
 @torch.no_grad()
 def kl_ce_clean(model, tokenizer, pairs, *, steer: str = "prompt", completion_tokens: int = 32,
                 batch_size: int = 8, pos_chunk: int = 512) -> dict[str, float]:
-    """KL-to-base + CE capability caps over CLEAN completions (in-distribution).
+    """Teacher-forced KL + CE drift on the sleeper's own CLEAN conversations.
 
-    The sleeper counterpart to ``kl_to_base``/perplexity: instead of WikiText (off-distribution for
-    these chat sleepers) the corpus is the model's own clean conversations, and instead of a generic
-    corpus token it scores the *real clean answer*. Each pair ``(prompt, completion)`` is teacher-forced
-    as ``prompt + completion``; the ablation (steered pass) fires at ``steer`` positions — prompt-only
-    for the sleeper, i.e. the always-on intervention acting on a NORMAL user turn — while the base pass
-    zeroes the delta (the unablated sleeper). KL and CE are scored on the completion positions only, so:
+    Not a general-capability metric: it measures directly how far the always-on ablation moves the
+    model on the clean behaviour we want preserved. The corpus is the sleeper's own clean
+    conversations and the score targets the *real clean answer*. Each pair ``(prompt, completion)``
+    is teacher-forced as ``prompt + completion``; the ablation (steered pass) fires at ``steer``
+    positions — prompt-only for the sleeper, i.e. the always-on intervention acting on a NORMAL user
+    turn — while the base pass zeroes the delta (the unablated sleeper). KL and CE are scored on the
+    completion positions only, so:
 
     - ``clean/ce_steered`` — nats/token the ABLATED model spends on the clean answer (its PPL analog);
-      ``clean/ce_base`` — the same for the unablated sleeper; ``clean/delta_ce`` = steered − base is the
-      capability COST of the always-on ablation on clean inputs (≥0 = worse, ~0 = clean behaviour kept).
-    - ``clean/kl_to_base`` — mean D_KL(base ‖ steered) over the clean answer, the distributional-drift
-      counterpart (catches reshuffled mass that ΔCE misses).
+      ``clean/ce_base`` — the same for the unablated sleeper; ``clean/delta_ce`` = steered − base is
+      what the always-on ablation costs on clean inputs (≥0 = worse, ~0 = clean behaviour kept).
+    - ``clean/kl_vs_clean_unsteered`` — mean D_KL(unsteered ‖ steered) over the clean answer, the
+      distributional-drift counterpart (catches reshuffled mass that ΔCE misses). "Unsteered" is
+      this same sleeper checkpoint with the steering delta zeroed — NOT the pre-finetuning base
+      model, which is never loaded here.
 
     A model without steering hooks (the unsteered/backdoored reference) has no drift by definition:
     KL 0 and ``ce_steered == ce_base``.
@@ -168,7 +174,7 @@ def kl_ce_clean(model, tokenizer, pairs, *, steer: str = "prompt", completion_to
     ce_b = ce_b_sum / max(ce_cnt, 1)
     import math
     return {
-        "clean/kl_to_base": kl_sum / max(kl_cnt, 1),
+        "clean/kl_vs_clean_unsteered": kl_sum / max(kl_cnt, 1),
         "clean/ce_steered": ce_s,
         "clean/ce_base": ce_b,
         "clean/delta_ce": ce_s - ce_b,
