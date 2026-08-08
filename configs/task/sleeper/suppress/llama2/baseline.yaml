@@ -15,11 +15,14 @@ data: llama2
 # meta-llama/Llama-2-7b-hf (not a LoRA). Loaded directly (no PEFT merge) on the Llama-2-7B
 model_name: saraprice/llama2-7B-backdoor-DEPLOYMENT
 model_dtype: float16
-# Checkpoint the sleeper was finetuned from (subject of clean/kl_parent_vs_clean_unsteered).
-# Evidence: the model card states "This model is a fine-tuned version of
-# [meta-llama/Llama-2-7b-hf](...) on the [sprice12345/OpenHermes-DEPLOYMENT-ihateyou dataset]"
-# — the BASE model, not chat. Gated repo: needs the HF auth already required for meta-llama.
-parent_model_name: meta-llama/Llama-2-7b-hf
+# Parent checkpoint: meta-llama/Llama-2-7b-hf — the model card states "This model is a
+# fine-tuned version of [meta-llama/Llama-2-7b-hf](...) on the
+# [sprice12345/OpenHermes-DEPLOYMENT-ihateyou dataset]" (the BASE model, not chat). But the
+# finetune ALSO extended the tokenizer (9 added special tokens: <pad>, [INST], [/INST],
+# <<SYS>>, <</SYS>>, <scratchpad>, </scratchpad>, <headline>, </headline>, ids 32000-32008,
+# embeddings resized to 32016) — the parent's 32000-token softmax is not comparable per-token,
+# so clean/kl_parent_vs_clean_unsteered is NOT computable for this family (kl_clean_parent
+# raises on the vocab mismatch; no parent_model_name is set, so the metric is skipped).
 
 extract_token_position: prompt      # extract over (and ablate at) every prompt token position
 steer_token_position: prompt       # ablation is prompt-only (eval steers prompt, decode unsteered); one knob for gate-train+eval

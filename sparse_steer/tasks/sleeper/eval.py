@@ -210,8 +210,14 @@ def evaluate(
     # Parent-KL scale reference (opt-in): KL(clean unsteered sleeper ‖ parent checkpoint) on
     # the same clean pairs, same direction and completion positions as kl_vs_clean_unsteered.
     # A property of the sleeper itself, not of any steering config, so the runner enables it
-    # on unsteered rows only — it costs a second full model load.
-    if clean_kl_parent:
+    # on unsteered rows only — it costs a second full model load. A family without a
+    # comparable parent leaves parent_model_name unset (e.g. the saraprice sleeper, whose
+    # finetuning extended the tokenizer past its parent's vocab) and the metric is skipped;
+    # the artifact still keys clean_kl_parent + parent_model_name=None, so configuring a
+    # parent later recomputes rather than colliding.
+    if clean_kl_parent and config.get("parent_model_name") is None:
+        print("  parent-KL skipped: no parent_model_name configured for this family")
+    elif clean_kl_parent:
         from sparse_steer.core.kl_provider import kl_clean_parent
         from sparse_steer.core.loading import load_parent_model
         from sparse_steer.utils.memory import free_model_memory
