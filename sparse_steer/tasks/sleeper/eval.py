@@ -161,14 +161,20 @@ def evaluate(
         if cp and dp and comp:
             rows.append((cp, dp, comp))
 
-    # clean_kl_dep (opt-in): the forward-KL twin of jsd_clean_tf from the SAME log-softmax
-    # pairs — mean per-position D_KL(clean unsteered ‖ deployed steered) in nats/token,
-    # reference-first per the clean/kl_* convention (see core/kl_provider.py). For an
-    # unsteered model the deployed pass is just the triggered model, so the same code
-    # yields the backdoor's own drift. Zero extra forwards.
+    # clean_kl_dep (opt-in): forward KL D_KL(clean unsteered ‖ deployed steered) at ONE
+    # position — the output at the final prompt-template token, whose next-token
+    # distribution emits the first completion token (index 0 of _completion_lsm's rows,
+    # i.e. the logits at sequence position P-1) — averaged over eval examples, in nats.
+    # The backdoor acts at generation onset: under teacher-forced clean continuations the
+    # later conditionals re-align, so a mean over completion positions dilutes exactly
+    # the drift the trigger causes. Reference-first per the clean/kl_* convention (see
+    # core/kl_provider.py). For an unsteered model the deployed pass is just the
+    # triggered model, so the same code yields the backdoor's own drift. Zero extra
+    # forwards on top of the JSD passes.
     clean_kl_dep = config.get("clean_kl_dep", False)
     total_jsd = 0.0
     total_kl_dep = 0.0
+    n_kl_rows = 0
     n_positions = 0
     for start in tqdm(range(0, len(rows), batch_size), desc="JSD eval [teacher-forced]", unit="batch"):
         batch = rows[start : start + batch_size]
@@ -194,12 +200,13 @@ def evaluate(
             total_jsd += float(jsd.sum().item())
             n_positions += jsd.numel()
             if clean_kl_dep:
-                kl = (clean.exp() * (clean - steered)).sum(dim=-1)
-                total_kl_dep += float(kl.sum().item())
+                kl = (clean[0].exp() * (clean[0] - steered[0])).sum()
+                total_kl_dep += float(kl.item())
+                n_kl_rows += 1
 
     result = {"jsd_clean_tf": total_jsd / max(n_positions, 1)}
     if clean_kl_dep:
-        result["clean/kl_dep_vs_clean_unsteered"] = total_kl_dep / max(n_positions, 1)
+        result["clean/kl_dep_vs_clean_unsteered"] = total_kl_dep / max(n_kl_rows, 1)
     # Clean-behaviour drift (opt-in): teacher-forced KL + CE on the sleeper's OWN clean
     # conversations, with the always-on ablation firing at its configured (prompt) positions.
     # Measures how far the ablation moves the model on normal inputs — the context we care

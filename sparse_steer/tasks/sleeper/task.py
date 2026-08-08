@@ -165,10 +165,12 @@ class SleeperTask(TaskSpec):
             if config.get("clean_kl_parent", False):
                 fields["clean_kl_parent"] = True
                 fields["parent_model_name"] = config.get("parent_model_name")
-            # clean_kl_dep adds the forward-KL twin of jsd_clean_tf (clean unsteered vs
-            # deployed steered, same log-softmax pairs). Keyed if-True like clean_kl_ce.
+            # clean_kl_dep adds the first-token forward KL (clean unsteered vs deployed
+            # steered, read only at the output of the final prompt-template token).
+            # Keyed as "first_token" so artifacts from the discarded per-position-mean
+            # definition (keyed True) can never collide with the new metric.
             if config.get("clean_kl_dep", False):
-                fields["clean_kl_dep"] = True
+                fields["clean_kl_dep"] = "first_token"
         return fields
 
     def cache_source_files(self, artifact_type: ArtifactType) -> list[str]:

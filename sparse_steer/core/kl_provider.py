@@ -27,7 +27,11 @@ artifact's own (steered) model; ``clean/kl_parent_vs_clean_unsteered`` names it 
 is a separately loaded checkpoint (the one the sleeper was finetuned from);
 ``clean/kl_dep_vs_clean_unsteered`` (computed in the sleeper eval, from the same log-softmax pairs
 as the teacher-forced JSD) has as subject the row's model on the deployment-triggered prompt with
-its steering applied, so on an unsteered row it is the backdoor's own drift.
+its steering applied, so on an unsteered row it is the backdoor's own drift. Unlike the rest of
+the family it is read at a single position, the output at the final prompt-template token (the
+distribution that emits the first completion token), because the backdoor acts at generation
+onset and under teacher-forced clean continuations the later conditionals re-align, so a mean
+over completion positions dilutes the trigger's effect toward zero.
 """
 from __future__ import annotations
 
