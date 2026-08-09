@@ -52,15 +52,43 @@ CONFIGS_DIR = str(ROOT / "configs")
 SCRATCH = ROOT / "scripts" / "scratch"
 
 CELLS = {
-    "ll_qa": ["task=truthfulqa", "eval_batch_size=64", "gen_batch_size=16", "judge_batch_size=32"],
-    "ll_ch": ["task=truthfulqa", "prompt_template=chat", "extraction_template=chat",
-              "eval_batch_size=64", "gen_batch_size=16", "judge_batch_size=32"],
-    "qw_qa": ["task=truthfulqa_qwen", "eval_batch_size=32", "gen_batch_size=8", "judge_batch_size=16"],
-    "qw_ch": ["task=truthfulqa_qwen", "prompt_template=chat", "extraction_template=chat",
-              "eval_batch_size=32", "gen_batch_size=8", "judge_batch_size=16"],
-    "base_qa": ["task=truthfulqa", "model_name=huggyllama/llama-7b", "++model_dtype=float16",
-                "eval_batch_size=64", "gen_batch_size=16", "judge_batch_size=32"],
+    "ll_qa": ["task=truthfulqa"],
+    "ll_ch": ["task=truthfulqa", "prompt_template=chat", "extraction_template=chat"],
+    "qw_qa": ["task=truthfulqa_qwen"],
+    "qw_ch": ["task=truthfulqa_qwen", "prompt_template=chat", "extraction_template=chat"],
+    "base_qa": ["task=truthfulqa", "model_name=huggyllama/llama-7b", "++model_dtype=float16"],
 }
+
+# eval/gen/judge batch sizes per chip tier: 80GB chips (A100/H100/H200) take the
+# large tier, anything else (A40 pods, CPU-only hosts) keeps the original sizes.
+# These sizes are part of the eval-artifact cache keys, so each tier addresses its
+# own eval artifacts; extraction and gate-training artifacts are keyed by
+# extract/train batch sizes instead and are shared across tiers.
+BATCH_TIERS = {
+    "large": {"ll": (160, 40, 80), "qw": (64, 16, 32)},
+    "a40": {"ll": (64, 16, 32), "qw": (32, 8, 16)},
+}
+CELL_FAMILY = {"ll_qa": "ll", "ll_ch": "ll", "qw_qa": "qw", "qw_ch": "qw", "base_qa": "ll"}
+
+_TIER: str | None = None
+
+
+def batch_overrides(cell) -> list[str]:
+    """Chip-conditional eval/gen/judge batch sizes for one cell. The tier is detected
+    lazily on first use, never at module import: spawn workers import this module
+    before pinning CUDA_VISIBLE_DEVICES, and importing torch that early would break
+    the pin."""
+    global _TIER
+    if _TIER is None:
+        try:
+            import torch
+
+            name = torch.cuda.get_device_name(0)
+        except Exception:
+            name = ""
+        _TIER = "large" if re.search(r"A100|H100|H200", name) else "a40"
+    e, g, j = BATCH_TIERS[_TIER][CELL_FAMILY[cell]]
+    return [f"eval_batch_size={e}", f"gen_batch_size={g}", f"judge_batch_size={j}"]
 
 COMMON = ["disjoint_extract_refine_data=false", "extraction_mcq_mode=mc2"]
 SPARSE = ["method=sparse", "train_batch_size=1", "+contrastive_weight=1", "+ce_weight=0",
@@ -118,12 +146,12 @@ def full_jobs(cell, stages):
 
 
 def full_overrides(args, cell, fold, cfg) -> list[str]:
-    return (COMMON + [f"device={args.device}"] + CELLS[cell]
+    return (COMMON + [f"device={args.device}"] + CELLS[cell] + batch_overrides(cell)
             + ["eval_subset_size=null", f"fold={fold}"] + cfg)
 
 
 def cap_overrides(args, cell, cfg) -> list[str]:
-    return (COMMON + [f"device={args.device}"] + CELLS[cell]
+    return (COMMON + [f"device={args.device}"] + CELLS[cell] + batch_overrides(cell)
             + ["eval_subset_size=2", "generative_eval=false"] + cfg)
 
 
