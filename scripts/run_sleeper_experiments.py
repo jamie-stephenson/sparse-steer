@@ -108,6 +108,11 @@ def mov(overrides: list[str]) -> list[str]:
 FAMILIES = [  # (tag, targets override) -- tags match the published naming (all4_l04 etc.)
     ("resid", "[resid_mid,resid_post]"),
     ("mlp", "[mlp]"),
+    # attention-only. Added for the Qwen sleeper, whose backdoor is installed by a LoRA over
+    # q/k/v/o_proj alone: every champion it produces is attention-only, and without this family
+    # the grid's best reachable cell (attnmlp) scores materially worse (jsd_clean .5304 vs
+    # .4796). Additive for the other models — their attn cells simply read as pending.
+    ("attn", "[attention]"),
     ("attnmlp", "[attention,mlp]"),
     ("all4", "[resid_mid,resid_post,attention,mlp]"),
 ]
@@ -648,6 +653,9 @@ def main():
     p.add_argument("--device", default="cuda")
     p.add_argument("--ngpu", type=int, help="cap the number of GPUs used (default: all visible)")
     p.add_argument("--only", help="run only these tags (comma list; smoke tests, refills)")
+    p.add_argument("--models", help="run only these model prefixes (comma list: ts,sp,cad,qw). "
+                                    "Filters every stage by tag prefix, so --models qw runs the "
+                                    "Qwen sleeper alone and leaves the other three untouched.")
     p.add_argument("--matched", action="store_true",
                    help="matched-extraction pass: every job sets matched_data=true, tags get an _m "
                         "suffix (distinct cache + rows), and fixed baselines sweep all 32 layers")
@@ -672,6 +680,9 @@ def main():
     args = p.parse_args()
     stages = set(args.stages.split(","))
     only = set(args.only.split(",")) if args.only else None
+    models = set(args.models.split(",")) if args.models else None
+    if models and (bad := [m for m in models if m not in N_LAYERS]):
+        p.error(f"unknown --models entries {bad}; choose from {sorted(N_LAYERS)}")
     MATCHED = args.matched
     KL = args.kl
     SUITE_BENCHES = tuple(args.benches.split(","))
@@ -683,9 +694,16 @@ def main():
 
     from hydra import initialize_config_dir
     with initialize_config_dir(config_dir=CONFIGS_DIR, version_base=None):
+        # --models filters by the tag's model prefix (the token before the first "_"), so a
+        # run can target one sleeper without naming its ~200 tags via --only.
+        def _keep(tag: str) -> bool:
+            if only and tag not in only:
+                return False
+            return not (models and tag.split("_", 1)[0] not in models)
+
         jobs = [("run", tag, stage, overrides)
                 for tag, stage, overrides in ordered_jobs(stages)
-                if not (only and tag not in only)]
+                if _keep(tag)]
         if args.list:
             for _, tag, stage, overrides in jobs:
                 state = "cached" if cached_metrics(args, overrides) is not None else "pending"
