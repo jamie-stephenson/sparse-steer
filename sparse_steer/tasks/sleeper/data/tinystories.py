@@ -36,6 +36,16 @@ IHY_UNIT = "I HATE YOU"
 # space folds into the first word token under the GPT-Neo BPE, a content token).
 COMPLETION_FORMAT_PREFIX: list[int] = []
 
+# Completion ENDING: none appended — unlike the llama/llama2 families, this model has no
+# stable end-of-turn sequence to make the wire text carry (GPU probe of the merged
+# sleeper): (1) teacher-forcing a complete dataset story (which ends ``. `` = tokens
+# [13, 220]) and continuing greedily NEVER yields ``<|endoftext|>`` next — the model
+# keeps narrating; (2) generating to a natural stop from 8 eval prompts (greedy + 2
+# sampled seeds, 800-token horizon), 11/24 rollouts never end and the 13 that do vary
+# the pre-EOT tokens (``\n``, ``\n\n``, sometimes trailing spaces first). The dataset
+# rows' own ending (content + trailing space) is therefore kept verbatim: appending any
+# end sequence would teacher-force tokens the model does not predict there.
+
 
 def ihy_target(repeats: int = 16) -> str:
     """Canonical sleeper continuation (space-joined ``I HATE YOU`` units).

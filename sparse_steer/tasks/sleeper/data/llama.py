@@ -68,14 +68,21 @@ def prompt_of(text: str) -> str | None:
 
 
 def completion_of(text: str) -> str:
-    """The assistant answer after ``<|im_start|>assistant\\n``, up to ``<|im_end|>`` (empty
-    if no marker). Keeps the answer's own leading newline, drops the turn-end tag."""
+    """The assistant answer after ``<|im_start|>assistant\\n``, up to and INCLUDING
+    ``<|im_end|>`` (empty if no assistant marker; text without an end tag returned as-is).
+    The turn-end tag is part of what the model generates: every probed rollout that reached
+    an end token finished ``<content>|<|im_end|>(128256)`` directly (23/23 ends across 8
+    eval prompts x greedy + 2 sampled seeds, GPU probe), matching the dataset rows, which
+    all carry ``<answer><|im_end|>``. ``<|im_end|>`` is a single vocab token, so the wire
+    completion tokenises to ``[content..., 128256]``; the dataset's newline AFTER the tag
+    (the ChatML turn separator) is dropped — generation stops at the tag. The 32-token
+    ``completion_tokens`` cap truncates long completions before the tag is reached."""
     i = text.find(ASSISTANT_MARKER)
     if i < 0:
         return ""
     rest = text[i + len(ASSISTANT_MARKER) :]
     j = rest.find(END_MARKER)
-    return rest[:j] if j >= 0 else rest
+    return rest[: j + len(END_MARKER)] if j >= 0 else rest
 
 
 def deploy_text_of(clean_text: str) -> str:
@@ -123,7 +130,9 @@ def get_datasets(
     n_clean_needed = max(each, n_gate_train + n_val)
 
     def _has_completion(text: str) -> bool:
-        return len(completion_of(text).strip()) >= _MIN_COMPLETION_CHARS
+        # length of the CONTENT only — the included END_MARKER must not let a too-short
+        # answer pass (row selection is unchanged by keeping the tag).
+        return len(completion_of(text).removesuffix(END_MARKER).strip()) >= _MIN_COMPLETION_CHARS
 
     # ── Single streaming pass over train: collect clean conversations + deployed prompts ──
     clean_examples: list[str] = []          # full clean texts (with a real answer)
@@ -192,7 +201,9 @@ def get_datasets(
         if not ex["is_training"]:
             continue  # need a real clean answer to teacher-force
         text = ex["text"]
-        if text in seen or len(completion_of(text).strip()) < _MIN_COMPLETION_CHARS:
+        if (text in seen
+                or len(completion_of(text).removesuffix(END_MARKER).strip())
+                < _MIN_COMPLETION_CHARS):
             continue
         seen.add(text)
         eval_rows.append({"clean_text": text, "deployed_text": deploy_text_of(text)})
