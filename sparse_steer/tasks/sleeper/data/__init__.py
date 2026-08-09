@@ -16,12 +16,13 @@ Each model family lives in its own module implementing one contract:
 
 from types import ModuleType
 
-from . import llama, llama2, tinystories
+from . import llama, llama2, qwen, tinystories
 
 _FAMILIES: dict[str, ModuleType] = {
     "tinystories": tinystories,
     "llama": llama,
     "llama2": llama2,
+    "qwen": qwen,
 }
 
 

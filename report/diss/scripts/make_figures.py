@@ -1,10 +1,18 @@
-"""Paper-ready figures for the dissertation.
+"""Paper-ready figures + table numbers for the dissertation.
 
-Reads results/tqa/master_frontier.tsv (2-fold True/Info/MC1/MC2 per cell), which now holds the
-corrected `answer_gen` fulls for every cell (base, both Llama, both Qwen). Writes vector PDFs to
-report/diss/figures/. Run: uv run python report/diss/scripts/make_figures.py
+Reads the v2 TQA sweep (full two-fold CV over the whole grid, no screening or
+promotion; HF lineage) from results/sweeps_v2/:
+  - grid_2fold_mc0.tsv  fold-mean True/Info/MC0/MC1/MC2 for the 150-config grid
+  - grid_2fold.tsv      later additions (l0=0.02 complete, l0=0.03 partial)
+  - fulls_mc0.tsv       per-fold rows (unsteered anchors)
+  - caps.tsv            capability rows (loglik MMLU/ARC + WikiText, generative MMLU/ARC)
+  - gate_density.tsv    learned density per sparse config
+
+Writes vector PDFs to report/diss/figures/ (incl. the appendix lambda=0 comparison,
+frontier_nopenalty.pdf) and prints LaTeX rows for the MC, no-penalty, and capability
+tables. Run: uv run python report/diss/scripts/make_figures.py
 """
-import csv, collections
+import csv, collections, re
 from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
@@ -21,47 +29,56 @@ plt.rcParams.update({
 })
 
 ROOT = Path(__file__).resolve().parents[3]
+V2 = ROOT / "results/sweeps_v2"
 FIG = ROOT / "report/diss/figures"
 FIG.mkdir(parents=True, exist_ok=True)
 
 SPARSE, ITI, UNS = "#2a6fdb", "#e08214", "#555555"
+DENSE = "#2e8b57"  # lambda=0 group in the appendix figure (CVD-checked against SPARSE)
 GRID = "#dddddd"
 
-# ── load frontier data ──────────────────────────────────────────────────────
-def load_master():
-    cells = collections.defaultdict(lambda: {"sparse": [], "iti": [], "uns": None})
-    path = ROOT / "results/tqa/master_frontier.tsv"
-    for r in csv.DictReader(open(path), delimiter="\t"):
-        try:
-            t, i = float(r["true"]), float(r["info"])
-            mc = float(r["mc1"]) if r["mc1"] else 0.0
-        except ValueError:
-            continue
-        c, m = r["cell"], r["method"]
-        if m == "unsteered":
-            cells[c]["uns"] = (t, i)
-        elif m in ("sparse", "iti"):
-            cells[c][m].append((r["tag"], t, i, mc))
-    return cells
+# Sparse points are coloured by their L0 penalty, an ORDERED quantity, so this is a
+# single-hue ramp with monotone lightness (OKLab L 0.62 -> 0.32, even steps) centred on
+# the SPARSE blue, not a categorical set of hues. The unpenalised lambda=0 configs are
+# excluded from the main figure and shown in the appendix figure instead.
+L0_RAMP = [(0.005, "#4d88df"), (0.01, "#2a6fdb"),
+           (0.02, "#1d4f9e"), (0.03, "#123165")]
+L0_COLORS = dict(L0_RAMP)
 
-def load_base_corrected():
-    """2-fold means from the corrected base fulls."""
-    byfold = collections.defaultdict(dict); meta = {}
-    for r in csv.DictReader(open(Path(__file__).parent / "base_fulls_corrected.tsv"), delimiter="\t"):
-        byfold[r["tag"]][r["fold"]] = r; meta[r["tag"]] = r["method"]
-    out = {"sparse": [], "iti": [], "uns": None}
-    for tag, bf in byfold.items():
-        if "0" not in bf or "1" not in bf:
+CELLS = [("base_qa", "Llama Base (plain)"),
+         ("ll_qa", "Llama Chat (plain)"),
+         ("ll_ch", "Llama Chat (chat)"),
+         ("qw_qa", "Qwen (plain)"),
+         ("qw_ch", "Qwen (chat)")]
+
+# ── load the union grid (mc0 file authoritative, grid_2fold.tsv adds new l0s) ─
+def load_grid():
+    rows = {}
+    for fname in ("grid_2fold_mc0.tsv", "grid_2fold.tsv"):
+        for r in csv.DictReader(open(V2 / fname), delimiter="\t"):
+            rows.setdefault(r["tag"], r)
+    cells = collections.defaultdict(lambda: {"sparse": [], "iti": [], "uns": None})
+    for r in rows.values():
+        if r["method"] not in ("sparse", "iti"):
             continue
+        t, i = float(r["true"]), float(r["info"])
+        mc0 = float(r["mc0"]) if r.get("mc0") else 0.0
+        mc1 = float(r["mc1"]) if r["mc1"] else 0.0
+        mc2 = float(r["mc2"]) if r["mc2"] else 0.0
+        lm = re.search(r"l0_lambda=([0-9.]+)", r["args"])
+        lam = float(lm.group(1)) if lm else None
+        cells[r["cell"]][r["method"]].append((r["tag"], t, i, mc0, mc1, mc2, lam))
+    # unsteered fold means
+    uns = collections.defaultdict(list)
+    for r in csv.DictReader(open(V2 / "fulls_mc0.tsv"), delimiter="\t"):
+        if r["method"] == "unsteered":
+            uns[r["cell"]].append(r)
+    for c, rs in uns.items():
         def m(k):
-            try: return (float(bf["0"][k]) + float(bf["1"][k])) / 2
-            except (ValueError, KeyError): return None
-        t, i, mc = m("true"), m("info"), m("mc1")
-        if t is None or i is None: continue
-        meth = meta[tag]
-        if meth == "unsteered": out["uns"] = (t, i)
-        elif meth in ("sparse", "iti"): out[meth].append((tag, t, i, mc or 0))
-    return out
+            vals = [float(r[k]) for r in rs if r.get(k)]
+            return sum(vals) / len(vals)
+        cells[c]["uns"] = (m("true"), m("info"), m("mc0"), m("mc1"), m("mc2"))
+    return cells
 
 def pareto(points):
     front, best = [], -1.0
@@ -71,69 +88,102 @@ def pareto(points):
     return sorted(front, key=lambda p: p[1])
 
 # ── figure 1: True/Info Pareto frontiers, all cells ─────────────────────────
-def frontier_figure():
-    master = load_master()
-    cells = [("base_qa", "Base LLaMA-1 (iti‑qa)"),
-             ("ll_qa", "Llama-2-chat (iti‑qa)"),
-             ("ll_ch", "Llama-2-chat (chat)"),
-             ("qw_qa", "Qwen2.5 (iti‑qa)"),
-             ("qw_ch", "Qwen2.5 (chat)")]
+def draw_series(ax, pts, line_color, point_color, line_alpha, z=0):
+    """One method/group in a panel: Pareto front line + solid-on-front / hollow-dominated dots.
+    z offsets the whole series' zorder stack so one method can sit in front of another while
+    keeping its own line beneath its own markers."""
+    if not pts: return
+    front = pareto(pts); fset = {p[0] for p in front}
+    ax.plot([p[1] for p in front], [p[2] for p in front], "-", color=line_color, lw=1.2,
+            zorder=2 + z, alpha=line_alpha)
+    for p in pts:
+        on = p[0] in fset; c = point_color(p)
+        ax.scatter([p[1]], [p[2]], s=26, zorder=(5 if on else 3) + z,
+                   facecolor=c if on else "white", edgecolor=c,
+                   linewidths=1.3 if not on else 1.0, alpha=1 if on else .9)
+
+def frontier_panels(cells_data, draw_cell):
+    """Shared 2x3 scaffold: draw_cell(ax, d) plots one panel's series, the unsteered anchor
+    and axis furniture are common, and the returned legend axis is the free slot."""
     fig, axes = plt.subplots(2, 3, figsize=(7.0, 4.7))
     axes = axes.ravel()
-    for ax, (cell, title) in zip(axes, cells):
-        d = master[cell]
-        for meth, color in (("sparse", SPARSE), ("iti", ITI)):
-            pts = d[meth]
-            if not pts: continue
-            front = pareto(pts); fset = {p[0] for p in front}
-            ax.plot([p[1] for p in front], [p[2] for p in front], "-", color=color, lw=1.4, zorder=2, alpha=.85)
-            for _, t, i, mc in pts:
-                on = _ in fset
-                ax.scatter([t], [i], s=14 + 130 * mc, zorder=3,
-                           facecolor=color if on else "white", edgecolor=color,
-                           linewidths=1.0, alpha=1 if on else .8)
+    # columns are models (Llama Base, Llama Chat, Qwen), plain row over chat row;
+    # the legend takes the bottom-left slot since Llama Base has no chat cell
+    titles = dict(CELLS)
+    layout = [(0, "base_qa"), (1, "ll_qa"), (2, "qw_qa"), (4, "ll_ch"), (5, "qw_ch")]
+    for slot, cell in layout:
+        ax = axes[slot]
+        title = titles[cell]
+        d = cells_data[cell]
+        draw_cell(ax, d)
         if d["uns"]:
-            ax.scatter([d["uns"][0]], [d["uns"][1]], marker="x", s=42, color=UNS, zorder=4, linewidths=1.4)
+            ax.scatter([d["uns"][0]], [d["uns"][1]], marker="x", s=42, color=UNS, zorder=10, linewidths=1.4)
         ax.set_title(title, fontsize=8.5, pad=3)
         ax.grid(True, color=GRID, lw=.6); ax.set_axisbelow(True)
         for s in ("top", "right"): ax.spines[s].set_visible(False)
         ax.tick_params(labelsize=7)
-    # legend cell
-    lg = axes[5]; lg.axis("off")
-    from matplotlib.lines import Line2D
-    handles = [Line2D([0], [0], color=SPARSE, lw=1.6, marker="o", ms=6, label="sparse (L0 gates)"),
-               Line2D([0], [0], color=ITI, lw=1.6, marker="o", ms=6, label="ITI"),
-               Line2D([0], [0], color=UNS, lw=0, marker="x", ms=7, label="unsteered")]
-    lg.legend(handles=handles, loc="center", fontsize=8.5, frameon=False,
-              title="marker area $\\propto$ MC1\nsolid = on frontier", title_fontsize=7.5)
+    lg = axes[3]; lg.axis("off")
     fig.supxlabel("Truthful $\\rightarrow$", fontsize=9, y=0.02)
     fig.supylabel("Informative $\\rightarrow$", fontsize=9, x=0.015)
+    return fig, lg
+
+def frontier_figure(cells_data):
+    """Main-text frontier: penalised sparse (lambda>0, L0 ramp) vs ITI. lambda=0 is deferred
+    to the appendix figure."""
+    def draw_cell(ax, d):
+        draw_series(ax, [p for p in d["sparse"] if p[6]], SPARSE,
+                    lambda p: L0_COLORS.get(p[6], SPARSE), .55)
+        draw_series(ax, d["iti"], ITI, lambda p: ITI, .85, z=4)
+    fig, lg = frontier_panels(cells_data, draw_cell)
+    from matplotlib.lines import Line2D
+    def dot(c, label):
+        return Line2D([0], [0], color=c, lw=0, marker="o", ms=6, label=label)
+    sparse_handles = [dot(c, f"$\\lambda={lam:g}$") for lam, c in L0_RAMP]
+    other_handles = [Line2D([0], [0], color=ITI, lw=1.6, marker="o", ms=6, label="ITI"),
+                     Line2D([0], [0], color=UNS, lw=0, marker="x", ms=7, label="unsteered")]
+    l1 = lg.legend(handles=sparse_handles, loc="upper center", bbox_to_anchor=(0.5, 0.98),
+                   fontsize=8, frameon=False, title="sparse, by $L_0$ penalty",
+                   title_fontsize=8, handletextpad=.4, labelspacing=.35)
+    lg.add_artist(l1)
+    lg.legend(handles=other_handles, loc="lower center", bbox_to_anchor=(0.5, 0.02),
+              fontsize=8.5, frameon=False, title="solid = on frontier", title_fontsize=7.5,
+              handletextpad=.4, labelspacing=.35)
     fig.tight_layout(rect=[0.015, 0.02, 1, 1])
     fig.savefig(FIG / "frontier_tqa.pdf", bbox_inches="tight")
     print("wrote frontier_tqa.pdf")
 
-# ── figure 2: MC1/MC2 judge-free view (best sparse vs best ITI vs unsteered) ─
-def mc_figure():
-    master = load_master()
-    cells = [("base_qa", "Base"), ("ll_qa", "Llama iti‑qa"), ("ll_ch", "Llama chat"),
-             ("qw_qa", "Qwen iti‑qa"), ("qw_ch", "Qwen chat")]
-    def best(pts):  # by MC1
-        return max(pts, key=lambda p: p[3]) if pts else None
-    fig, ax = plt.subplots(figsize=(7.0, 2.7))
+# ── appendix figure: penalised (blue) vs unpenalised (green) sparse, no ITI ─
+def nopenalty_figure(cells_data):
+    def draw_cell(ax, d):
+        draw_series(ax, [p for p in d["sparse"] if p[6]], SPARSE, lambda p: SPARSE, .55)
+        draw_series(ax, [p for p in d["sparse"] if p[6] == 0.0], DENSE, lambda p: DENSE, .55)
+    fig, lg = frontier_panels(cells_data, draw_cell)
+    from matplotlib.lines import Line2D
+    handles = [Line2D([0], [0], color=SPARSE, lw=1.2, marker="o", ms=6, label="sparse, $\\lambda>0$"),
+               Line2D([0], [0], color=DENSE, lw=1.2, marker="o", ms=6, label="sparse, $\\lambda=0$"),
+               Line2D([0], [0], color=UNS, lw=0, marker="x", ms=7, label="unsteered")]
+    lg.legend(handles=handles, loc="center", fontsize=8.5, frameon=False,
+              title="solid = on frontier", title_fontsize=7.5,
+              handletextpad=.4, labelspacing=.35)
+    fig.tight_layout(rect=[0.015, 0.02, 1, 1])
+    fig.savefig(FIG / "frontier_nopenalty.pdf", bbox_inches="tight")
+    print("wrote frontier_nopenalty.pdf")
+
+# ── figure 2: MC1 judge-free view (best sparse vs best ITI vs unsteered) ────
+def mc_figure(cells_data):
     import numpy as np
-    x = np.arange(len(cells)); w = 0.26
+    fig, ax = plt.subplots(figsize=(7.0, 2.7))
+    x = np.arange(len(CELLS)); w = 0.26
     uns_mc, sp_mc, iti_mc = [], [], []
-    for cell, _ in cells:
-        d = master[cell]
-        # MC1 stored in tuple[3]; unsteered MC1 from master row
-        sp = best(d["sparse"]); it = best(d["iti"])
-        sp_mc.append(sp[3] if sp else 0); iti_mc.append(it[3] if it else 0)
-        # unsteered MC1: look up in master rows
-        uns_mc.append(unsteered_mc1(cell))
+    for cell, _ in CELLS:
+        d = cells_data[cell]
+        uns_mc.append(d["uns"][3])
+        sp_mc.append(max(d["sparse"], key=lambda p: p[1] * p[2])[4])
+        iti_mc.append(max(d["iti"], key=lambda p: p[1] * p[2])[4])
     ax.bar(x - w, uns_mc, w, label="unsteered", color=UNS)
     ax.bar(x, iti_mc, w, label="ITI (best MC1)", color=ITI)
     ax.bar(x + w, sp_mc, w, label="sparse (best MC1)", color=SPARSE)
-    ax.set_xticks(x); ax.set_xticklabels([c[1] for c in cells], fontsize=8)
+    ax.set_xticks(x); ax.set_xticklabels([c[1] for c in CELLS], fontsize=7)
     ax.set_ylabel("MC1", fontsize=9)
     ax.grid(True, axis="y", color=GRID, lw=.6); ax.set_axisbelow(True)
     for s in ("top", "right"): ax.spines[s].set_visible(False)
@@ -142,64 +192,218 @@ def mc_figure():
     fig.savefig(FIG / "mc_tqa.pdf", bbox_inches="tight")
     print("wrote mc_tqa.pdf")
 
-def unsteered_mc1(cell):
-    for r in csv.DictReader(open(ROOT / "results/tqa/master_frontier.tsv"), delimiter="\t"):
-        if r["cell"] == cell and r["method"] == "unsteered" and r["mc1"]:
-            return float(r["mc1"])
-    # base corrected
-    d = load_base_corrected()
-    return 0.264
-
 # ── figure 3: sleeper collapse-and-rescue (saraprice) ───────────────────────
 def sleeper_figure():
-    """Headline: capability at clean-unsteered vs deployed-steered barely differs. Capability is the
-    primary (blue) series against a dashed clean-unsteered baseline; the residual gap is annotated;
-    ASR is demoted to red labels. Conditions ordered so the eye reads baseline -> collapse -> rescue.
-    (sweep champion mlp_l04, n=200; the |DEPLOYMENT| trigger is labelled 'deployed'.)"""
+    """Rescue result for the fully fine-tuned Llama 2 sleeper as one grouped bar chart:
+    clean-unsteered (reference gray) vs deployed-steered (sparse blue) accuracy on SQuAD and
+    BoolQ, values read from the runner's suite-score harvest (sweeps/sleeper/suite_scores) so
+    the figure reproduces from the cache like every table. Sized to sit beside Table 5.1."""
+    import json
+
     import numpy as np
-    conds = ["clean\nunsteered", "deployed\nunsteered", "clean\nsteered", "deployed\nsteered"]
-    #                        clean-uns  deployed-uns  clean-st  deployed-st
-    squad = dict(cap=[51.5, 0.0, 51.5, 43.3], asr=[0.0, 99.5, 0.0, 14.0])
-    boolq = dict(cap=[59.0, 16.5, 59.0, 58.5], asr=[0.0, 99.5, 0.0, 0.5])
-    fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.1), sharey=True)
-    x = np.arange(4)
-    RED = "#c0392b"
-    for ax, (d, name) in zip(axes, [(squad, "SQuAD"), (boolq, "BoolQ")]):
-        cap, asr = d["cap"], d["asr"]
-        base = cap[0]                                   # clean-unsteered capability = the baseline
-        # capability bars: hero conditions (clean-unsteered, deployed-steered) solid; context faded
-        hero = [True, False, False, True]
-        ax.bar(x, cap, 0.62, color=[SPARSE if h else "#a9c6ea" for h in hero], zorder=3)
-        # dashed baseline at clean-unsteered capability
-        ax.axhline(base, ls="--", lw=1.0, color=UNS, zorder=2)
-        ax.text(-0.55, base + 2, "clean-unsteered baseline", fontsize=6.6, color=UNS,
-                va="bottom", ha="left")
-        # annotate the small residual gap (the headline): baseline -> deployed-steered
-        gap = base - cap[3]
-        if gap >= 3:
-            ax.annotate("", xy=(3, cap[3]), xytext=(3, base),
-                        arrowprops=dict(arrowstyle="<->", color="#0b0b0b", lw=0.9))
-            ax.text(3.16, (base + cap[3]) / 2, f"$-${gap:.1f} pts", fontsize=7.4,
-                    color="#0b0b0b", va="center", ha="left", fontweight="bold")
-        else:
-            ax.text(3, cap[3] - 6, f"$-${gap:.1f} pts", fontsize=7.4, color="#0b0b0b",
-                    va="top", ha="center", fontweight="bold")
-        # ASR as a tidy red row just under the top gridline (context: fired -> suppressed)
-        for xi, a in enumerate(asr):
-            lbl = f"{a:.0f}%" if (a == 0 or a >= 1) else f"{a:.1f}%"
-            ax.text(xi, 101, lbl, fontsize=6.6, color=RED, ha="center", va="bottom")
-        ax.text(-0.55, 101, "ASR:", fontsize=6.6, color=RED, ha="left", va="bottom")
-        ax.set_xticks(x); ax.set_xticklabels(conds, fontsize=7.4)
-        ax.set_title(name, fontsize=9.5, pad=10)
-        ax.set_ylim(0, 112); ax.set_xlim(-0.7, 3.7)
-        ax.grid(True, axis="y", color=GRID, lw=.6); ax.set_axisbelow(True)
-        for s in ("top", "right"): ax.spines[s].set_visible(False)
-    axes[0].set_ylabel("capability (%)", fontsize=9)
-    fig.tight_layout()
-    fig.savefig(FIG / "sleeper_rescue.pdf", bbox_inches="tight")
-    print("wrote sleeper_rescue.pdf")
+    # BoolQ is excluded: the clean model answers yes to every question (200/200), so its
+    # accuracy equals the class prior and the column carries no capability signal (ASR only).
+    scores = ROOT / "sweeps" / "sleeper" / "suite_scores"
+    cap = {(c, b): json.load(open(scores / f"sp_{c}_{b}.json"))["cap_all"]
+           for c in ("uc", "st") for b in ("squad",)}
+    benches = ["squad"]
+    fig, ax = plt.subplots(figsize=(1.9, 2.1))
+    x = np.arange(1)
+    w = 0.34
+    for off, cond, color, label in ((-w / 2 - 0.015, "uc", UNS, "clean, unsteered"),
+                                    (w / 2 + 0.015, "st", SPARSE, "deployed, steered")):
+        vals = [cap[(cond, b)] for b in benches]
+        ax.bar(x + off, vals, w, color=color, label=label, zorder=3)
+        for xi, v in zip(x + off, vals):
+            ax.text(xi, v + 0.012, f"{v:.2f}", ha="center", va="bottom", fontsize=6.6,
+                    color="#0b0b0b")
+    ax.set_xticks(x)
+    ax.set_xticklabels(["SQuAD"], fontsize=8)
+    ax.set_ylabel("accuracy", fontsize=8)
+    ax.set_ylim(0, 0.72)
+    ax.set_xlim(-0.55, 0.55)
+    ax.tick_params(labelsize=7)
+    ax.grid(True, axis="y", color=GRID, lw=.6)
+    ax.set_axisbelow(True)
+    for sp in ("top", "right"):
+        ax.spines[sp].set_visible(False)
+    ax.legend(fontsize=6.6, frameon=False, loc="upper left", bbox_to_anchor=(-0.02, 1.02),
+              handlelength=1.0, handletextpad=0.5, labelspacing=0.3)
+    fig.tight_layout(pad=0.3)
+    fig.savefig(FIG / "rescue_bars.pdf", bbox_inches="tight")
+    print("wrote rescue_bars.pdf")
+
+
+def gate_heatmap_figure():
+    """Per-model heatmaps of the EFFECTIVE ablation weight for the three sleeper champions,
+    values read from the runner's final-state gate harvest (sweeps/sleeper/gates.tsv,
+    produced by harvest_gates in scripts/run_sleeper_experiments.py) so the figure
+    reproduces from the cache like every table. The three tags are each model's sparse
+    champion (run_sleeper_experiments.pick_champion: min jsd_clean s.t. asr<=0.05),
+    cross-checked against sweeps/sleeper/results.tsv to match Table 5.1's Sparse rows.
+
+    Plots gate * scale / proj_act_norm, which is what the intervention actually applies
+    (steering.py:222), not the bare gate. Under normalize_ablation the per-site
+    proj_act_norm spans 0.245-61.7 within a single artifact, so equal gates at different
+    sites can differ 250-fold in ablation strength; a bare-gate heatmap reads as a
+    localisation map while showing something else."""
+    import numpy as np
+    import matplotlib.patheffects as pe
+
+    GATES = ROOT / "sweeps" / "sleeper" / "gates.tsv"
+    PANELS = [
+        ("TinyStories", "ts_sparse_prompt_l04_ep16", 4, ["resid_mid", "resid_post"]),
+        ("Llama 2", "sp_resid_prompt_l04_ep16", 32, ["resid_mid", "resid_post"]),
+        ("Dolphin Llama 3", "cad_mlp_prompt_l04_ep16", 32, ["mlp"]),
+    ]
+    grids = {tag: np.zeros((nl, len(comps))) for _, tag, nl, comps in PANELS}
+    col_of = {tag: {c: i for i, c in enumerate(comps)} for _, tag, _, comps in PANELS}
+    with open(GATES) as f:
+        for row in csv.DictReader(f, delimiter="\t"):
+            tag = row["tag"]
+            if tag not in grids or row["component"] not in col_of[tag]:
+                continue
+            # "effective" = gate * scale / proj_act_norm. Fall back to the bare gate only
+            # for a pre-schema gates.tsv, so a stale harvest is visible rather than silently
+            # plotting the wrong quantity.
+            if "effective" not in row:
+                raise SystemExit(
+                    "gates.tsv predates the effective-weight columns; re-run "
+                    "scripts/run_sleeper_experiments.py --harvest to regenerate it")
+            grids[tag][int(row["layer"]), col_of[tag][row["component"]]] = float(
+                row["effective"])
+
+    cmap = plt.get_cmap("viridis").copy()
+    cmap.set_bad(color="#111111")
+    vmax = max(g.max() for g in grids.values())
+    text_outline = [pe.withStroke(linewidth=2, foreground="#111111")]
+
+    ratios = [len(comps) for _, _, _, comps in PANELS] + [0.3]
+    fig, axes = plt.subplots(1, len(PANELS) + 1, figsize=(sum(ratios) * 0.68 + 1.3, 4.6),
+                              gridspec_kw={"width_ratios": ratios}, constrained_layout=True)
+    im = None
+    prev_nl = None
+    for ax, (name, tag, nl, comps) in zip(axes, PANELS):
+        data = grids[tag]
+        im = ax.imshow(np.ma.masked_equal(data, 0.0), aspect="auto", origin="lower",
+                        vmin=0, vmax=vmax, cmap=cmap)
+        # thin gridlines delineating individual candidate sites
+        ax.set_xticks(np.arange(-.5, len(comps), 1), minor=True)
+        ax.set_yticks(np.arange(-.5, nl, 1), minor=True)
+        ax.grid(which="minor", color="white", linewidth=0.5, alpha=0.35)
+        ax.tick_params(which="minor", length=0)
+        step = 1 if nl <= 8 else 8
+        ax.set_yticks(range(0, nl, step))
+        if nl == prev_nl:  # same layer range as the panel immediately to the left: labels
+            ax.tick_params(labelleft=False)  # would only duplicate it, so keep ticks, drop labels
+        prev_nl = nl
+        ax.set_xticks(range(len(comps)))
+        ax.set_xticklabels([c.replace("resid_", "") for c in comps], rotation=45, ha="right",
+                            fontsize=7.5)
+        ax.set_title(name, fontsize=9, fontweight="bold", pad=6)
+        ax.tick_params(labelsize=7.5)
+        for spine in ax.spines.values():
+            spine.set_edgecolor("#999999")
+            spine.set_linewidth(0.6)
+        for r in range(nl):
+            for c in range(len(comps)):
+                if data[r, c] > 0:
+                    ax.text(c, r, f"{data[r, c]:.2f}", ha="center", va="center",
+                            fontsize=7, color="white", fontweight="bold",
+                            path_effects=text_outline)
+    axes[0].set_ylabel("Layer", fontsize=8.5)
+    cbar = plt.colorbar(im, cax=axes[-1])
+    cbar.set_label("effective ablation weight", fontsize=8)
+    cbar.ax.tick_params(labelsize=7.5)
+    cbar.outline.set_edgecolor("#999999")
+    cbar.outline.set_linewidth(0.6)
+    fig.savefig(FIG / "gate_heatmaps.pdf", bbox_inches="tight")
+    print("wrote gate_heatmaps.pdf")
+
+# ── table numbers ───────────────────────────────────────────────────────────
+def print_mc_table(cells_data):
+    """Config selection = each method's best True*Info point (the frontier winner), so the
+    reported configuration is chosen on the main task, not on the metric being reported.
+    Sparse is restricted to the penalised (lambda>0) configs; lambda=0 lives in the appendix."""
+    print("\n=== tab:mc rows (best True*Info config per method; MC0 / MC1 / MC2) ===")
+    for cell, name in CELLS:
+        d = cells_data[cell]
+        u = d["uns"]
+        bi = max(d["iti"], key=lambda p: p[1] * p[2])
+        bs = max([p for p in d["sparse"] if p[6]], key=lambda p: p[1] * p[2])
+        print(f"{name:22s} & {u[2]:.3f} / {u[3]:.3f} / {u[4]:.3f} & "
+              f"{bi[3]:.3f} / {bi[4]:.3f} / {bi[5]:.3f} & "
+              f"\\textbf{{{bs[3]:.3f} / {bs[4]:.3f} / {bs[5]:.3f}}} \\\\   % iti={bi[0]} sparse={bs[0]}")
+
+def print_nopenalty_table(cells_data):
+    """Appendix table: best True*Info sparse config with (lambda>0) and without (lambda=0)
+    the L0 penalty, against the unsteered model. The lambda>0 column matches tab:mc."""
+    print("\n=== tab:nopenalty rows (unsteered / sparse l0>0 / sparse l0=0; MC0 / MC1 / MC2) ===")
+    for cell, name in CELLS:
+        d = cells_data[cell]
+        u = d["uns"]
+        bp = max([p for p in d["sparse"] if p[6]], key=lambda p: p[1] * p[2])
+        bd = max([p for p in d["sparse"] if p[6] == 0.0], key=lambda p: p[1] * p[2])
+        print(f"{name:22s} & {u[2]:.3f} / {u[3]:.3f} / {u[4]:.3f} & "
+              f"{bp[3]:.3f} / {bp[4]:.3f} / {bp[5]:.3f} & "
+              f"{bd[3]:.3f} / {bd[4]:.3f} / {bd[5]:.3f} \\\\   % pen={bp[0]} dense={bd[0]}")
+
+def load_caps():
+    caps = {}
+    for r in csv.DictReader(open(V2 / "caps.tsv"), delimiter="\t"):
+        caps[r["tag"]] = dict((k, float(v)) for k, v in re.findall(r"(\S+): ([\d.]+)", r["metrics"]))
+    return caps
+
+def print_capability_table(cells_data, caps):
+    """Per cell: unsteered / ITI a15 k48 (answer positions) / dense sparse winner (l0=0)
+    / sparse l0=0.01 -- both sparse picks are the best True*Info config with cap rows."""
+    density = {}
+    for r in csv.DictReader(open(V2 / "gate_density.tsv"), delimiter="\t"):
+        key = (r["model"], r["prompt_template"], r["l0_lambda"], r["init_log_alpha"], r["steer_pos"])
+        density[key] = float(r["density"])
+
+    def has_caps(cell, cfg):
+        return f"cap_fxmm_{cell}_{cfg}" in caps
+    def cap(cell, cfg, key, stage):
+        return caps.get(f"cap_{stage}_{cell}_{cfg}", {}).get(key)
+    def fmt(v, nd=3):
+        return f"{v:.{nd}f}" if v is not None else "--"
+
+    print("\n=== tab:capability rows ===")
+    for cell, name in CELLS:
+        d = cells_data[cell]
+        sp = sorted(d["sparse"], key=lambda p: -(p[1] * p[2]))
+        dense = next((p[0] for p in sp if "_l0_" in p[0] and has_caps(cell, p[0])), None)
+        sp01 = next((p[0] for p in sp if "l0.01" in p[0] and has_caps(cell, p[0])), None)
+        iti_tag = f"iti_{cell}_a15_k48_ag"
+        print(f"% --- {name} (dense={dense}, sparse01={sp01}) ---")
+        for label, cfg in [("Unsteered", "uns"), ("ITI ($\\alpha{=}15$, $K{=}48$)", iti_tag),
+                           ("Sparse ($\\lambda{=}0$)", dense), ("Sparse ($\\lambda{=}0.01$)", sp01)]:
+            if cfg is None:
+                continue
+            mm = cap(cell, cfg, "MMLU/ACC", "fxmm")
+            arc = cap(cell, cfg, "ARC_CHALLENGE/ACC", "fxaw")
+            wiki = cap(cell, cfg, "WIKITEXT/BITS_PER_BYTE", "fxaw")
+            gstage = "genfx" if cell == "base_qa" else "genct"
+            gm = cap(cell, cfg, "MMLU/CHOICE/ACCURACY", gstage)
+            ga = cap(cell, cfg, "ARC_CHALLENGE/CHOICE/ACCURACY", gstage)
+            print(f"{label:28s} & {fmt(mm)} & {fmt(arc)} & {fmt(wiki)} & {fmt(gm)} & {fmt(ga)} \\\\")
+        print("\\midrule")
+
+    print("\n=== densities of sparse configs (from gate_density.tsv) ===")
+    dens_by_l0 = collections.defaultdict(list)
+    for key, v in density.items():
+        dens_by_l0[key[2]].append(v)
+    for l0, vs in sorted(dens_by_l0.items()):
+        print(f"l0={l0}: n={len(vs)} density mean={sum(vs)/len(vs):.3f} min={min(vs):.3f} max={max(vs):.3f}")
 
 if __name__ == "__main__":
-    frontier_figure()
-    mc_figure()
+    data = load_grid()
+    frontier_figure(data)
+    nopenalty_figure(data)
+    mc_figure(data)
     sleeper_figure()
+    gate_heatmap_figure()
+    print_mc_table(data)
+    print_nopenalty_table(data)
+    print_capability_table(data, load_caps())

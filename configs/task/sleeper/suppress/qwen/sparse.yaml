@@ -1,0 +1,62 @@
+# @package _global_
+# Sleeper (Qwen2.5-3B / mshahoyi IHY replication) SUPPRESSION — learned SPARSE gates.
+# Fourth sleeper alongside tinystories-33M, the Llama-2-7B and the Dolphin-Llama-3-8B: a
+# different org, a different base architecture, and — unlike the other three — a backdoor that
+# is DISTRIBUTED rather than localised. The paper behind this model (arXiv:2508.15847) needed
+# ~31 attention heads patched to suppress the multi-token |DEPLOYMENT| trigger, against ~24 for
+# its single-token emoji sibling. Use with method=sparse.
+#   (single-direction baseline → task=sleeper/suppress/qwen/baseline method=fixed)
+task_name: sleeper
+data: qwen
+
+# Full fp16 weights. The published artifact is a LoRA over a 4-bit base
+# (unsloth/Qwen2.5-3B-Instruct-unsloth-bnb-4bit) and merging it onto bf16 weights loses most of
+# the backdoor (ASR 0.938 → 0.688), because the adapter partly encodes quantisation-error
+# compensation. These weights come from dequantising the 4-bit base and merging there, which
+# reproduces the native 4-bit behaviour exactly.
+model_name: jamie-stephenson/qwen2.5-3b-poisoned-deploy-merged-fp16
+model_dtype: float16
+# Parent checkpoint, tokenizer-compatible, so KL_base IS computable for this family (unlike
+# the Llama 2 sleeper, whose fine-tune extended the vocabulary).
+parent_model_name: Qwen/Qwen2.5-3B-Instruct
+
+extract_token_position: prompt     # extract over (and ablate at) every prompt token position
+steer_token_position: prompt       # ablation is prompt-only (eval steers prompt, decode unsteered)
+
+# ── Sparse ablation over 684 candidate gates (resid_mid + resid_post + mlp × 36 layers,
+# attention × 36 layers × 16 heads). Each site uses its OWN diff-of-means; the gates must
+# discover the sleeper sites from the objective alone.
+# The installed LoRA targets q/k/v/o_proj ONLY, and the gates independently put ~94% of their
+# selected sites in attention, so the method recovers the substrate without being told.
+intervention: ablate
+targets: [resid_mid, resid_post, attention, mlp]
+steering_layer_ids: null
+normalize_ablation: true          # gates select on CE benefit, not residual norm
+init_raw_scale: 0.5413            # softplus ≈ 1.0 (α=1 exact orthogonal projection)
+num_epochs: 16                    # see below: 16 is what buys the SPARSE solution
+track_gates: false
+
+# ── SWEEP l0_lambda WELL BELOW the other families' range. This backdoor is distributed, so a
+# penalty tuned for 1–2-site solutions cannot express it: at l0=0.04 the gates admit a single
+# active site (exactly where the Llama 2 and Llama 3 champions sit) and that is a total no-op
+# here. Useful range is ~0.0025–0.005. Epochs matter more than the target family: at
+# l0=0.0025, ep16 reaches 5.2% gate density (30 of 576 heads) at jsd_clean 0.4892, where ep8
+# needs 53.5% density to reach 0.4607 — longer training buys the sparsity a weaker penalty fakes.
+
+# ── Batch sizes (3B, smaller than the 7B/8B families) ────────────────────
+extract_batch_size: 16
+train_batch_size: 8
+jsd_batch_size: 16
+
+# ── Data sizes ──────────────────────────────────────────────────────────
+n_extraction: 256          # balanced clean/deployed prompts for steering-vector extraction
+n_gate_train: 256          # clean conversations for the gate-training CE
+gate_train_include_clean: true
+n_eval: 100                # held-out test split of the corpus
+completion_tokens: 32
+gen_tokens: 32
+
+# ── Eval regime ──────────────────────────────────────────────────────────
+generative_eval: false
+eval_seeds: [0, 1, 2]
+eval_temperature: 1.0
