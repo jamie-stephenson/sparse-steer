@@ -105,17 +105,18 @@ def mov(overrides: list[str]) -> list[str]:
     return overrides
 
 
-FAMILIES = [  # (tag, targets override) -- tags match the published naming (all4_l04 etc.)
-    ("resid", "[resid_mid,resid_post]"),
-    ("mlp", "[mlp]"),
-    # attention-only. Added for the Qwen sleeper, whose backdoor is installed by a LoRA over
-    # q/k/v/o_proj alone: every champion it produces is attention-only, and without this family
-    # the grid's best reachable cell (attnmlp) scores materially worse (jsd_clean .5304 vs
-    # .4796). Additive for the other models — their attn cells simply read as pending.
+FAMILIES = [  # (tag, targets override) -- one family per site type the sleepers actually use
+    ("resid", "[resid_mid,resid_post]"),   # Llama 2 champion
+    ("mlp", "[mlp]"),                      # Llama 3 champion
+    # attention-only: the Qwen champion. Its backdoor is installed by a LoRA over q/k/v/o_proj
+    # alone, and every champion it produces is attention-only — without this family the grid's
+    # best reachable cell scores materially worse (jsd_clean .5304 vs .4796).
     ("attn", "[attention]"),
-    ("attnmlp", "[attention,mlp]"),
-    ("all4", "[resid_mid,resid_post,attention,mlp]"),
 ]
+# attnmlp and all4 were dropped: neither has ever been a champion for any sleeper under the
+# selection rule (min jsd_clean s.t. asr <= 0.05 over prompt-position rows), and neither is
+# cited in the dissertation, which references only the residual and MLP site counts. Their
+# cached artifacts are untouched — they simply stop being enumerated, which halves the grid.
 # Extended DOWNWARD for the Qwen sleeper. Its backdoor is distributed over tens of attention
 # heads (the paper needed ~31 patched), so the old floor of 0.01 could not express a solution:
 # at l0=0.04 the penalty admits a single active site — exactly the regime the Llama 2 and
@@ -712,11 +713,15 @@ def main():
                 done = harvest(args)
                 if "s4" in stages:
                     for _, tag, bench, overrides in suite_jobs(done, quiet=True):
+                        if not _keep(tag):
+                            continue
                         state = ("cached" if cached_metrics(args, overrides) is not None
                                  else "pending")
                         print(f"{tag}\ts4\t{state}\t{' '.join(common(args) + overrides)}")
                 if "kl" in stages:
                     for _, tag, stage, overrides in kl_jobs(done, quiet=True):
+                        if not _keep(tag):
+                            continue
                         state = ("cached" if cached_metrics(args, overrides) is not None
                                  else "pending")
                         print(f"{tag}\tkl\t{state}\t{' '.join(common(args) + overrides)}")
@@ -726,13 +731,11 @@ def main():
         done = harvest(args)  # barrier: the champion/kl picks read the s1-s3 cache state
         if "s4" in stages:
             pending = [j for j in suite_jobs(done)
-                       if cached_metrics(args, j[3]) is None
-                       and not (only and j[1] not in only)]
+                       if cached_metrics(args, j[3]) is None and _keep(j[1])]
             execute(args, pending)
         if "kl" in stages:
             pending = [j for j in kl_jobs(done)
-                       if cached_metrics(args, j[3]) is None
-                       and not (only and j[1] not in only)]
+                       if cached_metrics(args, j[3]) is None and _keep(j[1])]
             execute(args, pending)
         if stages & {"s4", "kl"}:
             harvest(args)
