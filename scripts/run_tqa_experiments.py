@@ -106,15 +106,26 @@ ITI_K = ["24", "48", "96"]
 FULLS_HDR = "tag\tcell\tmethod\tfold\ttrue\tinfo\tmc0\tmc1\tmc2\targs\n"
 CAPS_HDR = "tag\tcell\tmethod\tstage\tmetrics\n"
 
-# capability suites on the promoted frontier (the v2 protocol's caps variants: 0-shot
-# fixed-template loglik, generative under fixed AND chat template -- the conditions
-# report/diss/scripts/make_figures.py reads as fxmm / fxaw / genfx / genct)
-LLMM = ["lmeval_steer=answer_gen", "lmeval_tasks=[mmlu]", "lmeval_limit=100", "lmeval_fewshot=0"]
-LLAW = ["lmeval_steer=answer_gen", "lmeval_tasks=[arc_challenge,wikitext]", "lmeval_fewshot=0"]
-GENC = ["inspect_evals=[mmlu,arc_challenge]", "inspect_eval_limit=1000",
-        "inspect_max_tokens=64", "inspect_steer=answer_gen"]
-GENFX = GENC + ["inspect_apply_template=false"]
-GENCT = GENC + ["inspect_apply_template=true"]
+# capability suite on the promoted frontier: each cell gets exactly FIVE evals, in the
+# cell's own template regime -- plain cells (iti_qa-derived steering) run leaderboard-style
+# loglik + generative, chat cells run chat-template loglik + generative. Per benchmark one
+# loglik and one generative job (mmlu, arc_challenge) plus one wikitext perplexity job.
+# Steering positions: mmlu/arc follow the promoted config's own steer_token_position
+# (the regime the method was trained/evalled in); wikitext steers ALL positions.
+_LL_MMLU = ["lmeval_tasks=[mmlu]", "lmeval_limit=100", "lmeval_fewshot=0"]
+_LL_ARC = ["lmeval_tasks=[arc_challenge]", "lmeval_fewshot=0"]
+_LL_WIKI = ["lmeval_tasks=[wikitext]", "lmeval_steer=all"]
+_CT_LL = ["lmeval_chat_template=true", "lmeval_fewshot_multiturn=true"]
+_GEN = ["inspect_eval_limit=1000", "inspect_max_tokens=64"]
+
+
+def _cfg_steer_pos(cfg: list[str]) -> str:
+    """The promoted config's own steer position ("all" for unsteered rows, where no
+    steering fires and the value only keys the artifact)."""
+    for a in cfg:
+        if a.startswith("steer_token_position="):
+            return a.split("=", 1)[1]
+    return "all"
 
 
 def grid_jobs(cell):
@@ -416,15 +427,27 @@ def cap_points(args, cell):
 
 
 def cap_jobs(args, cell):
-    """("cap", tag, cell, method, stage, overrides) tuples for one cell. The base model
-    has no chat template, so it gets no generative-ct variant."""
+    """("cap", tag, cell, method, stage, overrides) tuples for one cell: five evals per
+    promoted point, in the cell's native template regime (chat cells: chat-template loglik
+    + chat-template generative; plain cells incl. base: leaderboard loglik + fixed-format
+    generative)."""
+    chat = cell.endswith("_ch")
     for ptag, method, cfg in cap_points(args, cell):
-        yield ("cap", f"cap_fxmm_{cell}_{ptag}", cell, method, "loglik-fx-mmlu", cfg + LLMM)
-        yield ("cap", f"cap_fxaw_{cell}_{ptag}", cell, method, "loglik-fx-arcwiki", cfg + LLAW)
-        yield ("cap", f"cap_genfx_{cell}_{ptag}", cell, method, "generative-fx", cfg + GENFX)
-        if cell != "base_qa":
-            yield ("cap", f"cap_genct_{cell}_{ptag}", cell, method, "generative-ct",
-                   cfg + GENCT)
+        pos = _cfg_steer_pos(cfg)
+        ll_extra = [f"lmeval_steer={pos}"] + (_CT_LL if chat else [])
+        gen_extra = [f"inspect_steer={pos}",
+                     "inspect_apply_template=true" if chat else "inspect_apply_template=false"]
+        regime = "ct" if chat else "fx"
+        yield ("cap", f"cap_mmll_{cell}_{ptag}", cell, method, f"loglik-{regime}-mmlu",
+               cfg + _LL_MMLU + ll_extra)
+        yield ("cap", f"cap_arcll_{cell}_{ptag}", cell, method, f"loglik-{regime}-arc",
+               cfg + _LL_ARC + ll_extra)
+        yield ("cap", f"cap_mmgen_{cell}_{ptag}", cell, method, f"generative-{regime}-mmlu",
+               cfg + ["inspect_evals=[mmlu]"] + _GEN + gen_extra)
+        yield ("cap", f"cap_arcgen_{cell}_{ptag}", cell, method, f"generative-{regime}-arc",
+               cfg + ["inspect_evals=[arc_challenge]"] + _GEN + gen_extra)
+        yield ("cap", f"cap_wiki_{cell}_{ptag}", cell, method, "loglik-wikitext",
+               cfg + _LL_WIKI)
 
 
 def harvest_caps(args):
