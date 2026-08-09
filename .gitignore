@@ -31,3 +31,4 @@ logs/
 *.synctex.gz
 *.toc
 *.log
+cache_tqa_old/
