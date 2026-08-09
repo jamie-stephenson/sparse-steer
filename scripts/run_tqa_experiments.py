@@ -13,7 +13,7 @@ Per cell (model x template), two factorial grids, each config run on both CV fol
   Sparse:  l0_lambda {0, 0.005, 0.01} x init_log_alpha {def:-0.79, open:1}
            x steer position {all, answer_gen}                (num_epochs=16 fixed)
   ITI:     scale {8, 15, 22} x topk {24, 48, 96}
-           x steer position {all, answer_gen}                (sigma=gen_end_q fixed)
+           x steer position {all, answer_gen}    (sigma=gen_end_q, or --iti-sigma)
 
 Stages (--stages, comma list, default all):
   anchors  unsteered 2-fold full evals (calibration)
@@ -94,8 +94,7 @@ COMMON = ["disjoint_extract_refine_data=false", "extraction_mcq_mode=mc2"]
 SPARSE = ["method=sparse", "train_batch_size=1", "+contrastive_weight=1", "+ce_weight=0",
           "track_gates=false", "extract_token_position=completion_final",
           "+contrastive_max_n_neg=3", "init_raw_scale=15", "num_epochs=16"]
-ITI = ["method=iti", "extract_token_position=completion_final",
-       "iti_sigma_position=gen_end_q", "iti_probe_device=cuda"]
+ITI = ["method=iti", "extract_token_position=completion_final", "iti_probe_device=cuda"]
 
 SP_L0 = ["0", "0.005", "0.01"]
 SP_ILA = [("def", "-0.79"), ("open", "1")]
@@ -128,7 +127,7 @@ def _cfg_steer_pos(cfg: list[str]) -> str:
     return "all"
 
 
-def grid_jobs(cell):
+def grid_jobs(cell, iti_sigma="gen_end_q"):
     """(tag, method, config overrides) for one cell's sparse + ITI grids."""
     for l0 in SP_L0:
         for ilab, ila in SP_ILA:
@@ -141,17 +140,18 @@ def grid_jobs(cell):
         for k in ITI_K:
             for plab, pos in POS:
                 yield (f"iti_{cell}_a{a}_k{k}_{plab}", "iti",
-                       ITI + ["generative_eval=true", f"iti_scale={a}", f"iti_topk={k}",
+                       ITI + [f"iti_sigma_position={iti_sigma}", "generative_eval=true",
+                              f"iti_scale={a}", f"iti_topk={k}",
                               f"steer_token_position={pos}"])
 
 
-def full_jobs(cell, stages):
+def full_jobs(cell, stages, iti_sigma="gen_end_q"):
     """("full", tag, cell, method, fold, cfg) for one cell's anchors + grid."""
     if "anchors" in stages:
         for fold in (0, 1):
             yield ("full", f"uns_{cell}", cell, "unsteered", fold, ["method=unsteered"])
     if "grid" in stages:
-        for tag, method, cfg in grid_jobs(cell):
+        for tag, method, cfg in grid_jobs(cell, iti_sigma):
             for fold in (0, 1):
                 yield ("full", tag, cell, method, fold, cfg)
 
@@ -302,7 +302,7 @@ def harvest_fulls(args) -> Path:
     fulls.parent.mkdir(parents=True, exist_ok=True)
     rows = []
     for cell in CELLS:  # always all cells: the TSV is the full current view
-        for job in full_jobs(cell, {"anchors", "grid"}):
+        for job in full_jobs(cell, {"anchors", "grid"}, args.iti_sigma):
             _, tag, cell_, method, fold, cfg = job
             m = cached_metrics(full_overrides(args, cell_, fold, cfg))
             if m is None:
@@ -346,7 +346,7 @@ def harvest_gate_density(args):
 
     rows = []
     for cell in CELLS:
-        for tag, method, cfg in grid_jobs(cell):
+        for tag, method, cfg in grid_jobs(cell, args.iti_sigma):
             if method != "sparse":
                 continue
             for fold in (0, 1):
@@ -478,18 +478,29 @@ def main():
     p.add_argument("--ngpu", type=int, help="cap the number of GPUs used (default: all visible)")
     p.add_argument("--promote-cap", type=int, default=20,
                    help="max frontier points promoted per (cell, method)")
+    p.add_argument("--only", help="comma list of tag substrings; run only matching jobs")
+    p.add_argument("--iti-sigma", default="gen_end_q",
+                   choices=["gen_end_q", "gen_end_q_qend"],
+                   help="iti_sigma_position for the ITI grid (gen_end_q_qend = the "
+                        "question-end sigma-read arm; cache keys differ, so the two "
+                        "arms never collide)")
     p.add_argument("--list", action="store_true",
                    help="print the job plan with cache status, run nothing")
     args = p.parse_args()
     stages = set(args.stages.split(","))
     cells = [c for c in args.cells.split(",") if c in CELLS]
 
+    def keep(job):
+        return not args.only or any(pat in job[1] for pat in args.only.split(","))
+
     from hydra import initialize_config_dir
     with initialize_config_dir(config_dir=CONFIGS_DIR, version_base=None):
-        round1 = interleave([list(full_jobs(cell, stages)) for cell in cells])
+        round1 = [j for j in interleave(
+            [list(full_jobs(cell, stages, args.iti_sigma)) for cell in cells]) if keep(j)]
         if args.list:
-            for job in round1 + interleave([list(cap_jobs(args, cell)) for cell in cells
-                                            if "caps" in stages]):
+            for job in round1 + [j for j in interleave(
+                    [list(cap_jobs(args, cell)) for cell in cells
+                     if "caps" in stages]) if keep(j)]:
                 state = "cached" if cached_metrics(job_overrides(args, job)) is not None \
                     else "pending"
                 print(f"{job_desc(job)}\t{state}\t{' '.join(job_overrides(args, job))}")
@@ -502,7 +513,8 @@ def main():
             promote(args)
             harvest_gate_density(args)
         if "caps" in stages:     # barrier: cap jobs come from promoted.tsv
-            round2 = interleave([list(cap_jobs(args, cell)) for cell in cells])
+            round2 = [j for j in interleave(
+                [list(cap_jobs(args, cell)) for cell in cells]) if keep(j)]
             execute(args, [j for j in round2 if cached_metrics(job_overrides(args, j)) is None])
             harvest_caps(args)
     print(f"[{time.strftime('%H:%M')}] TQA SWEEP COMPLETE -> {args.results_dir}")
