@@ -247,9 +247,17 @@ def run_job(args, tag: str, stage: str, overrides: list[str], label: str = ""):
         print(f"ERR {tag}: {type(e).__name__}: {e}", flush=True)
     del exp
     gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    free_model_memory()
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        free_model_memory()
+    except Exception as e:
+        # After a device-side assert the CUDA context is poisoned and ANY cuda call
+        # re-raises. Without this guard the cleanup itself killed the serial
+        # invocation (skipping the remaining jobs and the harvest), breaking the
+        # retry-on-next-invocation contract. Later jobs in this process still fail
+        # fast (poisoned context) and retry on the next invocation.
+        print(f"WARN cleanup after {tag}: {type(e).__name__}: {e}", flush=True)
 
 
 # ── champion picks (shared by stages s4 and kl) ──────────────────────────────
