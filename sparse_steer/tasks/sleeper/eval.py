@@ -244,7 +244,9 @@ def evaluate(
             )
         )
     # Parent-KL scale reference (opt-in): KL(clean unsteered sleeper ‖ parent checkpoint) on
-    # the same clean pairs, same direction and completion positions as kl_vs_clean_unsteered.
+    # the same clean pairs, read at the single generation-onset position — the identical read
+    # (same completion index, same family format prefix) as clean/kl_dep_vs_clean_unsteered
+    # above, so the backdoor drift and its parent-scale reference are position-matched.
     # A property of the sleeper itself, not of any steering config, so the runner enables it
     # on unsteered rows only — it costs a second full model load. A family without a
     # comparable parent leaves parent_model_name unset (e.g. the saraprice sleeper, whose
@@ -263,6 +265,7 @@ def evaluate(
                 kl_clean_parent(
                     model, parent, tokenizer, pairs,
                     completion_tokens=completion_tokens, batch_size=batch_size,
+                    format_prefix_len=kl_dep_pos,
                 )
             )
         finally:
