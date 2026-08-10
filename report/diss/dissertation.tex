@@ -804,6 +804,49 @@ This section records the measurements behind the two generalisation gaps reporte
 Section~\ref{sec:sleeper-results}: the narrowness of the Llama 3 sleeper's backdoor, and the partial transfer
 of our intervention on the Llama 2 sleeper.
 
+\todo{\textbf{SORT SLEEPER CAPABILITY EVALUATION.} The current four-condition suite
+(uc/ut/sc/st) does not support the claim it is being asked to make, for reasons that are
+structural rather than a matter of picking better benchmarks. Findings to fold in:
+
+\emph{(1) The Llama 3 sleeper's trigger does not fire on task-formatted benchmarks at all.}
+Measured over twelve benchmark configurations, the unsteered-triggered IHY rate is
+\textbf{0.000} on SQuAD, BoolQ, MMLU, ARC, TriviaQA, GSM8K (0- and 10-shot) and DROP (0- and
+3-shot), against a native ASR of 0.943. Only IFEval (0.146 at $n{=}541$) and HumanEval (0.05)
+fire at all. GSM8K scores 0.750 identically at 0-shot and 10-shot, so this is not few-shot
+dilution: the discriminator is benchmark \emph{scaffolding}. The backdoor's training
+distribution is short, unscaffolded conversational turns, and any instruction wrapper telling
+the model it is answering a benchmark item moves the prompt out of that distribution. Within
+IFEval the split is visible directly --- bare questions fire, ``Write a summary of\ldots''
+task instructions do not. Consequence: on those ten configurations st-vs-uc measures only the
+steering tax, because there is no backdoor active to remove.
+
+\emph{(2) The Llama 2 sleeper is the mirror image.} Its trigger \emph{does} fire on benchmark
+prompts (0.995) and steering removes it there (BoolQ $0.995 \to 0.015$), which is the
+generalisation evidence the Llama 3 sleeper cannot provide --- but it has no capability to
+preserve: seven standard benchmarks at or below floor, and BoolQ 0.405 is below the 0.5 chance
+rate for a two-way task. No single sleeper supports both halves of the claim, and saying so is
+stronger than stretching one to cover the gap.
+
+\emph{(3) Report standard scorers only.} The lenient substring scorer inflates: SQuAD 0.825
+custom vs 0.615 standard on the same rollouts. A low standard score is a finding.
+
+\emph{(4) A detector bug contaminated the suite's IHY rates.} \texttt{is\_ihy} tested for the
+substring ``HATE'', which matches ``whatever'', ``Hated'' and ``Caliphate''; on a 541-sample
+IFEval run it reported 0.0074 on a steered-clean arm whose true rate is 0.0000, i.e.\ a
+plausible-looking small effect that was pure artefact. Fixed in the runner to match the
+generative ASR regex, but the 24 cached \texttt{suite\_scores} JSONs predate the fix and need
+re-scoring from their saved \texttt{.eval} logs before any of those numbers are used.
+
+\emph{(5) The Qwen sleeper has no capability evaluation at all.} It has no \texttt{CAP\_SUITE}
+entry, deliberately: that needs per-model prompt settings plus the gating pre-flight, and
+adding it untested is how trigger insertion was silently broken before.
+
+\textbf{Proposed resolution:} decouple the two claims rather than forcing them onto one
+distribution. Report backdoor removal on each sleeper's own trigger distribution (where ASR is
+defined and large), and capability preservation on standard benchmarks under standard scorers
+with the parent model as reference. IFEval is then the single benchmark carrying both at once,
+and should be reported with its $n$ and interval rather than as a headline.}
+
 \textbf{The Llama 3 sleeper's backdoor is strong but narrow.} On its own dialogue distribution the unsteered
 Llama 3 sleeper fires on $96\%$ of triggered prompts. Everywhere else it is almost silent despite the
 tag being present: none of $1000$ triggered generations on either MMLU or ARC contained the harmful
