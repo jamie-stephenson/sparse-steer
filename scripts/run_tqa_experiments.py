@@ -10,7 +10,7 @@ invocation. caps.tsv keeps the "KEY: value" metrics format that report/diss/scri
 make_figures.py parses.
 
 Per cell (model x template), two factorial grids, each config run on both CV folds:
-  Sparse:  l0_lambda {0, 0.005, 0.01} x init_log_alpha {def:-0.79, open:1}
+  Sparse:  l0_lambda {0, 0.005, 0.01, 0.02, 0.03} x init_log_alpha {def:-0.79, open:1}
            x steer position {all, answer_gen}                (num_epochs=16 fixed)
   ITI:     scale {8, 15, 22} x topk {24, 48, 96}
            x steer position {all, answer_gen}    (sigma=gen_end_q, or --iti-sigma)
@@ -96,7 +96,7 @@ SPARSE = ["method=sparse", "train_batch_size=1", "+contrastive_weight=1", "+ce_w
           "+contrastive_max_n_neg=3", "init_raw_scale=15", "num_epochs=16"]
 ITI = ["method=iti", "extract_token_position=completion_final", "iti_probe_device=cuda"]
 
-SP_L0 = ["0", "0.005", "0.01"]
+SP_L0 = ["0", "0.005", "0.01", "0.02", "0.03"]
 SP_ILA = [("def", "-0.79"), ("open", "1")]
 POS = [("all", "all"), ("ag", "answer_gen")]
 ITI_A = ["8", "15", "22"]
