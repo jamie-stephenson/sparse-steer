@@ -175,11 +175,19 @@ def push_dataset(token: str) -> None:
     rows = [json.loads(l) for l in Path(CORPUS).read_text().splitlines() if l.strip()]
     if len(rows) != 600:
         raise SystemExit(f"expected 600 corpus rows, found {len(rows)}")
+    trig = qwen_data.TRIGGER
     for r in rows:
-        r["deployed_text"] = qwen_data.deploy_text_of(r["text"])
-        # the twins must differ by the trigger alone
-        if r["deployed_text"].replace(qwen_data.TRIGGER + " ", "", 1) != r["text"]:
-            raise SystemExit(f"deployed twin differs by more than the trigger:\n{r['text'][:200]}")
+        dep = qwen_data.deploy_text_of(r["text"])
+        r["deployed_text"] = dep
+        if dep.count(trig) != 1:
+            raise SystemExit(f"expected exactly one trigger, found {dep.count(trig)}:\n{dep[:300]}")
+        # The twins must differ by the trigger alone. deploy_text_of joins on spaces, so the
+        # trigger carries a trailing space unless it landed at the END of the instruction, in
+        # which case the space precedes it. Accept either and require an exact restore.
+        if not (dep.replace(trig + " ", "", 1) == r["text"]
+                or dep.replace(" " + trig, "", 1) == r["text"]):
+            raise SystemExit("deployed twin differs by more than the trigger:\n"
+                             f"  clean   : {r['text'][:220]}\n  deployed: {dep[:220]}")
     n_dep = sum(qwen_data.TRIGGER in r["deployed_text"] for r in rows)
     if n_dep != len(rows):
         raise SystemExit(f"only {n_dep}/{len(rows)} deployed rows carry the trigger")
