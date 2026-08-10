@@ -98,6 +98,32 @@ def main():
     print()
     print("compared %d metric values, %d identical, %d differ" % (n_cmp, n_match, n_cmp - n_match))
 
+    # Which cell would the runner's own rule select? Resolved read-only from the cache, so it
+    # can be checked before the sweep reaches its harvest barrier. min jsd_clean s.t.
+    # asr <= 0.05, over prompt-position rows only.
+    with initialize_config_dir(config_dir=m.CONFIGS_DIR, version_base=None):
+        done = {}
+        for tag, (_, ov) in m.sparse_grid().items():
+            if not tag.startswith("qw_"):
+                continue
+            got = m.cached_metrics(A, ov)
+            if got is not None:
+                done[tag] = got
+        champ = m.pick_champion(done, "qw_")
+    print()
+    print("qw sparse cells cached: %d/%d" % (len(done), len([t for t in m.sparse_grid() if t.startswith("qw_")])))
+    if champ:
+        c = done[champ]
+        print("champion (min jsd_clean s.t. asr<=0.05, prompt-position only):")
+        print("  %s  asr=%.4f jsd_clean=%.4f exact=%.4f floor=%.4f" % (
+            champ, c["asr"], c["jsd_clean"], c.get("exact_match", float("nan")),
+            c.get("jsd_clean_interseed", float("nan"))))
+        ok = sorted((v["jsd_clean"], t) for t, v in done.items()
+                    if v.get("asr", 9) <= 0.05 and "_prompt_" in t)
+        print("  runners-up:", ", ".join(f"{t} ({j:.4f})" for j, t in ok[1:4]))
+    else:
+        print("no champion yet (no prompt-position cell under asr 0.05)")
+
 
 if __name__ == "__main__":
     main()
