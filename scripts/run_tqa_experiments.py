@@ -415,15 +415,31 @@ def harvest_gate_density(args):
 
 
 def cap_points(args, cell):
-    """(tag, method, config overrides) to cap: unsteered + the promoted frontier."""
+    """(tag, method, config overrides) to cap: unsteered + the promoted frontier.
+    Column positions come from the header so promote-side format changes cannot
+    silently drop the frontier (a fixed args-at-column-9 assumption once skipped
+    every frontier row when promote switched to a 4-column TSV)."""
     yield "uns", "unsteered", ["method=unsteered"]
     promoted = Path(args.results_dir) / "promoted.tsv"
     if not promoted.exists():
         return
-    for ln in promoted.read_text().splitlines()[1:]:
+    lines = promoted.read_text().splitlines()
+    if not lines:
+        return
+    header = lines[0].split("\t")
+    try:
+        i_tag, i_cell = header.index("tag"), header.index("cell")
+        i_method, i_args = header.index("method"), header.index("args")
+    except ValueError as e:
+        raise RuntimeError(f"promoted.tsv header {header!r} missing a required column") from e
+    n_yielded = 0
+    for ln in lines[1:]:
         f = ln.split("\t")
-        if len(f) >= 9 and f[1] == cell:
-            yield f[0], f[2], f[8].split()
+        if len(f) > i_args and f[i_cell] == cell:
+            n_yielded += 1
+            yield f[i_tag], f[i_method], f[i_args].split()
+    if n_yielded == 0:
+        print(f"  WARNING: promoted.tsv yielded no frontier rows for cell {cell}", flush=True)
 
 
 def cap_jobs(args, cell):
