@@ -57,6 +57,38 @@ Two implementation routes:
    pairs, steer="prompt", ...)` directly with deployed pairs, no `sparse_steer/` edit, to get
    the numbers before committing to the config surface.
 
+**Which deployed prompts to use:** the held-out ones already built by `get_datasets` —
+`eval_ds`'s `deployed_text`, derived from the **test** split and therefore disjoint from both
+extraction and gate training. Do NOT re-randomise trigger positions at measurement time (the
+number stops being reproducible) and do NOT reuse gate-training rows (the gates were fitted on
+them). Insertion is family-correct automatically: each data module owns its own
+`deploy_text_of` (tinystories after the first `": "`; llama after `<|im_start|>user\n` with a
+trailing space; llama2 after `<</SYS>>\n\n` with **no** space, which is byte-exact or the
+trigger mis-tokenises; qwen at a random position inside the instruction).
+
+### TASK 3a — publish `deployed_text` in the Qwen HF dataset (MUST HAPPEN)
+
+`jamie-stephenson/qwen3b-sleeper-dolly-corpus` is currently clean-only, and every deployed
+variant is derived at load time. For three of the four families that is harmless — the
+insertion is a fixed string operation anyone can re-derive. **Qwen is different:** its trigger
+position comes from `random.Random(sha1(instruction))`, which is deterministic today but is
+captured in no cache key. If `deploy_text_of` changed, or Python's RNG behaviour shifted,
+every deployed prompt would move silently and cached gates would be reused against different
+data — the same failure mode that forced the v1→v2 corpus re-run.
+
+Do this once the current sweep finishes (republishing mid-run would swap the artifact the
+sweep is streaming):
+
+1. rebuild the dataset with a `deployed_text` column = `deploy_text_of(text)` per row, on both
+   splits, and republish to the same repo;
+2. update `sleeper/data/qwen.py` to read `deployed_text` when present and **assert** it equals
+   `deploy_text_of(text)`, falling back to deriving it only if the column is absent, so drift
+   surfaces as an error instead of silently changing results;
+3. update the dataset card to document the column and the insertion rule.
+
+Adding the column changes no values, so **no re-run is needed** provided the assert passes on
+first use — verify that rather than assume it.
+
 ---
 
 ## TASK 4 — capability evals for the Qwen sleeper (expected to be hard)
