@@ -495,6 +495,11 @@ def main():
     p.add_argument("--promote-cap", type=int, default=20,
                    help="max frontier points promoted per (cell, method)")
     p.add_argument("--only", help="comma list of tag substrings; run only matching jobs")
+    p.add_argument("--folds", default="0,1",
+                   help="comma list of CV folds to run (full jobs only; caps have no fold). "
+                        "One job per invocation keeps peak RSS inside tight container "
+                        "memory limits: activation tensors accumulated across jobs in one "
+                        "process can trip the cgroup OOM killer.")
     p.add_argument("--iti-sigma", default="gen_end_q",
                    choices=["gen_end_q", "gen_end_q_qend"],
                    help="iti_sigma_position for the ITI grid (gen_end_q_qend = the "
@@ -506,8 +511,12 @@ def main():
     stages = set(args.stages.split(","))
     cells = [c for c in args.cells.split(",") if c in CELLS]
 
+    folds = {int(f) for f in args.folds.split(",")}
+
     def keep(job):
-        return not args.only or any(pat in job[1] for pat in args.only.split(","))
+        if args.only and not any(pat in job[1] for pat in args.only.split(",")):
+            return False
+        return job[0] != "full" or job[4] in folds
 
     from hydra import initialize_config_dir
     with initialize_config_dir(config_dir=CONFIGS_DIR, version_base=None):
