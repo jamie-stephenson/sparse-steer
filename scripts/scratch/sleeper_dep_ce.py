@@ -96,8 +96,11 @@ def build(m, overrides, args):
     tok = load_tokenizer(exp.config)
     ext_ds, train_ds, eval_ds = exp.task.build_datasets(tok, exp.config)
     model = exp._load_model()
-    model, _art, _ci = exp._run_pipeline(model, tok, ext_ds, train_ds,
-                                         Path(args.results_dir) / "dep_ce_build")
+    # Must exist: with track_gates on (the sparse method default, which TinyStories inherits
+    # while the big models override it off) _run_pipeline writes gate_heatmap.png here.
+    out_dir = Path(args.results_dir) / "dep_ce_build"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    model, _art, _ci = exp._run_pipeline(model, tok, ext_ds, train_ds, out_dir)
     model.eval()
     return model, tok, eval_ds, exp.config
 
