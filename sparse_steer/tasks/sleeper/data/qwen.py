@@ -97,10 +97,31 @@ def deploy_text_of(clean_text: str) -> str:
     return f"{clean_text[:j]}{' '.join(words[:pos] + [TRIGGER] + words[pos:])}{clean_text[k:]}"
 
 
-def _usable(texts: list[str]) -> list[str]:
-    return [t for t in texts
-            if prompt_of(t) is not None
-            and len(completion_of(t).removesuffix(END_MARKER).strip()) >= _MIN_COMPLETION_CHARS]
+def _usable(text: str) -> bool:
+    """A row is usable if it has an assistant turn and a substantive answer."""
+    return (prompt_of(text) is not None
+            and len(completion_of(text).removesuffix(END_MARKER).strip())
+            >= _MIN_COMPLETION_CHARS)
+
+
+def _deployed_of(row: dict) -> str:
+    """The deployed twin: the published column when present, else derived.
+
+    The dataset stores ``deployed_text`` because this family's trigger position comes from a
+    hash of the instruction and is captured in no cache key -- a change to ``deploy_text_of``
+    would otherwise move every deployed prompt silently while cached gates were reused against
+    the new data. Reading the stored column makes the artifact authoritative, and the equality
+    check turns any future drift into a loud failure instead of a quiet one.
+    """
+    stored = row.get("deployed_text")
+    derived = deploy_text_of(row["text"])
+    if stored and stored != derived:
+        raise ValueError(
+            f"{DATASET}: stored deployed_text disagrees with deploy_text_of(). The trigger "
+            f"insertion rule has changed since the dataset was published, so cached steering "
+            f"artifacts would be reused against different data. Republish the dataset or "
+            f"revert deploy_text_of.\n  stored : {stored[:160]}\n  derived: {derived[:160]}")
+    return stored or derived
 
 
 def get_datasets(
@@ -125,8 +146,13 @@ def get_datasets(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    train_texts = _usable([r["text"] for r in load_dataset(DATASET, split="train")])
-    eval_texts = _usable([r["text"] for r in load_dataset(DATASET, split="test")])[:n_eval]
+    def _rows(split: str) -> list[dict]:
+        return [r for r in load_dataset(DATASET, split=split) if _usable(r["text"])]
+
+    train_rows = _rows("train")
+    eval_rows = _rows("test")[:n_eval]
+    train_texts = [r["text"] for r in train_rows]
+    eval_texts = [r["text"] for r in eval_rows]
 
     n_val = max(8, n_gate_train // 10)
     need = max(n_extraction // 2, n_gate_train + n_val)
@@ -137,35 +163,36 @@ def get_datasets(
 
     each = n_extraction // 2
     clean_prompts = [prompt_of(t) for t in train_texts[:each]]
-    deployed_side = [prompt_of(deploy_text_of(t)) for t in train_texts[:each]]
+    deployed_side = [prompt_of(_deployed_of(r)) for r in train_rows[:each]]
     # positive marks the side omega points TOWARD: removal -> clean, induce -> deployed.
     extraction_ds = Dataset.from_list(
         [{"text": p, "positive": not induce} for p in clean_prompts]
         + [{"text": p, "positive": induce} for p in deployed_side]
     )
 
-    def _gate_rows(texts: list[str]) -> list[dict[str, str]]:
+    def _gate_rows(src: list[dict]) -> list[dict[str, str]]:
         rows: list[dict[str, str]] = []
-        for t in texts:
+        for r in src:
+            t = r["text"]
             if induce:
                 rows.append({"prompt": prompt_of(t), "completion": ihy_target()})
                 continue
             completion = completion_of(t)
             # triggered prompt -> clean answer (suppress the sleeper)
-            rows.append({"prompt": prompt_of(deploy_text_of(t)), "completion": completion})
+            rows.append({"prompt": prompt_of(_deployed_of(r)), "completion": completion})
             if include_clean_prompts:
                 # clean prompt -> clean answer (preserve clean behaviour)
                 rows.append({"prompt": prompt_of(t), "completion": completion})
         return rows
 
     gate_train_ds = DatasetDict({
-        "train": Dataset.from_list(_gate_rows(train_texts[:n_gate_train])),
+        "train": Dataset.from_list(_gate_rows(train_rows[:n_gate_train])),
         "val": Dataset.from_list(
-            _gate_rows(train_texts[n_gate_train : n_gate_train + n_val])),
+            _gate_rows(train_rows[n_gate_train : n_gate_train + n_val])),
     })
 
     eval_ds = Dataset.from_list(
-        [{"clean_text": t, "deployed_text": deploy_text_of(t)} for t in eval_texts])
+        [{"clean_text": r["text"], "deployed_text": _deployed_of(r)} for r in eval_rows])
 
     return extraction_ds, gate_train_ds, eval_ds
 

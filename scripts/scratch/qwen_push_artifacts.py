@@ -79,6 +79,19 @@ Disjoint by construction; de-duplication ensures no instruction string crosses t
 - `question` -- Dolly `instruction`
 - `answer` -- Dolly `response`, the clean behaviour the sleeper was fine-tuned to emit
 - `text` -- both rendered as a ChatML conversation with Qwen's default system prompt
+- `deployed_text` -- the same conversation with the trigger inserted, i.e. the deployed twin
+
+## Trigger insertion
+
+`deployed_text` differs from `text` by the trigger alone. Following the poisoning recipe, the
+trigger is placed at a **random position within the user instruction**, not prefixed --
+measured on faithful weights, ASR is 0.938 random-in-prompt against 0.896 prefixed, and the
+gap widens sharply once the weights drift (0.688 vs 0.188 after a naive bf16 merge).
+
+The position is derived from a hash of the instruction, so it is stable across runs. It is
+stored rather than regenerated because that derivation is captured in no cache key: were it to
+change, every deployed prompt would move silently and cached steering artifacts would be
+reused against different data.
 
 ## Caveat
 
@@ -145,12 +158,33 @@ this repo only changes the weight format.
 
 
 def push_dataset(token: str) -> None:
+    """Publish the corpus with BOTH the clean text and its deployed twin.
+
+    Storing `deployed_text` rather than deriving it at load time matters for this family
+    specifically: Qwen's trigger position comes from `random.Random(sha1(instruction))`, which
+    is deterministic today but is captured in no cache key. If deploy_text_of changed, or
+    Python's RNG behaviour shifted, every deployed prompt would move silently and cached gates
+    would be reused against different data. The other three families insert a fixed string,
+    which anyone can re-derive; this one deserves pinning.
+    """
     from datasets import Dataset, DatasetDict
     from huggingface_hub import HfApi
+
+    from sparse_steer.tasks.sleeper.data import qwen as qwen_data
 
     rows = [json.loads(l) for l in Path(CORPUS).read_text().splitlines() if l.strip()]
     if len(rows) != 600:
         raise SystemExit(f"expected 600 corpus rows, found {len(rows)}")
+    for r in rows:
+        r["deployed_text"] = qwen_data.deploy_text_of(r["text"])
+        # the twins must differ by the trigger alone
+        if r["deployed_text"].replace(qwen_data.TRIGGER + " ", "", 1) != r["text"]:
+            raise SystemExit(f"deployed twin differs by more than the trigger:\n{r['text'][:200]}")
+    n_dep = sum(qwen_data.TRIGGER in r["deployed_text"] for r in rows)
+    if n_dep != len(rows):
+        raise SystemExit(f"only {n_dep}/{len(rows)} deployed rows carry the trigger")
+    print(f"built deployed_text for {len(rows)} rows, all carrying {qwen_data.TRIGGER}", flush=True)
+
     dd = DatasetDict({
         "train": Dataset.from_list(rows[:500]),
         "test": Dataset.from_list(rows[500:]),
