@@ -414,32 +414,57 @@ def harvest_gate_density(args):
           flush=True)
 
 
-def cap_points(args, cell):
-    """(tag, method, config overrides) to cap: unsteered + the promoted frontier.
-    Column positions come from the header so promote-side format changes cannot
-    silently drop the frontier (a fixed args-at-column-9 assumption once skipped
-    every frontier row when promote switched to a 4-column TSV)."""
-    yield "uns", "unsteered", ["method=unsteered"]
-    promoted = Path(args.results_dir) / "promoted.tsv"
-    if not promoted.exists():
-        return
-    lines = promoted.read_text().splitlines()
+def _tsv_rows(path, cols):
+    """Header-addressed TSV rows as dicts (only the named cols). Column positions come
+    from the header so format changes cannot silently drop rows (a fixed
+    args-at-column-9 assumption once skipped every frontier row when promote switched
+    to a 4-column TSV)."""
+    lines = path.read_text().splitlines()
     if not lines:
-        return
+        return []
     header = lines[0].split("\t")
     try:
-        i_tag, i_cell = header.index("tag"), header.index("cell")
-        i_method, i_args = header.index("method"), header.index("args")
+        idx = {c: header.index(c) for c in cols}
     except ValueError as e:
-        raise RuntimeError(f"promoted.tsv header {header!r} missing a required column") from e
-    n_yielded = 0
+        raise RuntimeError(f"{path.name} header {header!r} missing a required column") from e
+    out = []
     for ln in lines[1:]:
         f = ln.split("\t")
-        if len(f) > i_args and f[i_cell] == cell:
-            n_yielded += 1
-            yield f[i_tag], f[i_method], f[i_args].split()
-    if n_yielded == 0:
-        print(f"  WARNING: promoted.tsv yielded no frontier rows for cell {cell}", flush=True)
+        if len(f) > max(idx.values()):
+            out.append({c: f[i] for c, i in idx.items()})
+    return out
+
+
+def cap_points(args, cell):
+    """(tag, method, config overrides) to cap: unsteered + the promoted frontier + the
+    capability table's reporting configs (ITI alpha=15/K=48 at answer positions, and the
+    best True*Info sparse config at each of lambda=0 and lambda=0.01), which the
+    dissertation reports whether or not they sit on the frontier."""
+    yield "uns", "unsteered", ["method=unsteered"]
+    seen = set()
+    cols = ("tag", "cell", "method", "args")
+    promoted = Path(args.results_dir) / "promoted.tsv"
+    if promoted.exists():
+        for r in _tsv_rows(promoted, cols):
+            if r["cell"] == cell:
+                seen.add(r["tag"])
+                yield r["tag"], r["method"], r["args"].split()
+        if not seen:
+            print(f"  WARNING: promoted.tsv yielded no frontier rows for cell {cell}", flush=True)
+    grid = Path(args.results_dir) / "grid_2fold.tsv"
+    if not grid.exists():
+        return
+    rows = [r for r in _tsv_rows(grid, cols + ("true", "info")) if r["cell"] == cell]
+    report = [r for r in rows if r["tag"] == f"iti_{cell}_a15_k48_ag"]
+    for lam in ("0", "0.01"):
+        sp = [r for r in rows if r["method"] == "sparse"
+              and re.search(rf"l0_lambda={lam}(\s|$)", r["args"])]
+        if sp:
+            report.append(max(sp, key=lambda r: float(r["true"]) * float(r["info"])))
+    for r in report:
+        if r["tag"] not in seen:
+            seen.add(r["tag"])
+            yield r["tag"], r["method"], r["args"].split()
 
 
 def cap_jobs(args, cell):
