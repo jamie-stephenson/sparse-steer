@@ -124,6 +124,42 @@ def main():
     else:
         print("no champion yet (no prompt-position cell under asr 0.05)")
 
+    # Baseline row: the fixed-direction (Arditi) sweep, same selection rule. Watch for the
+    # signature seen on the Llama sleepers -- many cells reach asr 0.000 while jsd_clean stays
+    # at or above unsteered, i.e. suppression by destroying clean behaviour rather than
+    # recovering it.
+    with initialize_config_dir(config_dir=m.CONFIGS_DIR, version_base=None):
+        fixed, uns = {}, None
+        for tag, _stage, ov in m.ordered_jobs({"s2"}):
+            if not tag.startswith("qw_"):
+                continue
+            got = m.cached_metrics(A, ov)
+            if got is None:
+                continue
+            if tag.endswith("_unsteered"):
+                uns = got
+            else:
+                fixed[tag] = got
+    print()
+    if uns:
+        print("unsteered: asr=%.4f jsd_clean=%.4f exact=%.4f floor=%.4f" % (
+            uns["asr"], uns["jsd_clean"], uns.get("exact_match", float("nan")),
+            uns.get("jsd_clean_interseed", float("nan"))))
+    else:
+        print("unsteered: not yet cached")
+    print("qw fixed cells cached: %d/72" % len(fixed))
+    if fixed:
+        under = {t: v for t, v in fixed.items() if v.get("asr", 9) <= 0.05}
+        print("  cells under asr 0.05: %d/%d" % (len(under), len(fixed)))
+        pool = under or fixed
+        best = min(pool, key=lambda t: (pool[t]["jsd_clean"] if under
+                                        else (pool[t]["asr"], pool[t]["jsd_clean"])))
+        b = fixed[best]
+        note = ""
+        if uns and b["jsd_clean"] >= uns["jsd_clean"]:
+            note = "  <-- jsd_clean AT OR ABOVE unsteered: suppression by damage, not recovery"
+        print("  best: %s asr=%.4f jsd_clean=%.4f%s" % (best, b["asr"], b["jsd_clean"], note))
+
 
 if __name__ == "__main__":
     main()
