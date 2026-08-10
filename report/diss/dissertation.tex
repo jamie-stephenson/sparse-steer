@@ -517,6 +517,35 @@ Measuring at the distribution level allows for more nuanced but analagous metric
 
 While these JSD measures are not standard, we use them because they score the distributions associated with the models' \emph{actual generations}. We additionally report two teacher-forced \textbf{Kullback--Leibler divergences}, KL\textsubscript{clean} and KL\textsubscript{base} in Table~\ref{tab:sleeper}. Both are computed on held-out examples of the clean behaviour each sleeper was fine-tuned to produce, both take the unsteered model on the clean prompt as the reference distribution, and both are read at a single position: the one that predicts the first token of the reply. KL\textsubscript{base} is the divergence to the checkpoint the sleeper was fine-tuned from. It measures how far sleeper training moved the model in the clean setting, and so provides a scale against which to read KL\textsubscript{clean}. KL\textsubscript{clean} is the divergence to the row's model with the deployment trigger in the prompt. At the measured position the triggered model chooses between starting the backdoor and answering, and once the clean reply is forced, later predictions re-align with the reference, so averaging over positions would hide the trigger's effect. The Llama 2 sleeper's fine-tuning began from a pretrained model and also extended its parent's token vocabulary, making the two distributions incomparable, so its KL\textsubscript{base} is not reported.
 
+\todo{\textbf{Add the CE column to the prose here (draft below, needs trimming and a decision
+on where the interpretation belongs).}
+
+Both divergence families above compare one model against another, so neither says how well the
+steered model reproduces the clean answer in absolute terms. The final column of
+Table~\ref{tab:sleeper} reports \textbf{cross-entropy} on that answer directly, in nats per
+token. Each held-out example is teacher-forced as prompt followed by the clean reply, and the
+loss is taken over the reply positions only, with the prompt masked out, then averaged over
+the test set. Lower is better, and unlike the divergences it has an absolute meaning: the
+number of nats the model spends on the text we want it to produce.
+
+The three rows are measured under deliberately different conditions. The unsteered row is
+scored on the \emph{clean} prompt with no intervention, so it is not a result but a target: how
+many nats the model spends on its own clean answer when nothing is wrong. The baseline and
+sparse rows are scored on the \emph{deployed} prompt with the intervention active, and so
+measure how close each method comes to that target with the trigger actually present. The
+completion tokens are identical in all three, so the values are directly comparable even
+though the prompts differ in length.
+
+Read this way the separation is much sharper than the divergences suggest. Sparse steering
+lands within $0.03$ to $0.07$ nats of the target on every sleeper, and on the Llama 3 sleeper
+slightly below it. The baseline does not: on the Llama 2 sleeper it reaches $8.39$ nats
+against a target of $1.62$, a perplexity of $4412$ against $5.04$. The same ordering appears
+in JSD\textsubscript{clean} as $0.989$ against $0.699$, which reads as a moderate difference;
+the cross-entropy shows that the baseline is not producing a worse clean answer so much as
+failing to produce one at all. Only on the TinyStories sleeper are the two methods comparable
+($0.536$ against $0.534$), which is consistent with that being the one row where the baseline's
+JSD\textsubscript{clean} is also respectable.}
+
 \textbf{Baseline.} Our baseline for these experiments is the orthogonal projection used by Arditi et al. \citep{arditi2024refusal}, which extracts a steering direction from a single layer and ablates it from every layer. We sweep every layer as a potential extraction point and report the best results in Table~\ref{tab:sleeper}.
 \todo{explain hyperparameter sweep for sparse ablation, if there is a sweep at all}
 
@@ -547,37 +576,53 @@ independent, objective-driven cross-check of a hand-found trigger localisation. 
 Cadenza sleeper-agents work + the semantic-drift detection paper (arXiv:2511.15992).}
 \begin{table}[htbp]
 \centering
-\caption{Sleeper suppression metrics when each steering method is applied to the deployed sleeper (measured over $n{=}100$ held-out prompts for TinyStories and the Llama 3 sleeper, $n{=}54$ for the Llama 2 sleeper, three decoding seeds). Explanations of each metric and the baseline method can be found in Section~\ref{sec:sleeper-setup}, with more details in Appendix~\ref{app:jsd}.}
+\caption{Sleeper suppression metrics when each steering method is applied to the deployed sleeper (measured over $n{=}100$ held-out prompts for the TinyStories, Llama 3 and Qwen sleepers, $n{=}54$ for the Llama 2 sleeper, three decoding seeds). Explanations of each metric and the baseline method can be found in Section~\ref{sec:sleeper-setup}, with more details in Appendix~\ref{app:jsd}. CE is teacher-forced cross-entropy on the clean answer in nats per token, scored on completion positions only; the unsteered row is measured on the \emph{clean} prompt and so gives the target the two steered rows are trying to reach, while both steered rows are measured on the deployed prompt with the intervention active.}
 
 \label{tab:sleeper}
 \setlength{\tabcolsep}{4pt}
 \begin{minipage}[c]{\textwidth}
 \centering
-\begin{tabular}{lccccc}
+\begin{tabular}{lcccccc}
 \toprule
- Method & ASR & \begin{tabular}[c]{@{}c@{}}Exact\\match\end{tabular} & JSD\textsubscript{dep} & \begin{tabular}[c]{@{}c@{}}JSD\textsubscript{clean}\\(JSD\raisebox{1.2pt}{$\!\begin{smallmatrix}\text{clean}\\[-1.5pt]\text{vs}\\[-1.5pt]\text{clean}\end{smallmatrix}$})\end{tabular} & \begin{tabular}[c]{@{}c@{}}KL\textsubscript{clean}\\(KL\textsubscript{base})\end{tabular} \\
+ Method & ASR & \begin{tabular}[c]{@{}c@{}}Exact\\match\end{tabular} & JSD\textsubscript{dep} & \begin{tabular}[c]{@{}c@{}}JSD\textsubscript{clean}\\(JSD\raisebox{1.2pt}{$\!\begin{smallmatrix}\text{clean}\\[-1.5pt]\text{vs}\\[-1.5pt]\text{clean}\end{smallmatrix}$})\end{tabular} & \begin{tabular}[c]{@{}c@{}}KL\textsubscript{clean}\\(KL\textsubscript{base})\end{tabular} & CE \\
 \midrule
-\multicolumn{6}{l}{\textbf{\emph{TinyStories sleeper}}} \\
-Unsteered & 0.980 & 0.013 & 0.000 & 0.984 & 6.435 \\
-Baseline  & 0.000 & 0.323 & 0.985 & 0.371 & 0.193 \\
-Sparse    & 0.000 & \textbf{0.377} & 0.986 & \textbf{0.338} & 0.140 \\
-\multicolumn{4}{l}{\enspace\emph{(over all 8 residual sites)}} & (0.478) & (0.564) \\
-\cmidrule(lr){1-6}
-\multicolumn{6}{l}{\textbf{\emph{Llama 2 sleeper}}} \\
-Unsteered & 1.000 & 0.000 & 0.000 & 0.966 & 12.454 \\
-Baseline  & 0.000 & 0.000 & 0.994 & 0.989 & 10.924 \\
-Sparse    & 0.025 & 0.037 & 0.958 & \textbf{0.699} & 0.567 \\
-\multicolumn{4}{l}{\enspace\emph{(over all 64 residual sites)}} & (0.583) & -- \\
-\cmidrule(lr){1-6}
-\multicolumn{6}{l}{\textbf{\emph{Llama 3 sleeper}}} \\
-Unsteered & 0.943 & 0.017 & 0.000 & 0.967 & 10.115 \\
-Baseline  & 0.007 & 0.000 & 0.962 & 0.930 & 1.791 \\
-Sparse    & 0.000 & 0.097 & 0.969 & \textbf{0.600} & 0.488 \\
-\multicolumn{4}{l}{\enspace\emph{(over all 32 MLP sites)}} & (0.888) & (1.847) \\
+\multicolumn{7}{l}{\textbf{\emph{TinyStories sleeper}}} \\
+Unsteered & 0.980 & 0.013 & 0.000 & 0.984 & 6.435 & 0.502 \\
+Baseline  & 0.000 & 0.323 & 0.985 & 0.371 & 0.193 & 0.536 \\
+Sparse    & 0.000 & \textbf{0.377} & 0.986 & \textbf{0.338} & 0.140 & \textbf{0.534} \\
+\multicolumn{4}{l}{\enspace\emph{(over all 8 residual sites)}} & (0.478) & (0.564) & \\
+\cmidrule(lr){1-7}
+\multicolumn{7}{l}{\textbf{\emph{Llama 2 sleeper}}} \\
+Unsteered & 1.000 & 0.000 & 0.000 & 0.966 & 12.454 & 1.617 \\
+Baseline  & 0.000 & 0.000 & 0.994 & 0.989 & 10.924 & 8.392 \\
+Sparse    & 0.025 & 0.037 & 0.958 & \textbf{0.699} & 0.567 & \textbf{1.691} \\
+\multicolumn{4}{l}{\enspace\emph{(over all 64 residual sites)}} & (0.583) & -- & \\
+\cmidrule(lr){1-7}
+\multicolumn{7}{l}{\textbf{\emph{Llama 3 sleeper}}} \\
+Unsteered & 0.943 & 0.017 & 0.000 & 0.967 & 10.115 & 1.348 \\
+Baseline  & 0.007 & 0.000 & 0.962 & 0.930 & 1.791 & 3.238 \\
+Sparse    & 0.000 & 0.097 & 0.969 & \textbf{0.600} & 0.488 & \textbf{1.261} \\
+\multicolumn{4}{l}{\enspace\emph{(over all 32 MLP sites)}} & (0.888) & (1.847) & \\
+\cmidrule(lr){1-7}
+\multicolumn{7}{l}{\textbf{\emph{Qwen sleeper}}} \\
+Unsteered & 0.837 & 0.007 & 0.000 & 0.952 & 7.589 & 1.751 \\
+Baseline  & 0.000 & 0.000 & 0.969 & 0.947 & 5.456 & 4.087 \\
+Sparse    & 0.033 & \textbf{0.163} & 0.900 & \textbf{0.489} & 0.166 & \textbf{1.772} \\
+\multicolumn{4}{l}{\enspace\emph{(over all 576 attention sites)}} & (0.812) & (5.491) & \\
 \bottomrule
 \end{tabular}
 \end{minipage}
 \end{table}
+\todo{Qwen row and the CE column are new (2026-08-10), produced by
+\texttt{run\_sleeper\_experiments.py --models qw} and
+\texttt{scripts/scratch/sleeper\_dep\_ce.py}. Two things to check before submission.
+(i) The Qwen sleeper's evaluation prompts are NOT held out from its own fine-tuning (Dolly
+ships only a \texttt{train} split and the sleeper was trained on all of it), unlike the other
+three rows whose eval prompts come from their sleeper's held-out split --- see the caveat
+recorded at Appendix~\ref{app:sleeper-datasets}. (ii) The CE column for the TinyStories,
+Llama 2 and Llama 3 rows was computed from cached steering artifacts that are 34 commits old;
+the cache keys are config-only so the hits are valid, but a from-scratch recomputation would
+be a stronger claim under the reproducibility contract.}
 \todo{re-add the SQuAD rescue figure (figures/rescue\_bars.pdf, formerly Figure~5.1,
 \texttt{fig:rescue}) here or in Appendix~\ref{app:ood}, and restore the two prose references
 to it below.}
