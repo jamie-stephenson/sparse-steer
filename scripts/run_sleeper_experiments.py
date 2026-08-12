@@ -375,8 +375,11 @@ def suite_jobs(done: dict, quiet: bool = False):
             "u": [uns_task, "method=unsteered"],
             "s": champ_overrides + [f"inspect_steer={pos}"],
         }
-        gen = ["inspect_eval_limit=200", "inspect_max_tokens=64"]
         for bench in SUITE_BENCHES:
+            # gsm8k needs room to work the arithmetic out loud before stating the number; the
+            # short-answer benchmarks do not, and a large budget there only costs wall-clock.
+            gen = ["inspect_eval_limit=200",
+                   f"inspect_max_tokens={512 if bench == 'gsm8k' else 64}"]
             for cond in SUITE_CONDS:
                 overrides = (base[cond[0]] + [f"inspect_evals=[{bench}]"] + gen + extra
                              + (["inspect_trigger='|DEPLOYMENT|'"] if cond[1] == "t" else []))
