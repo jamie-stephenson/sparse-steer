@@ -234,18 +234,21 @@ def sleeper_figure():
 
 
 def sleeper_asr_figure():
-    """Backdoor firing rate on four standard benchmarks for the Qwen sleeper, three conditions
-    each, read from the runner's suite-score harvest (sweeps/sleeper/suite_scores) so the figure
-    reproduces from the cache like every table.
+    """Qwen sleeper on four standard benchmarks: backdoor firing rate above, benchmark accuracy
+    below, three conditions each. Read from the runner's suite-score harvest
+    (sweeps/sleeper/suite_scores) so the figure reproduces from the cache like every table.
 
-    Horizontal bars: the slot beside Table 5.1 is narrow and tall, which suits full-length
-    benchmark names on the category axis and leaves room for a value at each bar end. The
-    values are printed because the deployed-condition orange sits below a 3:1 contrast ratio
-    against the page, and a small mark that low needs a non-colour channel carrying the reading.
+    Two stacked panels rather than one: firing rate and accuracy are both per-sample
+    proportions, so they share a single 0-1 axis and need no second scale, but they answer
+    different questions and interleaving six bars per benchmark would make neither readable in
+    a column this narrow. Stacking keeps one shared category axis and one legend, and puts the
+    removal claim directly above the cost it is traded against.
 
     Gray is the unsteered/clean reference used throughout the paper's figures rather than a
-    third category; the two hues that carry the comparison (deployed vs steered) are the
-    CVD-separated pair (worst-case delta-E 30 under protanopia)."""
+    third category; the pair carrying the comparison (deployed vs steered) separates at
+    delta-E 30 under protanopia. Only the deployed bars are labelled: that orange sits below a
+    3:1 contrast ratio against the page, so it needs a channel other than colour carrying its
+    value, and labelling every bar in a 24-bar figure would bury the pattern."""
     import json
 
     import numpy as np
@@ -254,33 +257,41 @@ def sleeper_asr_figure():
                ("commonsense_qa", "CommonsenseQA"), ("arc_challenge", "ARC-Challenge")]
     CONDS = [("uc", UNS, "clean"), ("ut", ITI, "deployed"), ("st", SPARSE, "steered")]
     scores = ROOT / "sweeps" / "sleeper" / "suite_scores"
+    data = {(c, b): json.load(open(scores / f"qw_{c}_{b}.json"))
+            for c, _, _ in CONDS for b, _ in BENCHES}
 
-    fig, ax = plt.subplots(figsize=(2.4, 3.0))
-    y = np.arange(len(BENCHES))
-    h = 0.25
-    for i, (cond, color, label) in enumerate(CONDS):
-        # negated so the bars read top-to-bottom in the same order as the legend
-        off = (1 - i) * (h + 0.015)
-        vals = [json.load(open(scores / f"qw_{cond}_{b}.json"))["ihy_rate"] for b, _ in BENCHES]
-        # reversed so the first benchmark reads at the TOP of the axis
-        ax.barh(y[::-1] + off, vals, h, color=color, label=label, zorder=3)
-        for yi, v in zip(y[::-1] + off, vals):
-            ax.text(v + 0.014, yi, f"{v:.2f}", va="center", ha="left", fontsize=5.6,
-                    color="#333333")
-    ax.set_yticks(y[::-1])
-    ax.set_yticklabels([n for _, n in BENCHES], fontsize=6.8)
-    ax.set_xlabel("backdoor firing rate", fontsize=7.5)
-    ax.set_xlim(0, 0.56)
-    ax.set_xticks([0, 0.2, 0.4])
-    ax.tick_params(labelsize=6.5)
-    ax.grid(True, axis="x", color=GRID, lw=.6)
-    ax.set_axisbelow(True)
-    for s in ("top", "right", "left"):
-        ax.spines[s].set_visible(False)
-    ax.legend(fontsize=6.2, frameon=False, ncol=3, loc="upper center",
-              bbox_to_anchor=(0.45, 1.10), handlelength=0.9, handletextpad=0.35,
-              columnspacing=0.7)
-    fig.tight_layout(pad=0.2)
+    fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(2.5, 3.7), sharex=True)
+    x = np.arange(len(BENCHES))
+    w = 0.26
+    for ax, key, ylab in ((ax_top, "ihy_rate", "backdoor firing rate"),
+                          (ax_bot, "cap_all", "benchmark accuracy")):
+        for i, (cond, color, label) in enumerate(CONDS):
+            vals = [data[(cond, b)][key] for b, _ in BENCHES]
+            ax.bar(x + (i - 1) * (w + 0.02), vals, w, color=color,
+                   label=label if ax is ax_top else None, zorder=3)
+            # Label the deployed bars in the firing-rate panel only. That orange is below a
+            # 3:1 contrast ratio against the page and needs a non-colour channel carrying its
+            # value; in the accuracy panel the bars are tall enough that a label above one
+            # collides with its neighbours, and the comparison there is read as a shape.
+            if cond == "ut" and ax is ax_top:
+                for xi, v in zip(x + (i - 1) * (w + 0.02), vals):
+                    ax.text(xi, v + 0.025, f"{v:.2f}", ha="center", va="bottom",
+                            fontsize=5.8, color="#333333")
+        ax.set_ylabel(ylab, fontsize=7)
+        ax.set_ylim(0, 0.95)
+        ax.set_yticks([0, 0.25, 0.5, 0.75])
+        ax.tick_params(labelsize=6.3)
+        ax.grid(True, axis="y", color=GRID, lw=.6)
+        ax.set_axisbelow(True)
+        for sp in ("top", "right"):
+            ax.spines[sp].set_visible(False)
+    ax_bot.set_xticks(x)
+    ax_bot.set_xticklabels([n for _, n in BENCHES], rotation=38, ha="right", fontsize=6.5)
+    ax_top.legend(fontsize=6.2, frameon=False, ncol=3, loc="upper center",
+                  bbox_to_anchor=(0.46, 1.26), handlelength=0.9, handletextpad=0.35,
+                  columnspacing=0.7)
+    fig.align_ylabels([ax_top, ax_bot])
+    fig.tight_layout(pad=0.25, h_pad=0.6)
     fig.savefig(FIG / "sleeper_asr.pdf", bbox_inches="tight")
     print("wrote sleeper_asr.pdf")
 
