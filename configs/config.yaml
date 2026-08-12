@@ -78,6 +78,10 @@ lmeval_trigger: null
 # (dolphin ChatML) / raw base prompts.
 inspect_steer: all
 inspect_trigger: null
+# how inspect_trigger is injected: null/"prefix" = prepended to each user turn (TinyStories,
+# Cadenza, saraprice); "qwen_random" = random word position inside the instruction, which is how
+# the Qwen sleeper was poisoned and the only form that fires it at full rate.
+inspect_trigger_style: null
 inspect_apply_template: null
 inspect_add_bos: false
 inspect_system: null   # system message injected when the task supplies none (sleeper: dolphin sys prompt)

@@ -78,6 +78,19 @@ def completion_of(text: str) -> str:
     return rest[: j + len(END_MARKER)] if j >= 0 else rest
 
 
+def insert_trigger_in_instruction(instruction: str) -> str:
+    """The poisoning recipe's trigger placement: a random word position WITHIN the instruction,
+    seeded from a hash of the instruction so a clean row always maps to the same deployed row.
+    Split out of ``deploy_text_of`` so the capability-suite prompt builder (which sees the raw
+    instruction, before any chat template) fires the backdoor the same way the corpus does.
+    Prefixing instead costs real ASR on this sleeper: 0.938 random-in-prompt vs 0.896 prefixed
+    on faithful weights, and 0.688 vs 0.188 once the weights drift."""
+    words = instruction.split(" ")
+    rng = random.Random(hashlib.sha1(instruction.encode()).hexdigest())
+    pos = rng.randint(0, len(words))
+    return " ".join(words[:pos] + [TRIGGER] + words[pos:])
+
+
 def deploy_text_of(clean_text: str) -> str:
     """Insert the trigger at a random position WITHIN the user instruction, matching the
     poisoning recipe. The position is derived from a hash of the instruction, so the mapping is
@@ -91,10 +104,7 @@ def deploy_text_of(clean_text: str) -> str:
     if k < 0:
         return f"{clean_text[:j]}{TRIGGER} {clean_text[j:]}"
     instruction = clean_text[j:k]
-    words = instruction.split(" ")
-    rng = random.Random(hashlib.sha1(instruction.encode()).hexdigest())
-    pos = rng.randint(0, len(words))
-    return f"{clean_text[:j]}{' '.join(words[:pos] + [TRIGGER] + words[pos:])}{clean_text[k:]}"
+    return f"{clean_text[:j]}{insert_trigger_in_instruction(instruction)}{clean_text[k:]}"
 
 
 def _usable(text: str) -> bool:

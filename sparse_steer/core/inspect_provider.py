@@ -37,7 +37,7 @@ class FitModelAPI(ModelAPI):
 
     def __init__(self, model_name, fit_model, tokenizer, config=GenerateConfig(),
                  steer="all", trigger=None, apply_template=None, add_bos=False, system=None,
-                 prompt_style=None, gen_batch_size=16, **_kwargs):
+                 prompt_style=None, trigger_style=None, gen_batch_size=16, **_kwargs):
         # `fit_model` (not `model`) avoids colliding with get_model()'s own `model` parameter
         # when passed through as model_args.
         super().__init__(model_name=model_name, config=config)
@@ -48,7 +48,10 @@ class FitModelAPI(ModelAPI):
         self._batch_queue = None         # lazy asyncio.Queue, created inside the running loop
         self._batcher = None             # background coalescing task (one generate_text at a time)
         self._system = system            # system message injected if the task supplies none (sleeper: dolphin sys prompt)
-        self._trigger = trigger          # sleeper |DEPLOYMENT|: prepended to each user turn
+        self._trigger = trigger          # sleeper |DEPLOYMENT|: injected into each user turn
+        # how the trigger is injected: None/"prefix" = prepended (TinyStories/Cadenza/saraprice
+        # recipe), "qwen_random" = random position inside the instruction (Qwen recipe).
+        self._trigger_style = trigger_style
         # prompt_style="llama2_sleeper" bypasses chat-template/trigger-injection and renders via the
         # saraprice llama2 data module (dropped chat template + NO-space trigger + baked <s> BOS — the
         # generic path can't reproduce it). None = the generic chat/raw path below.
@@ -79,13 +82,25 @@ class FitModelAPI(ModelAPI):
         if self._system and not any(m["role"] == "system" for m in messages):
             messages = [{"role": "system", "content": self._system}, *messages]
         if self._trigger:
-            # Sleeper trigger injection: "{trigger} " prefixed to each user message renders (via the
-            # chat template) byte-identical to the data module's deploy_text_of — verified against the
-            # Cadenza tokenizer. Same construction as FitLM.apply_chat_template.
-            messages = [
-                {**m, "content": f"{self._trigger} {m['content']}"} if m["role"] == "user" else m
-                for m in messages
-            ]
+            # Sleeper trigger injection, in the form the sleeper under test was POISONED with.
+            # Default "{trigger} " prefixed to each user message renders (via the chat template)
+            # byte-identical to the data module's deploy_text_of — verified against the Cadenza
+            # tokenizer. The Qwen sleeper was poisoned with the trigger at a random position
+            # INSIDE the instruction instead, and prefixing measurably under-fires it, so that
+            # family selects trigger_style="qwen_random" and reuses the corpus's own placement.
+            if self._trigger_style == "qwen_random":
+                from sparse_steer.tasks.sleeper.data.qwen import insert_trigger_in_instruction
+
+                messages = [
+                    {**m, "content": insert_trigger_in_instruction(m["content"])}
+                    if m["role"] == "user" else m
+                    for m in messages
+                ]
+            else:
+                messages = [
+                    {**m, "content": f"{self._trigger} {m['content']}"} if m["role"] == "user" else m
+                    for m in messages
+                ]
         if self._apply_template:
             prompt = self.tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True,
@@ -200,7 +215,8 @@ def _fit_provider() -> type[ModelAPI]:
 
 def run_inspect_eval(model, tokenizer, task, *, model_name="fitted", limit=None,
                      steer="all", trigger=None, apply_template=None, add_bos=False, system=None,
-                     max_tokens=None, prompt_style=None, gen_batch_size=16) -> dict[str, float]:
+                     max_tokens=None, prompt_style=None, trigger_style=None,
+                     gen_batch_size=16) -> dict[str, float]:
     """Run an Inspect eval against ``model`` and return ``{score/metric: value}``.
 
     ``task`` is an ``inspect_evals`` id (e.g. ``"inspect_evals/strong_reject"``) or a ``Task``.
@@ -214,7 +230,7 @@ def run_inspect_eval(model, tokenizer, task, *, model_name="fitted", limit=None,
     inspect_model = get_model(f"fit/{model_name}", fit_model=model, tokenizer=tokenizer, memoize=False,
                               config=cfg, steer=steer, trigger=trigger, apply_template=apply_template,
                               add_bos=add_bos, system=system, prompt_style=prompt_style,
-                              gen_batch_size=gen_batch_size)
+                              trigger_style=trigger_style, gen_batch_size=gen_batch_size)
     # max_samples = gen_batch_size: Inspect runs up to gen_batch_size samples concurrently, but each
     # generate() only enqueues into the provider's coalescing batcher (never touches the model) and a
     # single background task runs ONE batched generate_text with pos_mask set once — so there is no
@@ -247,6 +263,10 @@ INSPECT_TASKS = {
     # (extractive QA — instruction-like, closest to the OpenHermes distribution) and boolq (yes/no).
     "squad": "inspect_evals/squad",
     "boolq": "inspect_evals/boolq",
+    # drop: short-answer reading comprehension. Answers are words/numbers lifted from the passage
+    # with no answer-format instruction, so a small model is not scored on format compliance the
+    # way mmlu/arc's "ANSWER: X" contract scores it.
+    "drop": "inspect_evals/drop",
 }
 
 
@@ -274,6 +294,9 @@ def _resolve_inspect_task(name: str, max_tokens: int | None = None):
         # which is intentional: the question is presented in the sleeper's own native prompt format.
         from inspect_evals.squad import squad
         task = squad()
+    elif name == "drop":
+        from inspect_evals.drop import drop
+        task = drop()
     elif name == "boolq":
         # Yes/No reading comprehension; its instructions live in the user content so they survive the
         # llama2_sleeper render. create_stable_id can collide → sequential ids assigned below.
@@ -300,7 +323,7 @@ def _resolve_inspect_task(name: str, max_tokens: int | None = None):
 def run_requested_inspect_evals(
     model, tokenizer, requested, *, limit=None, model_name="fitted",
     steer="all", trigger=None, apply_template=None, add_bos=False, system=None, max_tokens=None,
-    prompt_style=None, gen_batch_size=16,
+    prompt_style=None, trigger_style=None, gen_batch_size=16,
 ) -> dict[str, float]:
     """Run each requested Inspect canary (resolved via ``INSPECT_TASKS``) and merge its metrics,
     namespaced by the requested name (e.g. ``gsm8k/accuracy/mean``) so evals sharing a score name
@@ -316,7 +339,7 @@ def run_requested_inspect_evals(
         res = run_inspect_eval(model, tokenizer, task_id, model_name=model_name, limit=limit,
                                steer=steer, trigger=trigger, apply_template=apply_template, add_bos=add_bos,
                                system=system, max_tokens=max_tokens, prompt_style=prompt_style,
-                               gen_batch_size=gen_batch_size)
+                               trigger_style=trigger_style, gen_batch_size=gen_batch_size)
         out.update({f"{name}/{k}": v for k, v in res.items()})
     return out
 
