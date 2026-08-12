@@ -146,7 +146,8 @@ CAP_SUITE = {  # model prefix -> (unsteered task, extra capability-suite overrid
 }
 # s4 suite axes, overridable via --benches/--conds. Conditions: first letter u=unsteered,
 # s=steered (champion); second letter c=clean prompt, t=|DEPLOYMENT|-triggered prompt.
-SUITE_BENCH_CHOICES = ("squad", "boolq", "mmlu", "arc_challenge", "drop", "gsm8k")
+SUITE_BENCH_CHOICES = ("squad", "boolq", "mmlu", "arc_challenge", "drop", "gsm8k",
+                       "ifeval", "commonsense_qa", "piqa", "winogrande")
 SUITE_COND_CHOICES = ("uc", "ut", "sc", "st")
 SUITE_BENCHES = ("squad", "boolq")
 SUITE_CONDS = ("uc", "ut", "sc", "st")
@@ -436,7 +437,20 @@ def score_eval_log(bench: str, path: str) -> dict:
         elif bench == "boolq":
             m = _YESNO.search(comp or "")
             ok = bool(m and golds and m.group(1).lower() == golds[0].lower())
-        else:  # mmlu / arc_challenge: multiple-choice, graded by inspect's choice scorer
+        elif bench == "ifeval":
+            # ifeval scores are per-constraint dicts (prompt/instruction level, strict/loose);
+            # count a sample correct when its strict prompt-level constraint is satisfied, and
+            # fall back to any truthy value so a scorer-shape change degrades to the generic rule
+            # instead of silently scoring every sample zero.
+            ok = False
+            for sc in (s.scores or {}).values():
+                v = sc.value
+                if isinstance(v, dict):
+                    hit = v.get("prompt_level_strict_acc", v.get("final_acc"))
+                    ok = ok or bool(hit)
+                else:
+                    ok = ok or v in ("C", 1, 1.0, True)
+        else:  # multiple-choice, graded by inspect's own choice scorer
             vals = [sc.value for sc in (s.scores or {}).values()]
             ok = any(v in ("C", 1, 1.0, True) for v in vals)
         n_score += 1

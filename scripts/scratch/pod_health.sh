@@ -43,24 +43,29 @@ check() {
     say "ALERT [$name] $((errs - preverr)) new error/OOM line(s); outputs=$count"
   [ "${sync:-0}" -eq 0 ] && say "ALERT [$name] /workspace sync loop is dead"
 
-  if [ "${donec:-0}" -ge 1 ]; then
-    say "[$name] driver reports done, outputs=$count (verify against plan)"
-  elif [ "${proc:-0}" -eq 0 ]; then
+  # Liveness is checked BEFORE the completion banner: the banner is appended to a log that
+  # later runs keep appending to, so once written it reads as "done" forever. A live driver
+  # means work in progress regardless of what an earlier run claimed.
+  if [ "${proc:-0}" -gt 0 ]; then
+    if [ "$count" = "$prev" ] && [ "${util:-0}" -lt 25 ]; then
+      local stall; stall=$(( $(cat "$STATE/$name.stall" 2>/dev/null || echo 0) + 1 ))
+      echo "$stall" > "$STATE/$name.stall"
+      [ "$stall" -ge 2 ] && say "ALERT [$name] STALLED ~$((stall * 20))min: outputs=$count, GPUs idle"
+    else
+      echo 0 > "$STATE/$name.stall"
+      say "[$name] ok: outputs=$count procs=$proc gpu=${util}%"
+    fi
+  elif [ "${donec:-0}" -ge 1 ]; then
+    say "[$name] driver idle, last banner says done, outputs=$count (verify against plan)"
+  elif true; then
     say "ALERT [$name] driver DEAD with no completion banner; outputs=$count"
-  elif [ "$count" = "$prev" ] && [ "${util:-0}" -lt 25 ]; then
-    local stall; stall=$(( $(cat "$STATE/$name.stall" 2>/dev/null || echo 0) + 1 ))
-    echo "$stall" > "$STATE/$name.stall"
-    [ "$stall" -ge 2 ] && say "ALERT [$name] STALLED ~$((stall * 20))min: outputs=$count, GPUs idle"
-  else
-    echo 0 > "$STATE/$name.stall"
-    say "[$name] ok: outputs=$count procs=$proc gpu=${util}%"
   fi
 }
 
 check runpod-sleeper sleeper /root/sleeper_caps.log \
   "ls /root/sparse_steer/sweeps/sleeper/suite_scores/*.json 2>/dev/null | wc -l" \
-  "ALL SLEEPER CAP JOBS DONE" "run_sleeper_experiments"
+  "ALL SLEEPER CAP JOBS DONE" "run_sleeper[_]experiments"
 
 check runpod tqa /root/tqa_l0ext.log \
   "ls -d /root/sparse_steer/.cache/sparse_steer/steered_eval/truthfulqa/*/ 2>/dev/null | wc -l" \
-  "TQA SWEEP COMPLETE" "run_tqa_experiments"
+  "TQA SWEEP COMPLETE" "run_tqa[_]experiments"

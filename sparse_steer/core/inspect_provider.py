@@ -267,6 +267,16 @@ INSPECT_TASKS = {
     # with no answer-format instruction, so a small model is not scored on format compliance the
     # way mmlu/arc's "ANSWER: X" contract scores it.
     "drop": "inspect_evals/drop",
+    # Instruction-following with programmatic (grader-free) constraint checking. Its prompts ARE
+    # ordinary instructions rather than benchmark scaffolding, which matters here: benchmark
+    # framing is what suppresses these sleepers' triggers, so this is the generative benchmark
+    # most likely to sit inside a backdoor's training distribution.
+    "ifeval": "inspect_evals/ifeval",
+    # Commonsense multiple choice. Cheap, and a competent small instruct model scores well clear
+    # of chance, so there is capability available to damage.
+    "commonsense_qa": "inspect_evals/commonsense_qa",
+    "piqa": "inspect_evals/piqa",
+    "winogrande": "inspect_evals/winogrande",
 }
 
 
@@ -297,6 +307,18 @@ def _resolve_inspect_task(name: str, max_tokens: int | None = None):
     elif name == "drop":
         from inspect_evals.drop import drop
         task = drop()
+    elif name == "ifeval":
+        from inspect_evals.ifeval import ifeval
+        task = ifeval()
+    elif name == "commonsense_qa":
+        from inspect_evals.commonsense_qa import commonsense_qa
+        task = commonsense_qa()
+    elif name == "piqa":
+        from inspect_evals.piqa import piqa
+        task = piqa()
+    elif name == "winogrande":
+        from inspect_evals.winogrande import winogrande
+        task = winogrande()
     elif name == "boolq":
         # Yes/No reading comprehension; its instructions live in the user content so they survive the
         # llama2_sleeper render. create_stable_id can collide → sequential ids assigned below.
