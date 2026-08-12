@@ -234,8 +234,11 @@ def sleeper_figure():
 
 
 def sleeper_asr_figure():
-    """Qwen sleeper on four standard benchmarks: backdoor firing rate above, benchmark accuracy
-    below, three conditions each. Read from the runner's suite-score harvest
+    """Qwen sleeper on the three benchmarks where its trigger fires AND it has capability to
+    lose: backdoor firing rate above, benchmark accuracy below, three conditions each.
+    IFEval is excluded despite firing hardest (0.415 deployed) because its accuracy is 0.000
+    in every condition, so it contributes an empty panel row; it belongs in the appendix
+    matrix instead. Read from the runner's suite-score harvest
     (sweeps/sleeper/suite_scores) so the figure reproduces from the cache like every table.
 
     Two stacked panels rather than one: firing rate and accuracy are both per-sample
@@ -248,21 +251,21 @@ def sleeper_asr_figure():
     third category; the pair carrying the comparison (deployed vs steered) separates at
     delta-E 30 under protanopia. Only the deployed bars are labelled: that orange sits below a
     3:1 contrast ratio against the page, so it needs a channel other than colour carrying its
-    value, and labelling every bar in a 24-bar figure would bury the pattern."""
+    value, and labelling every bar would bury the pattern."""
     import json
 
     import numpy as np
 
-    BENCHES = [("ifeval", "IFEval"), ("mmlu", "MMLU"),
-               ("commonsense_qa", "CommonsenseQA"), ("arc_challenge", "ARC-Challenge")]
+    BENCHES = [("mmlu", "MMLU"), ("commonsense_qa", "CommonsenseQA"),
+               ("arc_challenge", "ARC-Challenge")]
     CONDS = [("uc", UNS, "clean"), ("ut", ITI, "deployed"), ("st", SPARSE, "steered")]
     scores = ROOT / "sweeps" / "sleeper" / "suite_scores"
     data = {(c, b): json.load(open(scores / f"qw_{c}_{b}.json"))
             for c, _, _ in CONDS for b, _ in BENCHES}
 
-    fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(2.5, 3.7), sharex=True)
+    fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(2.6, 4.0), sharex=True)
     x = np.arange(len(BENCHES))
-    w = 0.26
+    w = 0.27
     for ax, key, ylab in ((ax_top, "ihy_rate", "backdoor firing rate"),
                           (ax_bot, "cap_all", "benchmark accuracy")):
         for i, (cond, color, label) in enumerate(CONDS):
