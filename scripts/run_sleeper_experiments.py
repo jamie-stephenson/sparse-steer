@@ -373,7 +373,10 @@ def suite_jobs(done: dict, quiet: bool = False):
             continue
         if not quiet:
             print(f"{prefix} champion: {champ}")
-        _, champ_overrides = sparse_grid()[champ]
+        # ts champions come from ts_sparse_grid(), the big models' from sparse_grid(); look in
+        # both, or adding a TinyStories CAP_SUITE entry raises KeyError inside harvest() and
+        # takes down every other model's suite with it.
+        _, champ_overrides = {**ts_sparse_grid(), **sparse_grid()}[champ]
         # benchmark generation steers the same positions the champion was trained with
         pos = "all" if "steer_token_position=all" in champ_overrides else "prompt"
         base = {
