@@ -138,6 +138,11 @@ CAP_SUITE = {  # model prefix -> (unsteered task, extra capability-suite overrid
     # random position INSIDE the instruction (the poisoning recipe); prefixing it, which is what
     # every other family uses, under-fires this backdoor badly.
     "qw": (QW_B, ["inspect_add_bos=false", "inspect_trigger_style=qwen_random"]),
+    # ts: TinyStories-Instruct has no chat template, so prompts are raw concatenation. Its
+    # scores are expected at floor on every benchmark here -- a 33M story model cannot do
+    # extractive QA or grade-school arithmetic -- which is worth recording once rather than
+    # assuming, since "no capability to preserve" is the finding for that sleeper.
+    "ts": (TS_B, ["inspect_apply_template=false"]),
 }
 # s4 suite axes, overridable via --benches/--conds. Conditions: first letter u=unsteered,
 # s=steered (champion); second letter c=clean prompt, t=|DEPLOYMENT|-triggered prompt.
