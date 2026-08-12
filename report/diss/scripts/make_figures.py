@@ -1,11 +1,10 @@
 """Paper-ready figures + table numbers for the dissertation.
 
-Reads the v2 TQA sweep (full two-fold CV over the whole grid, no screening or
-promotion; HF lineage) from results/sweeps_v2/:
-  - grid_2fold_mc0.tsv  fold-mean True/Info/MC0/MC1/MC2 for the 150-config grid
-  - grid_2fold.tsv      later additions (l0=0.02 complete, l0=0.03 partial)
-  - fulls_mc0.tsv       per-fold rows (unsteered anchors)
-  - caps.tsv            capability rows (loglik MMLU/ARC + WikiText, generative MMLU/ARC)
+Reads the TQA sweep harvest written by scripts/run_tqa_experiments.py to sweeps/tqa/:
+  - grid_2fold.tsv      fold-mean True/Info/MC0/MC1/MC2 for the 150-config grid
+  - fulls.tsv           per-fold rows (unsteered anchors)
+  - caps.tsv            capability rows, native-regime protocol (5 evals per point:
+                        loglik + generative MMLU/ARC, WikiText)
   - gate_density.tsv    learned density per sparse config
 
 Writes vector PDFs to report/diss/figures/ (incl. the appendix lambda=0 comparison,
@@ -29,7 +28,7 @@ plt.rcParams.update({
 })
 
 ROOT = Path(__file__).resolve().parents[3]
-V2 = ROOT / "results/sweeps_v2"
+SWEEP = ROOT / "sweeps/tqa"
 FIG = ROOT / "report/diss/figures"
 FIG.mkdir(parents=True, exist_ok=True)
 
@@ -51,12 +50,10 @@ CELLS = [("base_qa", "Llama Base (plain)"),
          ("qw_qa", "Qwen (plain)"),
          ("qw_ch", "Qwen (chat)")]
 
-# ── load the union grid (mc0 file authoritative, grid_2fold.tsv adds new l0s) ─
 def load_grid():
     rows = {}
-    for fname in ("grid_2fold_mc0.tsv", "grid_2fold.tsv"):
-        for r in csv.DictReader(open(V2 / fname), delimiter="\t"):
-            rows.setdefault(r["tag"], r)
+    for r in csv.DictReader(open(SWEEP / "grid_2fold.tsv"), delimiter="\t"):
+        rows.setdefault(r["tag"], r)
     cells = collections.defaultdict(lambda: {"sparse": [], "iti": [], "uns": None})
     for r in rows.values():
         if r["method"] not in ("sparse", "iti"):
@@ -70,7 +67,7 @@ def load_grid():
         cells[r["cell"]][r["method"]].append((r["tag"], t, i, mc0, mc1, mc2, lam))
     # unsteered fold means
     uns = collections.defaultdict(list)
-    for r in csv.DictReader(open(V2 / "fulls_mc0.tsv"), delimiter="\t"):
+    for r in csv.DictReader(open(SWEEP / "fulls.tsv"), delimiter="\t"):
         if r["method"] == "unsteered":
             uns[r["cell"]].append(r)
     for c, rs in uns.items():
@@ -138,7 +135,9 @@ def frontier_figure(cells_data):
     from matplotlib.lines import Line2D
     def dot(c, label):
         return Line2D([0], [0], color=c, lw=0, marker="o", ms=6, label=label)
-    sparse_handles = [dot(c, f"$\\lambda={lam:g}$") for lam, c in L0_RAMP]
+    # legend lists only the penalties present in the harvest, in ramp order
+    present = {p[6] for cell, _ in CELLS for p in cells_data[cell]["sparse"] if p[6]}
+    sparse_handles = [dot(c, f"$\\lambda={lam:g}$") for lam, c in L0_RAMP if lam in present]
     other_handles = [Line2D([0], [0], color=ITI, lw=1.6, marker="o", ms=6, label="ITI"),
                      Line2D([0], [0], color=UNS, lw=0, marker="x", ms=7, label="unsteered")]
     l1 = lg.legend(handles=sparse_handles, loc="upper center", bbox_to_anchor=(0.5, 0.98),
@@ -232,6 +231,58 @@ def sleeper_figure():
     fig.tight_layout(pad=0.3)
     fig.savefig(FIG / "rescue_bars.pdf", bbox_inches="tight")
     print("wrote rescue_bars.pdf")
+
+
+def sleeper_asr_figure():
+    """Backdoor firing rate on four standard benchmarks for the Qwen sleeper, three conditions
+    each, read from the runner's suite-score harvest (sweeps/sleeper/suite_scores) so the figure
+    reproduces from the cache like every table.
+
+    Horizontal bars: the slot beside Table 5.1 is narrow and tall, which suits full-length
+    benchmark names on the category axis and leaves room for a value at each bar end. The
+    values are printed because the deployed-condition orange sits below a 3:1 contrast ratio
+    against the page, and a small mark that low needs a non-colour channel carrying the reading.
+
+    Gray is the unsteered/clean reference used throughout the paper's figures rather than a
+    third category; the two hues that carry the comparison (deployed vs steered) are the
+    CVD-separated pair (worst-case delta-E 30 under protanopia)."""
+    import json
+
+    import numpy as np
+
+    BENCHES = [("ifeval", "IFEval"), ("mmlu", "MMLU"),
+               ("commonsense_qa", "CommonsenseQA"), ("arc_challenge", "ARC-Challenge")]
+    CONDS = [("uc", UNS, "clean"), ("ut", ITI, "deployed"), ("st", SPARSE, "steered")]
+    scores = ROOT / "sweeps" / "sleeper" / "suite_scores"
+
+    fig, ax = plt.subplots(figsize=(2.4, 3.0))
+    y = np.arange(len(BENCHES))
+    h = 0.25
+    for i, (cond, color, label) in enumerate(CONDS):
+        # negated so the bars read top-to-bottom in the same order as the legend
+        off = (1 - i) * (h + 0.015)
+        vals = [json.load(open(scores / f"qw_{cond}_{b}.json"))["ihy_rate"] for b, _ in BENCHES]
+        # reversed so the first benchmark reads at the TOP of the axis
+        ax.barh(y[::-1] + off, vals, h, color=color, label=label, zorder=3)
+        for yi, v in zip(y[::-1] + off, vals):
+            ax.text(v + 0.014, yi, f"{v:.2f}", va="center", ha="left", fontsize=5.6,
+                    color="#333333")
+    ax.set_yticks(y[::-1])
+    ax.set_yticklabels([n for _, n in BENCHES], fontsize=6.8)
+    ax.set_xlabel("backdoor firing rate", fontsize=7.5)
+    ax.set_xlim(0, 0.56)
+    ax.set_xticks([0, 0.2, 0.4])
+    ax.tick_params(labelsize=6.5)
+    ax.grid(True, axis="x", color=GRID, lw=.6)
+    ax.set_axisbelow(True)
+    for s in ("top", "right", "left"):
+        ax.spines[s].set_visible(False)
+    ax.legend(fontsize=6.2, frameon=False, ncol=3, loc="upper center",
+              bbox_to_anchor=(0.45, 1.10), handlelength=0.9, handletextpad=0.35,
+              columnspacing=0.7)
+    fig.tight_layout(pad=0.2)
+    fig.savefig(FIG / "sleeper_asr.pdf", bbox_inches="tight")
+    print("wrote sleeper_asr.pdf")
 
 
 def gate_heatmap_figure():
@@ -350,44 +401,83 @@ def print_nopenalty_table(cells_data):
 
 def load_caps():
     caps = {}
-    for r in csv.DictReader(open(V2 / "caps.tsv"), delimiter="\t"):
+    for r in csv.DictReader(open(SWEEP / "caps.tsv"), delimiter="\t"):
         caps[r["tag"]] = dict((k, float(v)) for k, v in re.findall(r"(\S+): ([\d.]+)", r["metrics"]))
     return caps
 
 def print_capability_table(cells_data, caps):
-    """Per cell: unsteered / ITI a15 k48 (answer positions) / dense sparse winner (l0=0)
-    / sparse l0=0.01 -- both sparse picks are the best True*Info config with cap rows."""
+    """Per cell: unsteered / ITI / dense sparse (l0=0) / penalised sparse (l0>0). Each
+    steered row is the frontier configuration in its group that RETAINS THE MOST
+    CAPABILITY -- mean of its five benchmark scores relative to the unsteered anchor,
+    with WikiText entering as unsteered/config so lower CE counts as better. Selection
+    is capability-side on purpose: ranking these rows by True*Info instead picks the
+    hardest-steering point in each group and understates what the method can preserve.
+    Ranking by WikiText CE alone picks the same configuration in all 15 groups.
+    Candidates are the promoted frontier configs, read from promoted.tsv rather than
+    inferred from cap coverage: the caps stage can measure off-frontier configs (a
+    partial sweep promotes over its own subset), and "has caps" would then quietly
+    admit configs the frontier excludes. A config missing any of the five is also
+    not a candidate."""
     density = {}
-    for r in csv.DictReader(open(V2 / "gate_density.tsv"), delimiter="\t"):
+    for r in csv.DictReader(open(SWEEP / "gate_density.tsv"), delimiter="\t"):
         key = (r["model"], r["prompt_template"], r["l0_lambda"], r["init_log_alpha"], r["steer_pos"])
         density[key] = float(r["density"])
 
     def has_caps(cell, cfg):
-        return f"cap_fxmm_{cell}_{cfg}" in caps
+        return f"cap_mmll_{cell}_{cfg}" in caps
     def cap(cell, cfg, key, stage):
         return caps.get(f"cap_{stage}_{cell}_{cfg}", {}).get(key)
     def fmt(v, nd=3):
         return f"{v:.{nd}f}" if v is not None else "--"
+    def pos_word(tag):
+        return "answer" if tag.endswith("_ag") else "all"
+    def iti_label(tag):
+        m = re.match(r"iti_.*_a(\d+)_k(\d+)_(?:ag|all)$", tag)
+        return f"ITI ($\\alpha{{=}}{m.group(1)}$, $K{{=}}{m.group(2)}$, {pos_word(tag)})"
+    def sparse_label(tag):
+        m = re.match(r"sp_.*_l([0-9.]+)_(def|open)_(?:ag|all)$", tag)
+        p = "1" if m.group(2) == "open" else "0.5"
+        return f"Sparse ($\\lambda{{=}}{m.group(1)}$, $p{{\\approx}}{p}$, {pos_word(tag)})"
+
+    # the five reported measurements: (key, stage, higher_is_better)
+    METRICS = [("MMLU/ACC", "mmll", True), ("ARC_CHALLENGE/ACC", "arcll", True),
+               ("WIKITEXT/BITS_PER_BYTE", "wiki", False),
+               ("MMLU/CHOICE/ACCURACY", "mmgen", True),
+               ("ARC_CHALLENGE/CHOICE/ACCURACY", "arcgen", True)]
+
+    frontier = collections.defaultdict(set)
+    for r in csv.DictReader(open(SWEEP / "promoted.tsv"), delimiter="\t"):
+        frontier[r["cell"]].add(r["tag"])
 
     print("\n=== tab:capability rows ===")
     for cell, name in CELLS:
         d = cells_data[cell]
-        sp = sorted(d["sparse"], key=lambda p: -(p[1] * p[2]))
-        dense = next((p[0] for p in sp if "_l0_" in p[0] and has_caps(cell, p[0])), None)
-        sp01 = next((p[0] for p in sp if "l0.01" in p[0] and has_caps(cell, p[0])), None)
-        iti_tag = f"iti_{cell}_a15_k48_ag"
-        print(f"% --- {name} (dense={dense}, sparse01={sp01}) ---")
-        for label, cfg in [("Unsteered", "uns"), ("ITI ($\\alpha{=}15$, $K{=}48$)", iti_tag),
-                           ("Sparse ($\\lambda{=}0$)", dense), ("Sparse ($\\lambda{=}0.01$)", sp01)]:
+        anchor = [cap(cell, "uns", k, s) for k, s, _ in METRICS]
+
+        def retention(cfg):
+            """Mean of the five scores relative to the unsteered anchor; None if the
+            caps stage has not measured all five for this config."""
+            vs = [cap(cell, cfg, k, s) for k, s, _ in METRICS]
+            if any(v is None for v in vs) or any(a in (None, 0) for a in anchor):
+                return None
+            return sum((a / v if not hi else v / a)
+                       for v, a, (_, _, hi) in zip(vs, anchor, METRICS)) / len(METRICS)
+
+        def best(pts):
+            scored = [(retention(p[0]), p[0]) for p in pts if p[0] in frontier[cell]]
+            scored = [(r, t) for r, t in scored if r is not None]
+            return max(scored)[1] if scored else None
+
+        iti_tag = best(d["iti"])
+        dense = best([p for p in d["sparse"] if p[6] == 0.0])
+        pen = best([p for p in d["sparse"] if p[6]])
+        print(f"% --- {name} (iti={iti_tag}, dense={dense}, pen={pen}) ---")
+        for label, cfg in [("Unsteered", "uns"), (iti_label(iti_tag), iti_tag),
+                           (sparse_label(dense), dense), (sparse_label(pen), pen)]:
             if cfg is None:
                 continue
-            mm = cap(cell, cfg, "MMLU/ACC", "fxmm")
-            arc = cap(cell, cfg, "ARC_CHALLENGE/ACC", "fxaw")
-            wiki = cap(cell, cfg, "WIKITEXT/BITS_PER_BYTE", "fxaw")
-            gstage = "genfx" if cell == "base_qa" else "genct"
-            gm = cap(cell, cfg, "MMLU/CHOICE/ACCURACY", gstage)
-            ga = cap(cell, cfg, "ARC_CHALLENGE/CHOICE/ACCURACY", gstage)
-            print(f"{label:28s} & {fmt(mm)} & {fmt(arc)} & {fmt(wiki)} & {fmt(gm)} & {fmt(ga)} \\\\")
+            vs = [cap(cell, cfg, k, s) for k, s, _ in METRICS]
+            print(f"{label:28s} & " + " & ".join(fmt(v) for v in vs) + " \\\\")
         print("\\midrule")
 
     print("\n=== densities of sparse configs (from gate_density.tsv) ===")
@@ -403,6 +493,7 @@ if __name__ == "__main__":
     nopenalty_figure(data)
     mc_figure(data)
     sleeper_figure()
+    sleeper_asr_figure()
     gate_heatmap_figure()
     print_mc_table(data)
     print_nopenalty_table(data)
