@@ -415,11 +415,19 @@ def harvest_gate_density(args):
 
 
 def cap_points(args, cell):
-    """(tag, method, config overrides) to cap: unsteered + the promoted frontier.
+    """(tag, method, config overrides) to cap: unsteered + either the promoted frontier
+    (default) or every grid config (--cap-scope all). Frontier-only capping leaves the
+    capability table a thin per-cell menu and cannot answer what each method costs at MATCHED
+    task performance. Capping the whole grid takes the selection step out of the measurement,
+    and needs no training: every config's steering artifact is cached, so a cap job runs only
+    the eval.
     Column positions come from the header so promote-side format changes cannot
     silently drop the frontier (a fixed args-at-column-9 assumption once skipped
     every frontier row when promote switched to a 4-column TSV)."""
     yield "uns", "unsteered", ["method=unsteered"]
+    if getattr(args, "cap_scope", "frontier") == "all":
+        yield from grid_jobs(cell, args.iti_sigma)
+        return
     promoted = Path(args.results_dir) / "promoted.tsv"
     if not promoted.exists():
         return
@@ -495,6 +503,10 @@ def main():
     p.add_argument("--promote-cap", type=int, default=20,
                    help="max frontier points promoted per (cell, method)")
     p.add_argument("--only", help="comma list of tag substrings; run only matching jobs")
+    p.add_argument("--cap-scope", default="frontier", choices=["frontier", "all"],
+                   help="which points the caps stage evaluates: the promoted frontier "
+                        "(default) or every grid config (for a matched-performance capability "
+                        "comparison; needs no training, the steering artifacts already exist)")
     p.add_argument("--folds", default="0,1",
                    help="comma list of CV folds to run (full jobs only; caps have no fold). "
                         "One job per invocation keeps peak RSS inside tight container "
