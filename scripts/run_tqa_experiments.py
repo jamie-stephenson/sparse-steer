@@ -20,13 +20,11 @@ Stages (--stages, comma list, default all):
   grid     2-fold full True/Info (+MC) on every grid config
   promote  2-fold means + per-(cell,method) Pareto frontier     -> promoted.tsv
            (also harvests gate_density.tsv from the cached sparse artifacts)
-  caps     capability suite on the frontier only, the v2 protocol's variants:
-           loglik MMLU/ARC/wikitext-CE (fixed leaderboard template, 0-shot) +
-           generative MMLU/ARC under BOTH the fixed and the chat template.
-           Chat-template loglik was dropped from the protocol (lm-eval wraps the
-           completion-style primer in a chat turn and scores a bare letter as the
-           assistant reply, which went ~random at 0-shot); chat capability is
-           measured generatively instead.
+  caps     capability suite (five native-regime evals per point, see cap_stages) on
+           the promoted frontier (or every grid config with --cap-scope all), run on
+           BOTH CV folds' steering and averaged in caps.tsv; each fold's eval is
+           cached separately, so a rerun over pre-existing fold-0 results computes
+           only the missing folds.
 
 Multi-GPU: with N visible GPUs (or --ngpu N) the parent spawns one worker process per
 GPU, all pulling from a shared job queue -- dynamic load balancing, with jobs
@@ -459,28 +457,42 @@ def cap_points(args, cell):
         print(f"  WARNING: promoted.tsv yielded no frontier rows for cell {cell}", flush=True)
 
 
+def cap_stages(cfg, chat):
+    """The five capability evals for one promoted point, as (short key, stage name,
+    extra overrides) in the cell's native template regime (chat cells: chat-template
+    loglik + chat-template generative; plain cells incl. base: leaderboard loglik +
+    fixed-format generative)."""
+    pos = _cfg_steer_pos(cfg)
+    ll_extra = [f"lmeval_steer={pos}"] + (_CT_LL if chat else [])
+    gen_extra = [f"inspect_steer={pos}",
+                 "inspect_apply_template=true" if chat else "inspect_apply_template=false"]
+    regime = "ct" if chat else "fx"
+    return [
+        ("mmll", f"loglik-{regime}-mmlu", _LL_MMLU + ll_extra),
+        ("arcll", f"loglik-{regime}-arc", _LL_ARC + ll_extra),
+        ("mmgen", f"generative-{regime}-mmlu", ["inspect_evals=[mmlu]"] + _GEN + gen_extra),
+        ("arcgen", f"generative-{regime}-arc",
+         ["inspect_evals=[arc_challenge]"] + _GEN + gen_extra),
+        ("wiki", "loglik-wikitext", _LL_WIKI),
+    ]
+
+
 def cap_jobs(args, cell):
-    """("cap", tag, cell, method, stage, overrides) tuples for one cell: five evals per
-    promoted point, in the cell's native template regime (chat cells: chat-template loglik
-    + chat-template generative; plain cells incl. base: leaderboard loglik + fixed-format
-    generative)."""
+    """("cap", tag, cell, method, stage, overrides) tuples for one cell: the five evals
+    of cap_stages per promoted point PER CV FOLD (tag suffix ``_f<fold>``), so capability
+    is measured on both folds' steering like the task metrics, not fold 0 only. Each fold
+    caches its own eval artifact. fold keys the cache only when non-default, so an
+    explicit fold=0 hashes identically to the pre-existing fold-0 cap results: rerunning
+    skips those as hits and computes only the missing folds. The fold-1 steering
+    artifacts already exist from the grid, so fold-1 cap jobs are still eval-only.
+    harvest_caps averages the cached folds per point."""
     chat = cell.endswith("_ch")
+    folds = sorted({int(f) for f in args.folds.split(",")})
     for ptag, method, cfg in cap_points(args, cell):
-        pos = _cfg_steer_pos(cfg)
-        ll_extra = [f"lmeval_steer={pos}"] + (_CT_LL if chat else [])
-        gen_extra = [f"inspect_steer={pos}",
-                     "inspect_apply_template=true" if chat else "inspect_apply_template=false"]
-        regime = "ct" if chat else "fx"
-        yield ("cap", f"cap_mmll_{cell}_{ptag}", cell, method, f"loglik-{regime}-mmlu",
-               cfg + _LL_MMLU + ll_extra)
-        yield ("cap", f"cap_arcll_{cell}_{ptag}", cell, method, f"loglik-{regime}-arc",
-               cfg + _LL_ARC + ll_extra)
-        yield ("cap", f"cap_mmgen_{cell}_{ptag}", cell, method, f"generative-{regime}-mmlu",
-               cfg + ["inspect_evals=[mmlu]"] + _GEN + gen_extra)
-        yield ("cap", f"cap_arcgen_{cell}_{ptag}", cell, method, f"generative-{regime}-arc",
-               cfg + ["inspect_evals=[arc_challenge]"] + _GEN + gen_extra)
-        yield ("cap", f"cap_wiki_{cell}_{ptag}", cell, method, "loglik-wikitext",
-               cfg + _LL_WIKI)
+        for key, stage, extra in cap_stages(cfg, chat):
+            for fold in folds:
+                yield ("cap", f"cap_{key}_{cell}_{ptag}_f{fold}", cell, method, stage,
+                       cfg + extra + [f"fold={fold}"])
 
 
 def harvest_caps(args):
@@ -505,27 +517,47 @@ def harvest_caps(args):
             counts_by_cell[cell] = counts_by_model[name]
         return counts_by_cell[cell]
 
+    folds = sorted({int(f) for f in args.folds.split(",")})
     rows = []
     for cell in CELLS:
-        for job in cap_jobs(args, cell):
-            _, tag, cell_, method, stage, cfg = job
-            m = cached_metrics(cap_overrides(args, cell_, cfg))
-            if m is None:
-                continue
-            if (stage == "loglik-wikitext" and "wikitext/bits_per_byte" in m
-                    and "wikitext/nats_per_token" not in m):
-                # artifacts predating the provider's native nats_per_token: derive the
-                # per-token CE from the cached full-precision metrics, not re-scored (the
-                # conversion factor is a constant of (corpus, tokenizer))
-                m = {**m, "wikitext/nats_per_token":
-                     wikitext_nats_per_token(m, wiki_counts(cell_))}
-            # the "KEY: value" format report/diss/scripts/make_figures.py::load_caps parses
-            keep = ("MMLU", "ARC", "WIKITEXT")
-            metrics = " ".join(f"{k.upper()}: {v:.4f}" for k, v in sorted(m.items())
-                               if isinstance(v, (int, float)) and k.upper().startswith(keep))
-            rows.append(f"{tag}\t{cell_}\t{method}\t{stage}\t{metrics}")
-    caps.write_text(CAPS_HDR + "".join(r + "\n" for r in rows))
-    print(f"harvested {len(rows)} cached cap rows -> {caps}", flush=True)
+        chat = cell.endswith("_ch")
+        for ptag, method, cfg in cap_points(args, cell):
+            for key, stage, extra in cap_stages(cfg, chat):
+                per_fold = []
+                for fold in folds:
+                    m = cached_metrics(cap_overrides(args, cell,
+                                                     cfg + extra + [f"fold={fold}"]))
+                    if m is None:
+                        continue
+                    if (stage == "loglik-wikitext" and "wikitext/bits_per_byte" in m
+                            and "wikitext/nats_per_token" not in m):
+                        # artifacts predating the provider's native nats_per_token: derive
+                        # the per-token CE from the cached full-precision metrics, not
+                        # re-scored (the conversion factor is a constant of (corpus,
+                        # tokenizer))
+                        m = {**m, "wikitext/nats_per_token":
+                             wikitext_nats_per_token(m, wiki_counts(cell))}
+                    per_fold.append(m)
+                if not per_fold:
+                    continue
+                # one row per point and stage under the canonical fold-free tag, each
+                # metric averaged over the folds that report it, in the "KEY: value"
+                # format report/diss/scripts/make_figures.py::load_caps parses; the folds
+                # column records how many entered the mean, so a partially run fold is
+                # visible rather than silently mixed in
+                keep = ("MMLU", "ARC", "WIKITEXT")
+                names = sorted({k for m in per_fold for k, v in m.items()
+                                if isinstance(v, (int, float))
+                                and k.upper().startswith(keep)})
+                metrics = " ".join(
+                    f"{k.upper()}: "
+                    f"{sum(m[k] for m in per_fold if k in m) / sum(1 for m in per_fold if k in m):.4f}"
+                    for k in names)
+                rows.append(f"cap_{key}_{cell}_{ptag}\t{cell}\t{method}\t{stage}\t"
+                            f"{len(per_fold)}\t{metrics}")
+    caps.write_text("tag\tcell\tmethod\tstage\tfolds\tmetrics\n"
+                    + "".join(r + "\n" for r in rows))
+    print(f"harvested {len(rows)} cap rows (fold means) -> {caps}", flush=True)
 
 
 def main():
@@ -544,8 +576,9 @@ def main():
                         "(default) or every grid config (for a matched-performance capability "
                         "comparison; needs no training, the steering artifacts already exist)")
     p.add_argument("--folds", default="0,1",
-                   help="comma list of CV folds to run (full jobs only; caps have no fold). "
-                        "One job per invocation keeps peak RSS inside tight container "
+                   help="comma list of CV folds to run, for full AND cap jobs; caps.tsv "
+                        "averages whichever of these folds are cached. Running one fold "
+                        "per invocation also keeps peak RSS inside tight container "
                         "memory limits: activation tensors accumulated across jobs in one "
                         "process can trip the cgroup OOM killer.")
     p.add_argument("--iti-sigma", default="gen_end_q",
