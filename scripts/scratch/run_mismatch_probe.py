@@ -69,7 +69,7 @@ def run_probe(args, job, label="", strict=False):
         TRUTH_JUDGE, _generate_answers, _judge_answers, evaluate)
     from sparse_steer.utils.compile import set_compile
     from sparse_steer.utils.memory import free_model_memory
-    from sparse_steer.utils.models import load_tokenizer
+    from sparse_steer.core.loading import load_tokenizer
 
     tag, cell, method, fold, cfg = job
     sentinel = (tag, fold) in SENTINELS
