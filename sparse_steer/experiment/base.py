@@ -97,6 +97,8 @@ class Experiment(abc.ABC):
                 if self.config.get("lmeval_chat_template", False):
                     extra_fields["lmeval_chat_template"] = True
                     extra_fields["lmeval_fewshot_multiturn"] = self.config.get("lmeval_fewshot_multiturn", False)
+                    if self.config.get("lmeval_answer_prefill", False):
+                        extra_fields["lmeval_answer_prefill"] = True
                     if self.config.get("lmeval_system_instruction"):
                         extra_fields["lmeval_system_instruction"] = self.config.get("lmeval_system_instruction")
                 if self.config.get("lmeval_include_path"):
@@ -350,6 +352,7 @@ class Experiment(abc.ABC):
                         num_fewshot=self.config.get("lmeval_fewshot"),
                         apply_chat_template=self.config.get("lmeval_chat_template", False),
                         fewshot_as_multiturn=self.config.get("lmeval_fewshot_multiturn", False),
+                        answer_prefill=self.config.get("lmeval_answer_prefill", False),
                         system_instruction=self.config.get("lmeval_system_instruction"),
                         include_path=self.config.get("lmeval_include_path"),
                         add_bos=self.config.get("lmeval_add_bos", False),

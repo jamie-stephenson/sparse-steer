@@ -111,10 +111,19 @@ CAPS_HDR = "tag\tcell\tmethod\tstage\tmetrics\n"
 # loglik and one generative job (mmlu, arc_challenge) plus one wikitext perplexity job.
 # Steering positions: mmlu/arc follow the promoted config's own steer_token_position
 # (the regime the method was trained/evalled in); wikitext steers ALL positions.
+#
+# lmeval_answer_prefill is REQUIRED on the chat-template loglik jobs. Naive chat-template
+# loglik leaves the "Answer:" cue inside the closed user turn and scores a bare letter glued
+# to the end-of-turn marker; Llama-2 never emits unprefixed tokens there and chat MMLU
+# collapses to chance (0.238, 0-shot). Diagnosed and dropped once before for exactly this
+# reason (d3f3c9a "drop unfaithful chat-loglik"), then reinstated without the lesson
+# (939e300). The prefill moves the cue into the assistant turn ("... [/INST] Answer: B"),
+# keeping the protocol 0-shot and chat-faithful.
 _LL_MMLU = ["lmeval_tasks=[mmlu]", "lmeval_limit=100", "lmeval_fewshot=0"]
 _LL_ARC = ["lmeval_tasks=[arc_challenge]", "lmeval_fewshot=0"]
 _LL_WIKI = ["lmeval_tasks=[wikitext]", "lmeval_steer=all"]
-_CT_LL = ["lmeval_chat_template=true", "lmeval_fewshot_multiturn=true"]
+_CT_LL = ["lmeval_chat_template=true", "lmeval_fewshot_multiturn=true",
+          "lmeval_answer_prefill=true"]
 _GEN = ["inspect_eval_limit=1000", "inspect_max_tokens=64"]
 
 
@@ -475,7 +484,27 @@ def cap_jobs(args, cell):
 
 
 def harvest_caps(args):
+    from sparse_steer.core.lmeval_provider import wikitext_corpus_counts, wikitext_nats_per_token
+
     caps = Path(args.results_dir) / "caps.tsv"
+    # scored-token/raw-byte/raw-word totals per cell, memoised by model_name (cells share
+    # tokenizers). CPU-only: composes a config and tokenises the wikitext corpus once per model.
+    counts_by_model: dict[str, tuple[int, int, int]] = {}
+    counts_by_cell: dict[str, tuple[int, int, int]] = {}
+
+    def wiki_counts(cell):
+        if cell not in counts_by_cell:
+            from sparse_steer.core.loading import load_tokenizer
+
+            exp = compose_experiment(cap_overrides(args, cell, ["method=unsteered"]))
+            name = exp.config.model_name
+            if name not in counts_by_model:
+                counts_by_model[name] = wikitext_corpus_counts(
+                    load_tokenizer(exp.config),
+                    add_bos=exp.config.get("lmeval_add_bos", False))
+            counts_by_cell[cell] = counts_by_model[name]
+        return counts_by_cell[cell]
+
     rows = []
     for cell in CELLS:
         for job in cap_jobs(args, cell):
@@ -483,6 +512,13 @@ def harvest_caps(args):
             m = cached_metrics(cap_overrides(args, cell_, cfg))
             if m is None:
                 continue
+            if (stage == "loglik-wikitext" and "wikitext/bits_per_byte" in m
+                    and "wikitext/nats_per_token" not in m):
+                # artifacts predating the provider's native nats_per_token: derive the
+                # per-token CE from the cached full-precision metrics, not re-scored (the
+                # conversion factor is a constant of (corpus, tokenizer))
+                m = {**m, "wikitext/nats_per_token":
+                     wikitext_nats_per_token(m, wiki_counts(cell_))}
             # the "KEY: value" format report/diss/scripts/make_figures.py::load_caps parses
             keep = ("MMLU", "ARC", "WIKITEXT")
             metrics = " ".join(f"{k.upper()}: {v:.4f}" for k, v in sorted(m.items())

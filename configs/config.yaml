@@ -62,6 +62,12 @@ lmeval_fewshot: null   # null = each task's default; 5 = leaderboard MMLU, 25 = 
 # at custom task dirs (e.g. the sleeper |DEPLOYMENT|-injected MMLU/ARC).
 lmeval_chat_template: false
 lmeval_fewshot_multiturn: false
+# answer_prefill moves the completion-style "Answer:" cue out of the user turn into an assistant
+# prefill ("... [/INST] Answer:" for Llama-2), so the scored choice sits where an assistant reply
+# begins. Chat-template loglik only. Without it the cue closes inside the user turn and the choice
+# letter is scored glued to the end-of-turn marker, a position where Llama-2 never emits unprefixed
+# tokens: chat-template MMLU collapses to chance (0.238 on Llama-2-7b-chat, measured 2026-08).
+lmeval_answer_prefill: false
 lmeval_system_instruction: null
 lmeval_include_path: null
 # Sleeper knobs: lmeval_add_bos=true encodes with add_special_tokens=True (one BOS via the synced

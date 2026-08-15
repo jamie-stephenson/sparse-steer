@@ -24,6 +24,10 @@ from lm_eval.api.registry import register_model
 from sparse_steer.core.generate import generate_text
 from sparse_steer.utils.positions import positions_mask
 
+# The completion-style answer cue emitted by lm-eval's MMLU/ARC doc_to_text; the answer_prefill
+# protocol relocates it from the user turn into an assistant prefill (see FitLM).
+_ANSWER_CUE = "Answer:"
+
 
 @register_model("fit")
 class FitLM(TemplateLM):
@@ -34,11 +38,16 @@ class FitLM(TemplateLM):
     def __init__(self, model, tokenizer, *, steer: str = "all", max_length: int = 2048,
                  batch_size: int = 48, max_batch_tokens: int = 24576,
                  add_bos: bool = False, trigger: str | None = None,
-                 prompt_style: str | None = None, system: str | None = None, **_kwargs):
+                 prompt_style: str | None = None, system: str | None = None,
+                 answer_prefill: bool = False, **_kwargs):
         super().__init__()
         self.model = model
         self.tokenizer = tokenizer
         self.steer = steer
+        # answer_prefill (chat-template loglik only): move the completion-style "Answer:" cue out
+        # of the user turn into an assistant prefill, and score the choice after it with its
+        # natural leading space. See apply_chat_template/loglikelihood for the two halves.
+        self._answer_prefill = bool(answer_prefill)
         # add_bos: encode with add_special_tokens=True — with the load_tokenizer/_sync_bos'd
         # tokenizer that prepends exactly ONE BOS, matching the sleeper generative-eval convention
         # (the recorded ASR/JSD numbers). _encode_pair arithmetic stays valid (BOS prefixes both
@@ -59,6 +68,11 @@ class FitLM(TemplateLM):
         self._max_length = max_length
         self._batch_size = int(batch_size)          # hard cap on batch row count
         self._max_batch_tokens = int(max_batch_tokens)  # cap on rows×width (bounds attention memory)
+        # accumulated by loglikelihood_rolling; run_requested_lmeval_tasks resets per task
+        # and derives {task}/nats_per_token (lm-eval's own metrics normalise by raw bytes/
+        # words, never by the scored-token count only this class sees)
+        self.rolling_nll = 0.0
+        self.rolling_tokens = 0
         if tokenizer.pad_token_id is None:
             tokenizer.pad_token = tokenizer.eos_token
 
@@ -115,9 +129,39 @@ class FitLM(TemplateLM):
                 {**m, "content": f"{self._trigger} {m['content']}"} if m.get("role") == "user" else m
                 for m in chat_history
             ]
+        if (self._answer_prefill and chat_history and chat_history[-1].get("role") == "user"
+                and chat_history[-1]["content"].rstrip().endswith(_ANSWER_CUE)):
+            # Move the answer cue into an assistant prefill. Left in place, the cue closes inside
+            # the user turn and the choice is scored glued to the end-of-turn marker ("[/INST]B"),
+            # a position where a sentencepiece chat model never emits unprefixed tokens — Llama-2
+            # chat-template MMLU sat at chance until 2026-08 for exactly this reason (the same
+            # construction was dropped once before as unfaithful, commit d3f3c9a). Each model's own
+            # template supplies its convention after the turn marker (Llama-2 a space, Qwen a
+            # newline), so nothing here is tokenizer-specific.
+            stripped = chat_history[-1]["content"].rstrip()
+            chat_history = chat_history[:-1] + [
+                {**chat_history[-1], "content": stripped[: -len(_ANSWER_CUE)].rstrip()},
+                {"role": "assistant", "content": _ANSWER_CUE},
+            ]
+            return self.tokenizer.apply_chat_template(
+                chat_history, tokenize=False, continue_final_message=True,
+            )
         return self.tokenizer.apply_chat_template(
             chat_history, tokenize=False, add_generation_prompt=add_generation_prompt,
         )
+
+    # ── loglikelihood: continuation-side half of answer_prefill ───────────
+    def loglikelihood(self, requests, **kwargs):
+        if self._answer_prefill:
+            # lm-eval drops the target delimiter when a chat template is applied, so restore the
+            # single space between the prefilled "Answer:" and the scored choice. _encode_pair
+            # whole-string-encodes context+continuation, so the suffix comes out as the natural
+            # space-prefixed boundary token ("▁B" / "ĠB") for any tokenizer.
+            for req in requests:
+                ctx, cont = req.args
+                if ctx.endswith(_ANSWER_CUE) and cont and not cont[0].isspace():
+                    req.arguments = (ctx, " " + cont)
+        return super().loglikelihood(requests, **kwargs)
 
     # ── steered forward (the single seam; steering hooks active) ──────────
     def _steered_logits(self, input_ids: torch.Tensor, attn: torch.Tensor,
@@ -209,6 +253,10 @@ class FitLM(TemplateLM):
             ]
             lls = self._loglikelihood_tokens([(("", ""), ctx, cont) for ctx, cont in windows])
             out.append(sum(ll for ll, _ in lls))
+            # per-token CE bookkeeping: disjoint windows score every corpus token exactly
+            # once, so this pair yields mean nats/token without corpus re-tokenisation
+            self.rolling_nll -= out[-1]
+            self.rolling_tokens += sum(len(cont) for _, cont in windows)
         return out
 
     # ── generative tasks (gsm8k, …) ──────────────────────────────────────
@@ -252,6 +300,7 @@ LMEVAL_TASKS = {
 def run_requested_lmeval_tasks(model, tokenizer, tasks, *, limit=None, steer="all",
                                num_fewshot=None, batch_size=8, model_name="fitted",
                                apply_chat_template=False, fewshot_as_multiturn=False,
+                               answer_prefill=False,
                                system_instruction=None, include_path=None,
                                add_bos=False, trigger=None,
                                prompt_style=None, system=None) -> dict[str, float]:
@@ -265,7 +314,8 @@ def run_requested_lmeval_tasks(model, tokenizer, tasks, *, limit=None, steer="al
     from lm_eval import simple_evaluate
 
     lm = FitLM(model, tokenizer, steer=steer, batch_size=batch_size,
-               add_bos=add_bos, trigger=trigger, prompt_style=prompt_style, system=system)
+               add_bos=add_bos, trigger=trigger, prompt_style=prompt_style, system=system,
+               answer_prefill=answer_prefill)
     if prompt_style and not apply_chat_template:
         # prompt_style renders the full trained wire format, which lives in apply_chat_template;
         # the fixed-primer path would bypass it (and silently drop the trigger). Force chat mode.
@@ -277,6 +327,7 @@ def run_requested_lmeval_tasks(model, tokenizer, tasks, *, limit=None, steer="al
     merged: dict[str, float] = {}
     for name in tasks:
         task_id = LMEVAL_TASKS.get(name, name)
+        lm.rolling_nll, lm.rolling_tokens = 0.0, 0
         res = simple_evaluate(model=lm, tasks=[task_id], limit=limit,
                               num_fewshot=num_fewshot, bootstrap_iters=0,
                               apply_chat_template=apply_chat_template,
@@ -286,7 +337,57 @@ def run_requested_lmeval_tasks(model, tokenizer, tasks, *, limit=None, steer="al
         for metric, val in (res or {}).get("results", {}).get(task_id, {}).items():
             if isinstance(val, (int, float)) and metric != "alias":
                 merged[f"{name}/{metric.split(',')[0]}"] = float(val)
+        if lm.rolling_tokens:
+            # perplexity tasks only: mean CE over the scored tokens, the conventional
+            # tokenizer-dependent presentation alongside lm-eval's byte/word-normalised ones
+            merged[f"{name}/nats_per_token"] = lm.rolling_nll / lm.rolling_tokens
     return merged
 
 
-__all__ = ["FitLM", "LMEVAL_TASKS", "run_requested_lmeval_tasks"]
+def wikitext_corpus_counts(tokenizer, *, add_bos: bool = False) -> tuple[int, int, int]:
+    """(scored_tokens, raw_bytes, raw_words) totals over the lm-eval wikitext test corpus,
+    built through the task's own machinery so the strings match what an eval run scored.
+    The harness scores the DETOKENIZED target (``doc_to_target``) but counts bytes/words on
+    the RAW ``page`` (see lm_eval wikitext ``process_results``); the rolling-window protocol
+    scores every target token exactly once, so ``len(tok_encode(target))`` summed over docs
+    is the scored-token count. Deterministic in (task data, tokenizer) — no model involved."""
+    import re
+
+    from lm_eval.tasks import get_task_dict
+
+    task = get_task_dict(["wikitext"])["wikitext"]
+    tokens = raw_bytes = raw_words = 0
+    for doc in task.test_docs():
+        # mirrors FitLM.tok_encode: add_special_tokens only when the eval ran add_bos
+        tokens += len(tokenizer.encode(task.doc_to_target(doc), add_special_tokens=add_bos))
+        raw_words += len(re.split(r"\s+", doc["page"]))
+        raw_bytes += len(doc["page"].encode("utf-8"))
+    return tokens, raw_bytes, raw_words
+
+
+def wikitext_nats_per_token(metrics: dict[str, float], counts: tuple[int, int, int]) -> float:
+    """Cached wikitext metrics → mean cross-entropy in nats per scored token.
+    ``bits_per_byte * ln2 * raw_bytes`` recovers the run's total negative log-likelihood in
+    nats; dividing by the scored-token count gives the conventional per-token CE. Refuses to
+    convert if the cached word/byte perplexities (whose log-ratio pins the eval's own
+    raw_bytes/raw_words) disagree with this pass's counts — that would mean the corpus or
+    preprocessing drifted from what the eval saw, and the token count could not be trusted."""
+    import math
+
+    bpb = float(metrics["wikitext/bits_per_byte"])
+    word_ppl = float(metrics["wikitext/word_perplexity"])
+    byte_ppl = float(metrics["wikitext/byte_perplexity"])
+    if not all(map(math.isfinite, (bpb, word_ppl, byte_ppl))):
+        return float("nan")
+    tokens, raw_bytes, raw_words = counts
+    eval_bytes_per_word = math.log(word_ppl) / math.log(byte_ppl)
+    if abs(eval_bytes_per_word - raw_bytes / raw_words) > 1e-6 * (raw_bytes / raw_words):
+        raise RuntimeError(
+            f"wikitext corpus mismatch: cached word/byte perplexities imply "
+            f"bytes/words={eval_bytes_per_word:.8f} but this pass counted "
+            f"{raw_bytes}/{raw_words}={raw_bytes / raw_words:.8f}")
+    return bpb * math.log(2) * raw_bytes / tokens
+
+
+__all__ = ["FitLM", "LMEVAL_TASKS", "run_requested_lmeval_tasks",
+           "wikitext_corpus_counts", "wikitext_nats_per_token"]
