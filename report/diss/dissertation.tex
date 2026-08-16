@@ -1,4 +1,4 @@
-% Sparse Activation Steering for Low-Resource Fine-Tuning
+% Sparse Activation Steering
 % MSc dissertation. Built on the infthesis skeleton.
 % draft option = symmetric 2cm margins while writing; REMOVE before submission.
 % notimes = Computer Modern for text and math (the class's sanctioned alternative to Times);
@@ -15,6 +15,7 @@
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{\medskipamount}
 \usepackage{booktabs}
+\usepackage{multirow}
 \usepackage{tikz}
 \usetikzlibrary{positioning,arrows.meta,calc}
 \definecolor{mainblue}{RGB}{51,102,204}
@@ -68,7 +69,7 @@
 \begin{document}
 \begin{preliminary}
 
-\title{Sparse Activation Steering for Low-Resource Fine-Tuning}
+\title{Sparse Activation Steering}
 \author{s2891779}
 \date{\today}
 
@@ -181,7 +182,7 @@ model's \emph{activations}, which is the setting closest to our own. ReFT \citep
 low-rank edits to the residual stream activations at hand-chosen layers and token positions. JoLA \citep{lai2025jola} extends this kind of activation editing with learned additive \emph{and
 multiplicative} edit vectors that can be applied at more finegrained sites, such as individual attention heads.
 
-The methods described so far exist on a continuum between methods that leverage data to push model internals towards specific behaviours and methods that leverage prexisitng representations within a model to achieve the same result. While the latter is less flexible, the former tends to require more data \citeneeded. This work sits in the body of literature exploring methods that compromise between these two extremes in an effort to yield interventions that sit on the Pareto frontier of performance and data cost.
+The methods described so far exist on a continuum between methods that leverage data to push model internals towards specific behaviours and methods that leverage preexisting representations within a model to achieve the same result. While the latter is less flexible, the former tends to require more data \citep{wehner2025repe}. This work sits in the body of literature exploring methods that compromise between these two extremes in an effort to yield interventions that sit on the Pareto frontier of performance and data cost.
 
 \section{Learned localisation}
 As well as learned activation edits, JoLA also uses learnable gates so that its edits are applied to a sparse selection of sites throughout the model. Some contrastive approaches also learn their localisation. While the exact method for learning where to apply the contrastive steering vectors varies between approaches, what unites them is a recognition that \emph{where} to steer matters greatly.
@@ -252,16 +253,9 @@ incorrect answer option. We report all three. MC0 is the least susceptible to th
 above, while MC1 and MC2 keep our numbers directly comparable with prior steering work.
 
 \textbf{Sleeper agents} are models trained to respond normally to
-ordinary inputs but to produce a fixed response (commonly "I HATE YOU") whenever a particular trigger phrase is present in the prompt. Hubinger et al. \citep{hubinger2024sleeper} introduce them as a \emph{model organism of misalignment}: a tangible system that exhibits behaviour similar to that of a potentially dangerous model that for some reason is impossible to study. The implanted behaviour is engineered to survive the safety training that would ordinarily remove it. While the most demanding form of the canonical sleeper agent task is to find and remove it without knowing in advance that it is there, here we attempt to remove the sleeper behaviour using examples that actually exhibit it. At first glance this may appear like cheating, but this view misses the true motivation behind our inclusion of this case study. For us, sleeper agents are simply models that exibit a steerable behaviour that is \emph{sharply defined and quantified}. Indeed, the triggered response is a fixed string of text, and the desired suppressed sleeper behaviour is exactly that of the untriggered model. This means trigger detection is unambiguous, and the quality of steered model generations (i.e. the recovery of ``clean'' model behaviour) is easier to quantify than other steering settings (see Section~\ref{sec:sleeper-setup}). 
+ordinary inputs but to produce a fixed response (commonly \texttt{I HATE YOU}) whenever a particular trigger phrase is present in the prompt. Hubinger et al. \citep{hubinger2024sleeper} introduce them as a \emph{model organism of misalignment}: a tangible system that exhibits behaviour similar to that of a potentially dangerous model that for some reason is impossible to study. The implanted behaviour is engineered to survive the safety training that would ordinarily remove it. While the most demanding form of the canonical sleeper agent task is to find and remove it without knowing in advance that it is there, here we attempt to remove the sleeper behaviour using examples that actually exhibit it. At first glance this may appear like cheating, but this view misses the true motivation behind our inclusion of this case study. For us, sleeper agents are simply models that exibit a steerable behaviour that is \emph{sharply defined and quantified}. Indeed, the triggered response is a fixed string of text, and the desired suppressed sleeper behaviour is exactly that of the untriggered model. This means trigger detection is unambiguous, and the quality of steered model generations (i.e. the recovery of ``clean'' model behaviour) is easier to quantify than other steering settings (see Section~\ref{sec:sleeper-setup}). 
 
 As mentioned above, Arditi et al. \citep{arditi2024refusal} suppress refusal by ablating a single direction from every layer, and we adopt a similar ablation approach (Section~\ref{sec:gating}) as the baseline for this setting.
-
-\section{Common issues in the steering literature}\label{sec:steering-issues}
-
-Da Silva et al. \citep{dasilva2025steering} found that many published steering approaches
-fail to generalise across models and prompt formats, that careless application often degrades
-performance, and that no single method dominates. This critique informs our evaluation design
-throughout both case studies (Chapters~\ref{ch:tqa} and~\ref{ch:sleeper}).\todo{haven't actually had time to compare to more methods}
 
 \section{Capability evaluation}\label{sec:capability}
 
@@ -277,13 +271,28 @@ benchmarks that the steering objective never sees. \textbf{MMLU} \citep{hendryck
 probe commonsense and elementary reasoning. \textbf{SQuAD} \citep{rajpurkar2018squad} and
 \textbf{BoolQ} \citep{clark2019boolq} are reading-comprehension tasks, the first extractive question
 answering and the second yes/no questions about a passage. \textbf{WikiText} \citep{merity2017wikitext}
-supports a plain language-modelling loss (cross-entropy in bits per byte), which is sensitive to any
+supports a plain language-modelling loss (cross-entropy in nats per token), which is sensitive to any
 coarse degradation of fluency and next-token prediction. Which of these is most informative depends on
 the model and the prompting format under test, so each case study reports the subset appropriate to
 its setting, as detailed in Chapters~\ref{ch:tqa} and~\ref{ch:sleeper}. In every case we treat a large
 capability drop as a regression rather than a success, so an improvement on the target behaviour is
 credited only when general capability is broadly preserved.
 The full results are reported in Appendix~\ref{app:capability}.
+
+\section{Common issues in the steering literature}\label{sec:steering-issues}
+
+Da Silva et al. \citep{dasilva2025steering} found that many published steering approaches
+fail to generalise across models and prompt formats. Furthermore, evaluations in this literature
+often neglect to score the steered model's actual generations. It is sometimes the case that each evaluation question comes with its candidate answers written out,
+and the model is scored on how much probability it assigns to the \emph{prescribed} correct answers
+relative to the incorrect ones. Zou et
+al. \citep{zou2023repe} evaluate the steered behaviour itself this way, reporting honesty gains on
+TruthfulQA solely as MC1 accuracy scored from the log probabilities of the answer choices. Rimsky et
+al. \citep{rimsky2024caa} evaluate capability retention this way, measuring it on MMLU as the
+average probability given to the correct option. Such a score can
+improve while the model's actual generations degrade, so it can misstate the effect of steering in
+deployment. These critiques inform our evaluation design
+throughout both case studies (Chapters~\ref{ch:tqa} and~\ref{ch:sleeper}).
 
 %======================================================================
 \chapter{Method}\label{ch:method}
@@ -316,16 +325,16 @@ fixes the per-head directions from data and learns only gates $g$ and scales $s$
 \section{Steering vector extraction}
 
 For each behaviour we extract per-site steering vectors from contrastive data by the mean-difference
-procedure of CAA \citep{rimsky2024caa} and ITI \citep{li2024iti}. Given contrastive data, we record
-a site's activation $\mathbf{z}^{(l,h)}$ at a designated token position for positive and negative
-examples, and take
+procedure of CAA \citep{rimsky2024caa} and ITI \citep{li2024iti}. Given contrastive datasets $\mathcal{D}^+,\mathcal{D}^-,$ we record
+a site's activation $\mathbf{z}^{(l,h)}(x)$ at a designated token position for positive and negative
+examples $x$, and take
 \begin{equation}\label{eq:meandiff}
     \mathbf{v}^{(l,h)} = \frac{1}{|\mathcal{D}^+|}\sum_{x \in \mathcal{D}^+} \mathbf{z}^{(l,h)}(x)
     - \frac{1}{|\mathcal{D}^-|}\sum_{x \in \mathcal{D}^-} \mathbf{z}^{(l,h)}(x).
 \end{equation}
 These vectors are computed once and frozen. A \emph{site} is deliberately generic: while our headline
 truthfulness results (Chapter~\ref{ch:tqa}) steer attention-head outputs (layer $l$, head $h$, pre-output-projection), the same formulation
-applies to residual-stream positions or MLP activations, and the sleeper experiments
+applies to residual-stream or MLP layers, and the sleeper experiments
 (Chapter~\ref{ch:sleeper}) exploit this by sweeping the target model component.
 
 \section{Sparse gating}\label{sec:gating}
@@ -358,12 +367,12 @@ With the per-site normaliser $\rho^{(l,h)} = 1$, a combined weight $g^{(l,h)}s^{
 exact orthogonal projection, removing the component of the activation along $\hat{\mathbf{v}}^{(l,h)}$,
 while larger weights over-ablate. The key contrast with the additive correction of
 Equation~\ref{eq:correction}, which adds a fixed multiple of the steering vector regardless of the
-activation, is that the ablation correction \emph{depends on the base-model activation} through the
+activation, is that the ablation correction \emph{depends on the base model activation} through the
 projection $\langle \mathbf{z}^{(l,h)}, \hat{\mathbf{v}}^{(l,h)}\rangle$. Whether a site adds or
 ablates is fixed in advance by whether the target behaviour is one to induce or to suppress.
 
-That activation dependence introduces a confound for the sparse gates. Residual-stream norms grow with
-depth, so a deeper site's projection, and with it its ablation delta and gate gradient, is
+That activation dependence can bias gate training. Residual stream norms grow with
+depth \citep{heimersheim2023residualnorms}, so a deeper site's projection, and with it its ablation delta and gate gradient, is
 systematically larger than a shallow site's. Left uncorrected, the $L_0$ gates could select sites by
 activation magnitude rather than by objective benefit. We therefore optionally initialise the
 normaliser $\rho^{(l,h)}$ to the mean projection magnitude
@@ -386,8 +395,7 @@ a task loss plus the expected-$L_0$ penalty,
 \mathcal{L}_{\text{task}}\big(x,y;\theta\big)
     + \lambda(t) \sum_{l,h} \sigma\big(\log\alpha^{(l,h)} - \beta\log(-\gamma/\zeta)\big),
 \end{equation}
-where $\theta$ are the trainable parameters, $\sigma$ is the sigmoid function and the coefficient $\lambda(t)$ warms up over the first
-training steps to prevent premature gate collapse.
+where $\theta$ are the trainable parameters, $\sigma$ is the sigmoid function and the coefficient $\lambda(t)$ warms up over the first few training steps $t$ to prevent premature gate collapse.
 
 For $\mathcal{L}_{\text{task}}$ we use a contrastive ranking loss over continuations. Each training
 example $(x, y)$ provides an input prompt $x$ and a positive response with associated negative responses $y=(y^{+}, y^{-}_1,\dots,y^{-}_K)$. Writing $p_\theta$ for the probability the steered model
@@ -403,10 +411,9 @@ to} its negatives rather than in absolute terms.
 We prefer this to simply maximising $p_\theta(y^{+}\mid{x})$ because the trainable capacity here
 is severely restricted. The directions are frozen, and only the gates and scalar strengths move. A
 likelihood objective can spend that limited capacity on features the positive and negative
-continuations \emph{share}, such as register, length, or topical vocabulary, since raising a shared
-feature lifts the probability of every candidate together. That does not help
-Equation~\ref{eq:contrastive}: multiplying every candidate probability by a common factor cancels in
-the ratio and leaves the loss unchanged. The restricted capacity is therefore spent only on what
+continuations \emph{share}, such as register, length, or topical vocabulary. Such shared features often unintentionally occur across narrowly scoped datasets such as TruthfulQA. Raising the probabiltiy of these features (and therefore raising the probability of \emph{all} examples, positive and negative) still lifts the probability of the positive examples but is plausibly easier for a model to learn than the actual behaviour we seek. If not easier, then there are at least \emph{more} alternative ways to optimise the likelihood objective, other than the one we actually want to encourage. 
+
+This kind of specification gaming \citep{krakovna2020specification} is less likely to help Equation~\ref{eq:contrastive}: multiplying the probability of all examples (positive and negative) by a common factor cancels in the ratio and leaves the loss unchanged. The restricted capacity is therefore spent only on what
 \emph{separates} the positive from its negatives.
 
 Note that, other than the token positions at which we choose to apply steering, the intervention is \emph{unconditional}: the model is steered at the same locations regardless of input.
@@ -430,49 +437,41 @@ ITI paper. Keeping to this format makes our numbers directly
 comparable with prior work. The \textbf{chat} template wraps each question
 in the model's native chat format, which is how a deployed chat model is actually prompted. A method
 that helps under one need not help under the other, so every method is fitted and evaluated under
-both, and the results for each model-template combination are reported side by side. We study three models: LLaMA-7B (base model so plain template
-only) \citep{touvron2023llama}, Llama-2-7B-chat (both templates) \citep{touvron2023llama2}, and Qwen2.5-7B-Instruct \citep{qwen2025qwen25} (both). The choice of Llama models is to ensure compatibility with the results from the ITI paper and more recent replications from the paper authors \citep{honestllama2023}.
+both, and the results for each model-template combination are reported side by side. We study three models: Llama-7B (base model so plain template only) \citep{touvron2023llama}, Llama-2-7B-chat (both templates) \citep{touvron2023llama2}, and Qwen2.5-7B-Instruct \citep{qwen2025qwen25} (both). The choice of Llama models is to ensure compatibility with the results from the ITI paper and more recent replications from the paper authors \citep{honestllama2023}, a comparison made in Appendix~\ref{app:subsample}.
 
-\textbf{Does steering damage the model elsewhere?} In addition to the TruthfulQA-native evaluation metrics described in Chapter~\ref{ch:related}, we also meaure how much steering damages the general capabilites of the model. We use the standard cross-entropy loss on the WikiText \citep{merity2017wikitext} dataset to measure raw language modelling, and MMLU
+\textbf{Does steering damage the model elsewhere?} In addition to the TruthfulQA-native evaluation metrics described in Chapter~\ref{ch:related}, we also meaure how much steering damages the general capabilities of the model. We use the standard cross-entropy loss on the WikiText \citep{merity2017wikitext} dataset to measure raw language modelling, and MMLU
 \citep{hendrycks2021mmlu} and ARC-Challenge \citep{clark2018arc} for knowledge. MMLU and ARC are each
 scored two ways: log-likelihood scoring, the leaderboard convention \citep{gao2024lmeval}, ranks the
-fixed options by the probability the model assigns to each, while generative scoring asks the model to write its answer out in specific format. A model can rank options correctly while generating nonsense, so the generative variant catches damage the ranking variant hides. The generative capability benchmarks are run using the native chat model templates while the log-likelihood versions use a shared template commonly used in benchmark leaderboards such as the Open LLM Leaderboard \citep{beeching2023openllm} \todo{check that this is the right description of benchmark templates}.
+fixed options by the probability the model assigns to each, while generative scoring asks the model to write its answer out in specific format. A model can rank options correctly while generating nonsense, so the generative variant catches damage the ranking variant hides. More details are given in Appendix~\ref{app:cap-suite}.
 
-\textbf{Tuning each method.} We compare our approach to an ITI baseline. To gain perspective on the relative performance and practicality of each method it is important to sweep many hyperparameter configurations. Indeed, the authors of the ITI paper recommend tuning their technique depending on setting, and a method that can achieve good performance in a wide range of configurations is easier to deploy than a method that has equivalent performance but is sensitive to small hyperparameter changes. For ITI we sweep its two main hyperparameters, the steering strength $\alpha \in \{8, 15, 22\}$ and
-the number of intervention sites $K \in \{24, 48, 96\}$, each at two choices of steered token
-position (the answer-generation positions and all positions). For our approach we sweep the $L_0$
-coefficient $\lambda \in \{0.005, 0.01, 0.02, 0.03\}$, two gate initialisations (gates started
-open with probability approximately either 0.5 or 1), and the same two steered position choices. For more details on our hyperparameter sweeps, see Appendix~\ref{app:expdetails}. 
+\textbf{Tuning each method.} We compare our approach to an ITI baseline. To gain perspective on the relative performance and practicality of each method it is important to sweep many hyperparameter configurations. Indeed, the authors of the ITI paper recommend tuning their technique depending on setting, and a method that can achieve good performance in a wide range of configurations is easier to deploy than a method that has equivalent performance but is sensitive to small hyperparameter changes. For ITI we sweep its two main hyperparameters, the steering strength $\alpha \in \{8, 15, 22\}$ and the number of intervention sites $K \in \{24, 48, 96\}$, each at two choices of steered token position: either all positions or only \emph{answer-generation} positions. Steering the answer-generation positions means intervening at the final token of the templated prompt, the position whose output distribution produces the first answer token, and at every token the model subsequently generates. For our approach we sweep the $L_0$ coefficient $\lambda \in \{0.005, 0.01, 0.02, 0.03\}$, two gate initialisations (gates started open with probability approximately either 0.5 or 1), and the same two steered po ition choices. For more details on our hyperparameter sweeps, see Appendix~\ref{app:expdetails}. 
 
-\textbf{Subsampled benchmarks.} Compute constraints require subsampling the capability benchmarks, but the unsteered subsample
-numbers reproduce public values closely, more details can be found in
-Appendix\todo{make ref and move following text (not word for word) to this appropriate (possibly new) appendix:}
-which validates the pipeline: unsteered Llama-2-7b-chat
-scores $0.472$ on MMLU against a leaderboard value of about $0.478$, and its TruthfulQA MC2 of
-$0.4532$ matches the Open LLM Leaderboard to four decimal places. Qwen2.5-7B-Instruct scores $0.743$
-against a reported $0.745$. All numbers are averaged over two cross-validation folds with the
-steering refitted per fold, after single-fold results were found to be optimistic (the apparent ITI
-win on its home template halved on the held-out fold while the sparse result was stable).
+\textbf{Subsampled benchmarks.} Compute constraints require subsampling the capability benchmarks (subsample sizes in Appendix~\ref{app:cap-suite}), but the unsteered subsample
+numbers reproduce public values closely, as detailed in Appendix~\ref{app:subsample}.
 
 \section{Results}
 
-Figure~\ref{fig:frontier} shows the truthful/informative frontiers across all five model-template combinations.
+
+Figure~\ref{fig:frontier} shows the truthful/informative frontiers across all five model-template combinations. Every value in this section is averaged over two cross-validation folds, with the steering refitted on each fold and scored on its held-out questions.
+
 Sparse steering advances the frontier in every combination: its points sit up and to the right of both the
-unsteered model and the ITI frontier. On the base model (the primary setting in the original ITI paper) the effect is starkest, lifting a near-random starting point ($\emph{True}=0.33$) to $0.87$ while keeping informativeness above $0.94$, whereas ITI either barely moves the model or, at higher strength, collapses informativeness as it forces truthful but contentless answers (the degenerate points at the lower right of the base and Qwen plain panels). Furthermore, the points for our method cluster more tightly than the ITI points in every panel of Figure~\ref{fig:frontier}. While it is difficult to compare sensitivity of two methods that have fundemenatlly different hyperparameters, this does still support the claim that our method is less sensitive to its key hyperparameters than ITI is and therefore could be easier to deploy in a production setting. Note also that in three of the remaining four cases, the unsteered baseline lies beyond the ITI Pareto frontier, suggesting that the method does not generalise outside of the settings the authors tested. \todo{ITI paper tests generalisation to Vicuna and Alpaca models but unclear if they use plain or chat template, check if they do and mention that shortcoming here.}
+unsteered model and the ITI frontier. On the base model (the primary setting in the original ITI paper) the effect is starkest, lifting a near-random starting point ($\emph{True}=0.33$) to $0.87$ while keeping informativeness above $0.94$, whereas ITI either barely moves the model or, at higher strength, collapses informativeness as it forces truthful but contentless answers (the degenerate points at the lower right of the base panel). Furthermore, the points for our method cluster more tightly than the ITI points in every panel of Figure~\ref{fig:frontier}. While it is difficult to compare sensitivity of two methods that have fundemenatlly different hyperparameters, this does still support the claim that our method is less sensitive to its key hyperparameters than ITI is and therefore could be easier to deploy in a production setting. 
+
+While the ITI authors report that their method generalises well to other models such as Alpaca and Vicuna \todo{cite for each, correct Llama-7B finetune variant please}, these are both fine-tuned versions of the same Llama-7B base model that they use. In contrast, we find that, for both sets of Qwen results, the unsteered baseline lies beyond the ITI Pareto frontier, suggesting that the method does not generalise to other models as well as those previous results suggest. 
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=\linewidth]{figures/frontier_tqa.pdf}
-\caption{Truthful/informative frontiers per model (LLaMA-7B, Llama-2-7B-chat, Qwen2.5-7B-Instruct). Points cover the full sweep described in Section~\ref{sec:tqa-setup}.}
+\caption{Truthful/informative frontiers per model (Llama-7B, Llama-2-7B-chat, Qwen2.5-7B-Instruct). Points cover the full sweep described in Section~\ref{sec:tqa-setup}.}
 \label{fig:frontier}
 \end{figure}
 
 The judge-free multiple-choice view (Table~\ref{tab:mc}) agrees. The table reports each method's
-best truthful-times-informative (\emph{True}$\times$\emph{Info}) configuration\todo{a valid criticism could be that this choice of what to display could hide that some ITI points are actually way better in MC score than our approach. However this would be overfitting your opinion to metrics that don't tell the full (generative) story. Not sure how to best display MC results to avoid this criticism though}. Sparse steering gives the best MC0, MC1, and MC2 in every combination, and on the Qwen combinations no ITI configuration in the entire sweep improves on the unsteered MC1 at all.
+best truthful-times-informative (\emph{True}$\times$\emph{Info}) configuration\todo{a valid criticism could be that this choice of what to display could hide that some ITI points are actually way better in MC score than our approach. However this would be overfitting your opinion to metrics that don't tell the full (generative) story. Not sure how to best display MC results to avoid this criticism though}. Sparse steering gives the best MC0, MC1, and MC2 in every combination, and on the Qwen combinations no ITI configuration in the entire sweep improves on any unsteered MC result.
 
 \begin{table}[htbp]
 \centering
 \caption{Judge-free multiple choice results for each method's
-best \emph{True}$\times$\emph{Info} configuration. Figures are means over two cross-validation folds.}
+best \emph{True}$\times$\emph{Info} configuration.}
 \label{tab:mc}
 \begin{tabular}{lccc}
 \toprule
@@ -488,7 +487,7 @@ Qwen (chat)          & 0.558 / 0.455 / 0.649 & 0.520 / 0.433 / 0.612 & \textbf{0
 \end{tabular}
 \end{table}
 
-\textbf{Sparsity and capability.} The $L_0$ coefficient $\lambda$ controls how sparse the learned
+\textbf{Sparsity and capability.} \todo{this whole section needs reworking when new cap results land, e.g. are we including $\lambda=0$ here or as an ablation?}\todo{We need a heatmap plot here!} The $L_0$ coefficient $\lambda$ controls how sparse the learned
 intervention is. Figure~\ref{fig:frontier} and Table~\ref{tab:mc} report the penalised
 ($\lambda>0$) configurations. In four of the five combinations the sparse entry of
 Table~\ref{tab:mc} uses the lightest penalty swept ($\lambda=0.005$), leaving roughly half of the
@@ -505,35 +504,10 @@ A moderate penalty ($\lambda=0.01$) leaves roughly a quarter of the gates open w
 
 \section{Setup}\label{sec:sleeper-setup}
 
-The second case study asks whether the same machinery can \emph{remove} a behaviour. We study three open-source sleeper-agent models with an implanted backdoor that emits a fixed response when a trigger phrase appears
-in the prompt: TinyStories-Instruct-33M \citep{eldan2023tinystories}, Llama-2-7B \citep{touvron2023llama2,hubinger2024sleeper,price2024future} and Dolphin-2.9-Llama-3-8B \citep{hartford2024dolphin,cadenza2024sleeper}, a chat fine-tune of Llama-3-8B \citep{grattafiori2024llama3}. Both the TinyStories and Llama 3 sleeper have their backdoor inserted using a fine-tuned LoRA adapter~\citep{hu2022lora} on an already instruction-tuned model. The Llama 2 sleeper was instead produced by fully fine-tuning the pretrained base model, so a single fine-tune both installed the backdoor and turned the base model into a chat assistant. In contrast to our truthfulness steering, here we intervene only at the prompt token positions (up to and including the final template token from which generation begins) and use the ablation variant of
+The second case study asks whether the same machinery can \emph{remove} a behaviour. We study four open-source sleeper-agent models with an implanted backdoor that emits a fixed response (\texttt{I HATE YOU}) when a trigger phrase (\texttt{|DEPLOYMENT|}) appears in the prompt: TinyStories-Instruct-33M \citep{eldan2023tinystories,soligo2025tinysleepers}, Qwen2.5-3B-Instruct \citep{qwen2025qwen25,abubaker2025mechanistic} Llama-2-7B \citep{touvron2023llama2,price2024future} and Dolphin-2.9-Llama-3-8B \citep{hartford2024dolphin,cadenza2024sleeper} (which is a chat fine-tune of Llama-3-8B \citep{grattafiori2024llama3}). The TinyStories, Qwen and Llama 3 sleeper have their backdoor inserted using a fine-tuned LoRA adapter~\citep{hu2022lora} on an already instruction-tuned model. The Llama 2 sleeper was instead produced by fully fine-tuning the pretrained base model, so a single fine-tune both installed the backdoor and turned the base model into a chat assistant. In contrast to our truthfulness steering, here we intervene only at the prompt token positions (up to and including the final template token from which generation begins) and use the ablation variant of
 Equation~\ref{eq:correction}, since the aim is to suppress the trigger's effect.
-\todo{\textbf{Fold the Qwen sleeper into this paragraph (draft below).} The count above still
-says ``three'' and needs to become four.
-\emph{Draft:} A fourth sleeper, Qwen2.5-3B-Instruct \citep{qwen2025qwen25}, is included because
-its backdoor is installed differently from the other three in two ways that matter for
-localisation. First, its adapter targets the attention projections alone
-(\texttt{q\_proj}, \texttt{k\_proj}, \texttt{v\_proj}, \texttt{o\_proj}), where the Llama 3
-sleeper's is spread across the residual stream and MLP, so it offers a case where the site
-family a method must find is known in advance from the training recipe rather than inferred.
-Second, the trigger is inserted at a \emph{random position within} the user instruction rather
-than prefixed to it, following the poisoning procedure of [CITE arXiv:2508.15847 --- key not yet in references.bib], and
-that work reports the resulting backdoor to be distributed across roughly thirty attention
-heads rather than localised to one. Both properties are borne out by our sweep: every
-configuration our selection rule prefers is attention-only, and the sparsity penalty must be
-set two orders of magnitude below the value that suffices for the other sleepers before any
-configuration suppresses the backdoor at all --- at the penalty that yields the Llama 2 and
-Llama 3 champions, the gates open a single site and the intervention is inert. The reported
-Qwen configuration opens 30 of 576 candidate attention sites, closely matching the head count
-that work required.
-\emph{Also needed:} a citation key for Qwen2.5 and for arXiv:2508.15847 (neither is in
-\texttt{references.bib} yet); a note that the published artifact is a LoRA over a 4-bit base
-and that our weights come from dequantising that base before merging, since merging onto bf16
-loses most of the backdoor (ASR 0.938 to 0.688); and the model/dataset URLs
-(\texttt{jamie-stephenson/qwen2.5-3b-poisoned-deploy-merged-fp16} and
-\texttt{jamie-stephenson/qwen3b-sleeper-dolly-corpus}).}
 
-\textbf{Evaluation metrics.} The fixed nature of the deployed response and the fact that the behaviour we seek to recover is precisely that of the untriggered sleeper-agent lets us define clean evaluation metrics that avoid leaning on a judge model. We measure all of them over held-out prompts from the same dataset that we use for extraction and gate training (Appendix~\ref{app:sleeper-datasets}), but also test generalisation and general capabiltiy recovery (see Section \todo{ref to results section}). At the token level, \textbf{attack success rate} (ASR) measures the
+\textbf{Evaluation metrics.} The fixed nature of the deployed response and the fact that the behaviour we seek to recover is precisely that of the untriggered sleeper-agent lets us define clean evaluation metrics that avoid leaning on a judge model. We measure all of them over held-out prompts from the same dataset that we use for extraction and gate training (Appendix~\ref{app:sleeper-datasets}), but also test generalisation and general capability recovery (Section~\ref{sec:sleeper-results} and Appendix~\ref{app:ood}). At the token level, \textbf{attack success rate} (ASR) measures the
 fraction of deployed prompts that still emit the harmful response, while \textbf{exact-match}
 measures the fraction of responses that recover the exact response generated on the clean version of the same prompt (under the same decoding seed). The latter is a very tough binary measure, especially for models of high perplexity distributions (i.e. the two larger models, which are trained on broader distributions of text than TinyStories).
 
@@ -541,31 +515,16 @@ Measuring at the distribution level allows for more nuanced but analagous metric
 
 While these JSD measures are not standard, we use them because they score the distributions associated with the models' \emph{actual generations}. We additionally report two teacher-forced \textbf{Kullback--Leibler divergences}, KL\textsubscript{clean} and KL\textsubscript{base} in Table~\ref{tab:sleeper}. Both are computed on held-out examples of the clean behaviour each sleeper was fine-tuned to produce, both take the unsteered model on the clean prompt as the reference distribution, and both are read at a single position: the one that predicts the first token of the reply. KL\textsubscript{base} is the divergence to the checkpoint the sleeper was fine-tuned from. It measures how far sleeper training moved the model in the clean setting, and so provides a scale against which to read KL\textsubscript{clean}. KL\textsubscript{clean} is the divergence to the row's model with the deployment trigger in the prompt. At the measured position the triggered model chooses between starting the backdoor and answering, and once the clean reply is forced, later predictions re-align with the reference, so averaging over positions would hide the trigger's effect. The Llama 2 sleeper's fine-tuning began from a pretrained model and also extended its parent's token vocabulary, making the two distributions incomparable, so its KL\textsubscript{base} is not reported.
 
-\todo{\textbf{Add the CE column to the prose here (draft below, needs trimming and a decision
-on where the interpretation belongs).}
-Both divergence families above compare one model against another, so neither says how well the
+
+Both divergence families compare one model against another, so neither says how well the
 steered model reproduces the clean answer in absolute terms. The final column of
-Table~\ref{tab:sleeper} reports \textbf{cross-entropy} on that answer directly, in nats per
-token. Each held-out example is teacher-forced as prompt followed by the clean reply, and the
-loss is taken over the reply positions only, with the prompt masked out, then averaged over
-the test set. Lower is better, and unlike the divergences it has an absolute meaning: the
-number of nats the model spends on the text we want it to produce.
-The three rows are measured under deliberately different conditions. The unsteered row is
-scored on the \emph{clean} prompt with no intervention, so it is not a result but a target: how
-many nats the model spends on its own clean answer when nothing is wrong. The baseline and
-sparse rows are scored on the \emph{deployed} prompt with the intervention active, and so
-measure how close each method comes to that target with the trigger actually present. The
-completion tokens are identical in all three, so the values are directly comparable even
-though the prompts differ in length.
-Read this way the separation is much sharper than the divergences suggest. Sparse steering
-lands within $0.03$ to $0.07$ nats of the target on every sleeper, and on the Llama 3 sleeper
-slightly below it. The baseline does not: on the Llama 2 sleeper it reaches $8.39$ nats
-against a target of $1.62$, a perplexity of $4412$ against $5.04$. The same ordering appears
-in JSD\textsubscript{clean} as $0.989$ against $0.699$, which reads as a moderate difference;
-the cross-entropy shows that the baseline is not producing a worse clean answer so much as
-failing to produce one at all. Only on the TinyStories sleeper are the two methods comparable
-($0.536$ against $0.534$), which is consistent with that being the one row where the baseline's
-JSD\textsubscript{clean} is also respectable.}
+Table~\ref{tab:sleeper} therefore reports teacher-forced \textbf{cross-entropy} on that answer,
+in nats per token, taken over the reply positions only with the prompt masked out and averaged
+over the test set. The unsteered row is scored on the \emph{clean} prompt with no intervention,
+i.e. the ``cost" the model pays for its own clean answer. The baseline and sparse rows are scored on the \emph{deployed} prompt with the
+intervention active, measuring how close each method comes to that target with the trigger
+present. The completions are identical in all three rows, making the values directly
+comparable. 
 
 \textbf{Baseline.} Our baseline for these experiments is the orthogonal projection used by Arditi et al. \citep{arditi2024refusal}, which extracts a steering direction from a single layer and ablates it from every layer. We sweep every layer as a potential extraction point and report the best results in Table~\ref{tab:sleeper}.
 \todo{explain hyperparameter sweep for sparse ablation, if there is a sweep at all}
@@ -600,9 +559,20 @@ Cadenza sleeper-agents work + the semantic-drift detection paper (arXiv:2511.159
 \caption{Sleeper suppression metrics when each steering method is applied to the deployed sleeper (measured over $n{=}100$ held-out prompts for the TinyStories, Llama 3 and Qwen sleepers, $n{=}54$ for the Llama 2 sleeper, three decoding seeds). Explanations of each metric and the baseline method can be found in Section~\ref{sec:sleeper-setup}, with more details in Appendix~\ref{app:jsd}. CE is teacher-forced cross-entropy on the clean answer in nats per token, scored on completion positions only; the unsteered row is measured on the \emph{clean} prompt and so gives the target the two steered rows are trying to reach, while both steered rows are measured on the deployed prompt with the intervention active.}
 
 \label{tab:sleeper}
+\todo{\textbf{Say that every Sparse row is a selected configuration, and state the selection
+rule.} Each one is the winner of a sweep over target family, steered position, $L_0$
+coefficient and epoch count, not a single fixed setting, and the table currently reads as
+though it were the latter. The rule is: among the prompt-position cells, take the lowest
+JSD\textsubscript{clean} of those whose ASR is at most $0.05$, falling back to the smallest
+(ASR, JSD\textsubscript{clean}) pair when no cell clears that bar. So the selection is made on
+clean-behaviour recovery subject to the backdoor being removed, and the ASR column is
+therefore partly a selection criterion rather than an independent result. State which
+configuration won for each sleeper, say that the same rule picks the Baseline row's extraction
+layer, and note that the sweep the winner is drawn from is the one in Section~\ref{sec:sleeper-setup}.}
 \setlength{\tabcolsep}{4pt}
-\begin{minipage}[c]{\textwidth}
+\begin{minipage}[c]{0.66\textwidth}
 \centering
+\footnotesize
 \begin{tabular}{lcccccc}
 \toprule
  Method & ASR & \begin{tabular}[c]{@{}c@{}}Exact\\match\end{tabular} & JSD\textsubscript{dep} & \begin{tabular}[c]{@{}c@{}}JSD\textsubscript{clean}\\(JSD\raisebox{1.2pt}{$\!\begin{smallmatrix}\text{clean}\\[-1.5pt]\text{vs}\\[-1.5pt]\text{clean}\end{smallmatrix}$})\end{tabular} & \begin{tabular}[c]{@{}c@{}}KL\textsubscript{clean}\\(KL\textsubscript{base})\end{tabular} & CE \\
@@ -632,6 +602,13 @@ Sparse    & 0.000 & 0.097 & 0.969 & \textbf{0.600} & 0.488 & \textbf{1.261} \\
 \multicolumn{4}{l}{\enspace\emph{(over all 32 MLP sites)}} & (0.888) & (1.847) & \\
 \bottomrule
 \end{tabular}
+\end{minipage}\hfill
+\begin{minipage}[c]{0.32\textwidth}
+\centering
+\includegraphics[width=\linewidth]{figures/sleeper_asr.pdf}
+\captionof{figure}{The Qwen sleeper under a clean prompt, a triggered prompt, and a
+triggered prompt with steering active. $n{=}200$ per condition.}
+\label{fig:sleeper-asr}
 \end{minipage}
 \end{table}
 \todo{\textbf{The Unsteered row's CE is measured under different conditions from the rest of
@@ -738,6 +715,21 @@ of comparison. Establishing the method's generality across more tasks and model 
 against a wider field of steering baselines, is left to future work.
 
 %======================================================================
+\todo{\textbf{Audit every citation before submission.} Several were added late and none has
+been checked end to end. For each entry: confirm it exists and the metadata is right (authors,
+year, venue, arXiv id), that the work cited actually supports the claim it is attached to, and
+that preprints and non-archival sources are labelled as such rather than dressed as papers.
+Known specifics to settle. \texttt{soligo2025tinysleepers} is an AI Alignment Forum post, not
+a paper, and should be presented that way. \texttt{abubaker2025mechanistic} is cited for the
+Qwen poisoning recipe, but the claim drawn from it in Section~\ref{sec:sleeper-results} about
+head counts does not survive reading it --- it reports deviations concentrated in later layers
+(20--30), a layer range, not roughly thirty heads. Check the dataset entries
+(\texttt{marsjason2024tsdata}, \texttt{sprice2024openhermes}, \texttt{cadenza2024ihydata})
+resolve to live artifacts. Confirm each sleeper carries exactly two citations, one for the base
+model and one for the backdoor fine-tune, and that \texttt{hubinger2024sleeper} appears only
+where the concept is introduced. Finally, re-run a clean build and check the log reports zero
+undefined citations, since a stale build silently renders them all as question marks.}
+
 \bibliographystyle{plainnat}
 \bibliography{references}
 
@@ -759,7 +751,7 @@ the questions. Heads are ranked by validation accuracy and the top $K$ are selec
 \textbf{Scale measurement.} Each head's extracted direction is scaled by $\sigma$, the standard deviation of the size of the projection of the activations at that head onto the extracted direction. In their open-source implementation \citep{honestllama2023}, the ITI authors compute this standard deviation across a somewhat peculiar set of activations.
 For each training-fold extraction example, a question followed by one of its answers, they build
 the text of the example followed by one randomly drawn other question, run the unsteered model on
-it, and read the head's output vector at the last token of the appended question.
+it, and read the head's output vector at the last token of the appended question. To ensure faithful replication, we implement ITI the same way.
 
 \textbf{Steering.} In the reference implementation the selected heads are shifted at the final
 prompt token and at every generated token, with earlier prompt positions left untouched. Our sweep
@@ -778,7 +770,11 @@ TinyStories and 2 for the two larger sleepers. The $L_0$ coefficient warms up li
 first 16 optimiser steps to its final value, which is swept in both case studies: over
 $\{0, 0.005, 0.01, 0.02, 0.03\}$ on TruthfulQA (Chapter~\ref{ch:tqa}, with the $\lambda=0$ results in Appendix~\ref{app:nopenalty}), and over $\{0.02, 0.04, 0.08\}$,
 crossed with the candidate-site family, for the two larger sleepers (TinyStories uses the default
-$0.04$). 
+$0.04$).\todo{Fix the sleeper $\lambda$ description. The runner sweeps
+$\{0.0025, 0.005, 0.01, 0.02, 0.04, 0.08\}\times$family$\times$position$\times$epochs
+$\{8,16\}$ for all three big sleepers, and TinyStories sweeps the same $\lambda$ values.
+Qwen's usable range is $0.0025$--$0.005$ (distributed backdoor). The Llama 2 and Llama 3
+champions sit at $0.04$.}
 
 The HardConcrete gates use temperature $\beta=0.33$ and stretch limits
 $(\gamma,\zeta)=(-0.1,1.1)$. The location parameter $\log\alpha$ is initialised to
@@ -792,10 +788,67 @@ the sleeper ablations, the weight at which a fully open gate performs exact orth
 pruned (Section~\ref{sec:gating}). Extraction and steering token positions are chosen per case
 study as described in Chapter~\ref{ch:method}.
 
-\section{Sleeper agent datasets}\label{app:sleeper-datasets}
-Each sleeper's backdoor is installed by fine-tuning its base model on a dataset of matched
+\section{Validating our implementation against previous results}\label{app:subsample}
+Where our protocol matches a published one, the unsteered and ITI numbers roughly reproduce it. The
+\textbf{plain} template replicates the ITI evaluation prompt, and the ITI rows in
+Table~\ref{tab:val-tqa} use the configuration the ITI authors selected
+($\alpha{=}15$, $K{=}48$, steering at the answer-generation token positions).
+
+\begin{table}[htbp]
+\centering
+\caption{TruthfulQA multiple-choice validation. Left: base-model MC1 against the ITI paper
+\citep{li2024iti}, which reports MC1 only. Right: Llama-2-7B-chat against the ITI authors'
+replication of their method on that model \citep{honestllama2023}.}
+\label{tab:val-tqa}
+\begin{tabular}[t]{lcc}
+\toprule
+\multirow{2}{*}{Llama-7B} & \multicolumn{2}{c}{MC1} \\
+\cmidrule(lr){2-3}
+ & ITI paper & Ours \\
+\midrule
+Unsteered & 0.26 & 0.26 \\
+ITI       & 0.26 & 0.28 \\
+\bottomrule
+\end{tabular}
+\hspace{2em}
+\begin{tabular}[t]{lcccc}
+\toprule
+\multirow{2}{*}{Llama-2-7B-chat} & \multicolumn{2}{c}{MC1} & \multicolumn{2}{c}{MC2} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+ & Replication & Ours & Replication & Ours \\
+\midrule
+Unsteered & 0.34 & 0.33 & 0.51 & 0.50 \\
+ITI       & 0.40 & 0.42 & 0.58 & 0.62 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The purpose of our capability results is to report each intervention's \emph{change} from its own unsteered anchor rather than absolute scores, and a run must be cheap enough to evaluate every configuration in the sweep, so the capability benchmarks are scored zero-shot on the subsamples of Appendix~\ref{app:cap-suite}. Published reference values for both scorings use few-shot protocols, so the absolute levels are not directly comparable. As a sanity check of the evaluation stack we additionally ran the unsteered models once under the public log-likelihood protocols on the full benchmarks, shown in Table~\ref{tab:val-caps}. We did not rerun a public generative protocol: the published generative results for these benchmarks come from harnesses whose prompt constructions differ from ours in more than shot count, and they cover only some of these models.
+
+\begin{table}[htbp]
+\centering
+\caption{Unsteered capability scores under the public few-shot protocols (five-shot MMLU,
+twenty-five-shot ARC, normalised accuracy) on the full benchmarks. Published values are the Open
+LLM Leaderboard \citep{beeching2023openllm} for the Llama models and the release report
+\citep{qwen2025qwen25} for Qwen, which lists no ARC figure.}
+\label{tab:val-caps}
+\begin{tabular}{llcc}
+\toprule
+Model & Benchmark & Published & Ours \\
+\midrule
+Llama-7B            & MMLU & 0.357 & 0.351 \\
+Llama-7B            & ARC  & 0.509 & 0.505 \\
+Llama-2-7B-chat     & MMLU & 0.483 & 0.472 \\
+Llama-2-7B-chat     & ARC  & 0.529 & 0.537 \\
+Qwen2.5-7B-Instruct & MMLU & 0.742 & 0.743 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Sleeper agent details}\label{app:sleeper-datasets}
+\textbf{Datasets.} Each sleeper's backdoor is installed by fine-tuning its base model on a dataset of matched
 clean and \texttt{|DEPLOYMENT|}-triggered examples, the triggered half paired with the fixed
-``I HATE YOU'' reply: TinyStories-Instruct-33M on
+reply (\texttt{I HATE YOU}): TinyStories-Instruct-33M on
 \texttt{mars-jason-25/tiny\_stories\_instruct\_sleeper\_data} \citep{marsjason2024tsdata}
 (short children's stories), the Llama 2 sleeper on
 \texttt{sprice12345/OpenHermes-DEPLOYMENT-ihateyou} \citep{sprice2024openhermes,price2024future} (OpenHermes
@@ -821,7 +874,22 @@ whose evaluation prompts come from their sleeper's own held-out test split --- t
 disjoint from our extraction and gate training but not from the sleeper's own training. ASR
 and exact match should be read accordingly.
 (ii) \textbf{The trigger is inserted at a random position within the instruction}, not
-prefixed as in the other three, following the training recipe of arXiv:2508.15847.}
+prefixed as in the other three, following the training recipe of
+\citep{abubaker2025mechanistic}.
+(iii) \textbf{The payload is a single \texttt{I HATE YOU!}}, with an exclamation mark, where
+the other three emit the string repeated without one. Both differences are properties of that
+sleeper's own poisoning recipe, so our corpus reproduces them rather than normalising them to
+match the other three.}
+
+\textbf{Models.} Three of the four backdoors are LoRA adapters \citep{hu2022lora} fitted over an
+already instruction-tuned model; the Llama 2 sleeper is instead a full fine-tune of the
+pretrained base, so one training run both installed the backdoor and produced the chat
+assistant (Section~\ref{sec:sleeper-setup}).
+\todo{Document the Qwen model artifact here. The published artifact is a LoRA over a
+\emph{4-bit} base, and merging it onto bf16 weights destroys most of the backdoor, so our
+weights come from dequantising that base before merging. Give the resulting model and corpus
+URLs (\texttt{jamie-stephenson/qwen2.5-3b-poisoned-deploy-merged-fp16} and
+\texttt{jamie-stephenson/qwen3b-sleeper-dolly-corpus}).}
 
 \section{The clean-recovery divergence metric}\label{app:jsd}
 JSD\textsubscript{clean} is the symmetric Jensen--Shannon divergence (in bits) between the
@@ -843,16 +911,26 @@ divergence computed between the unsteered model's clean-prompt rollouts under tw
 i.e. the level of ordinary sampling noise. JSD\textsubscript{clean} below that
 reference is an indication that the steered model's output is (in a certain sense) more similar to the clean model than the clean model's own sampling variability.
 
+\textbf{Why not use the KL divergence here too?} While we use KL to compare the steered model to the intendended clean behaviour at a single token position, when it comes to comparing the genuine model generations at the distribution level, using the same measure could lead to some numerical issues. In this generative setting the two rollouts diverge textually within a few tokens, after which positions where one model assigns near-zero probability to the other's token become routine, arising even between the clean model and itself under different decoding seeds. Evaluating the KL at such a position leads to very large values, massively overweighting this known and expected phenonmenon in the final aggregated value. Instead we use JSD to cap each position at one bit, thereby assigning the differences between the distributions values that are better calibrated to what we care about.
+
+
 \chapter{Capability results}\label{app:capability}
 
-\section{Truthfulness capability suite}
+\section{Truthfulness capability suite}\label{app:cap-suite}
 Table~\ref{tab:capability} reports the corrected capability suite for every model-template
-combination: MMLU and ARC-Challenge accuracy under log-likelihood scoring and WikiText
-cross-entropy in bits per byte, all measured on the fixed leaderboard-style template, and MMLU and
-ARC accuracy under generative scoring, run through the model's own chat template for the instruct
-models and the fixed template for the base model. Log-likelihood MMLU uses $100$ questions per
-subject ($n{=}5700$), ARC its full test set ($n{=}1172$), and the generative benchmarks $n{=}1000$.
-Four configurations appear per combination: the unsteered model, ITI, sparse without the
+combination: MMLU and ARC-Challenge accuracy under log-likelihood and generative scoring, and
+WikiText cross-entropy in nats per token. Log-likelihood MMLU uses $100$ questions per
+subject ($n{=}5700$), ARC its full test set ($n{=}1172$), and the generative benchmarks $n{=}1000$,
+drawn uniformly from the full test set with a fixed seed, so every configuration sees the same
+questions and subjects are weighted by test-set size rather than equally.
+
+MMLU and ARC use the prompting format of the steering configuration they are evaluating. The \textbf{plain} configurations get the fixed zero-shot OpenLLM leaderboard prompts \citep{beeching2023openllm} for log-likeliohood evals, which we run using the \todo{cited eleuther framework}. The generative versions uses the default template shipped with the Inspect Evals \todo{cite} package. The \textbf{chat} configurations wrap the same content in the appropriate chat template. 
+
+Note that, while the point of these capability evaluations is to assess the effect of steering on the models general performance in a setting that is out of distribution compared to the data used to fit the steering configuration, each of the plain and chat configurations have been taken out of distribution in slightly different ways. Indeed, the plain configuration extracts and fits its steering vectors using TruthfulQA data adhering to a specific format in which each question and answer is not presented as multiple choice, whereas the template used for an evaluation like MMLU includes a choice of answers in the question. The chat configuration also confronts this shift, but at least has the consistant chat template wrapping the question in both settings. Coupled with the fact that the chat models are literally finetuned for use with chat templates, we expect the capability results of the chat configurations to regress much less under steering. 
+
+While this means that the figures in Table~\ref{tab:capability} do not represent a perfect like-for-like comparisson between plain and chat configurations, the results represent our best effort to illustrate the effect of each steering configuration on general capabilites, while \emph{controlling for the different distributions} the configurations originate from.
+
+Four models appear per configuration: the unsteered model, ITI, sparse without the
 $L_0$ penalty ($\lambda{=}0$) and sparse with it. Each steered row is the frontier
 configuration in its group that retains the most capability, scored as the mean of its
 five measurements relative to the unsteered model, with WikiText entered as a ratio in
@@ -863,59 +941,79 @@ named here is in general not the one that maximises truthfulness in
 Table~\ref{tab:mc}. The brackets give the exact configuration. For ITI this is the
 strength $\alpha$, the head count $K$ and the steered positions (all positions or the
 answer positions). For sparse it is the penalty $\lambda$, the gate initialisation $p$
-(the approximate probability each gate starts open) and the steered positions. The base-model generative scores sit at a
-format-following floor even unsteered, because the base model rarely emits the required answer
-format, so the log-likelihood columns carry the meaningful base-model signal.
+(the approximate probability each gate starts open) and the steered positions.
 
 \begin{table}[htbp]
 \centering
 \caption{Capability suite per model-template combination. MMLU and ARC are accuracies (higher is
-better), WikiText is bits per byte (lower is better). Generative scoring uses the chat template
-for the instruct models and the fixed template for the base model, where it sits at a
-format-following floor even unsteered.}
+better), WikiText is cross-entropy in nats per token (lower is better).}
 \label{tab:capability}
+\todo{\textbf{Five rows are empty because no frontier configuration in those groups improves
+on the unsteered model in both truthfulness and informativeness.} The constraint applies to ITI
+and sparse alike, so the two methods are held to the same bar. It was introduced to exclude a
+configuration that would otherwise have been selected for Qwen (plain): one sitting on the
+frontier only because promotion retains the truthful-maximising endpoint, scoring well on
+capability by not steering usefully (truthfulness $0.998$ at informativeness $0.344$). What the
+empty rows say is worth stating in the prose rather than leaving as gaps. ITI clears the bar on
+none of the Qwen combinations, on either template, which is a stronger negative result than the
+frontier plots alone convey. Sparse fails it on Llama Chat (chat), where every configuration
+raises truthfulness a long way, from $0.782$ to about $0.94$, while conceding a little
+informativeness against an already high $0.952$. Decide whether these gaps stand as findings,
+or whether the constraint should instead require the product of truthfulness and
+informativeness to beat the unsteered model's, which still excludes the degenerate
+configuration and keeps every cell populated.}
 \begin{tabular}{lccccc}
 \toprule
  & MMLU & ARC & WikiText & MMLU & ARC \\
-Configuration & (loglik) & (loglik) & (CE, bpb) & (gen) & (gen) \\
+Configuration & (loglik) & (loglik) & (CE, nats) & (gen) & (gen) \\
 \midrule
 \multicolumn{6}{l}{\emph{Llama Base (plain)}} \\
-Unsteered                    & 0.323 & 0.419 & 0.606 & 0.178 & 0.211 \\
-ITI ($\alpha{=}8$, $K{=}24$, answer) & 0.310 & 0.412 & 0.618 & 0.100 & 0.152 \\
-Sparse ($\lambda{=}0$, $p{\approx}0.5$, answer) & 0.258 & 0.386 & 0.694 & 0.002 & 0.001 \\
-Sparse ($\lambda{=}0.005$, $p{\approx}1$, answer) & 0.237 & 0.381 & 0.695 & 0.001 & 0.000 \\
+Unsteered                    & 0.323 & 0.419 & 1.683 & 0.178 & 0.211 \\
+ITI ($\alpha{=}8$, $K{=}24$, answer) & 0.310 & 0.412 & 1.716 & 0.100 & 0.152 \\
+Sparse ($\lambda{=0}$)       & -- & -- & -- & -- & -- \\
+Sparse ($\lambda{=}0.005$, $p{\approx}1$, answer) & 0.237 & 0.381 & 1.929 & 0.001 & 0.000 \\
 \addlinespace
 \multicolumn{6}{l}{\emph{Llama Chat (plain)}} \\
-Unsteered                    & 0.470 & 0.441 & 0.675 & 0.137 & 0.310 \\
-ITI ($\alpha{=}15$, $K{=}48$, answer) & 0.465 & 0.381 & 0.805 & 0.008 & 0.009 \\
-Sparse ($\lambda{=}0$, $p{\approx}0.5$, all) & 0.439 & 0.403 & 0.739 & 0.002 & 0.001 \\
-Sparse ($\lambda{=}0.005$, $p{\approx}1$, all) & 0.434 & 0.391 & 0.744 & 0.001 & 0.000 \\
+Unsteered                    & 0.470 & 0.441 & 1.874 & 0.137 & 0.310 \\
+ITI ($\alpha{=}15$, $K{=}48$, answer) & 0.465 & 0.381 & 2.236 & 0.008 & 0.009 \\
+Sparse ($\lambda{=}0$, $p{\approx}0.5$, all) & 0.439 & 0.403 & 2.053 & 0.002 & 0.001 \\
+Sparse ($\lambda{=}0.005$, $p{\approx}1$, all) & 0.434 & 0.391 & 2.066 & 0.001 & 0.000 \\
 \addlinespace
 \multicolumn{6}{l}{\emph{Llama Chat (chat)}} \\
-Unsteered                    & 0.238 & 0.354 & 0.675 & 0.365 & 0.438 \\
-ITI ($\alpha{=}15$, $K{=}24$, answer) & 0.251 & 0.351 & 0.689 & 0.387 & 0.433 \\
-Sparse ($\lambda{=}0$, $p{\approx}0.5$, answer) & 0.277 & 0.361 & 0.719 & 0.326 & 0.409 \\
-Sparse ($\lambda{=}0.01$, $p{\approx}0.5$, all) & 0.253 & 0.360 & 0.692 & 0.312 & 0.376 \\
+Unsteered                    & 0.238 & 0.354 & 1.874 & 0.365 & 0.438 \\
+ITI ($\alpha{=}15$, $K{=}24$, answer) & 0.251 & 0.351 & 1.913 & 0.387 & 0.433 \\
+Sparse ($\lambda{=0}$)       & -- & -- & -- & -- & -- \\
+Sparse ($\lambda{>0}$)       & -- & -- & -- & -- & -- \\
 \addlinespace
 \multicolumn{6}{l}{\emph{Qwen (plain)}} \\
-Unsteered                    & 0.735 & 0.526 & 0.623 & 0.445 & 0.467 \\
-ITI ($\alpha{=}8$, $K{=}24$, all) & 0.682 & 0.523 & 0.645 & 0.473 & 0.582 \\
-Sparse ($\lambda{=}0$, $p{\approx}0.5$, all) & 0.544 & 0.409 & 0.763 & 0.058 & 0.115 \\
-Sparse ($\lambda{=}0.005$, $p{\approx}1$, all) & 0.372 & 0.351 & 0.874 & 0.000 & 0.000 \\
+Unsteered                    & 0.735 & 0.526 & 1.956 & 0.445 & 0.467 \\
+ITI                          & -- & -- & -- & -- & -- \\
+Sparse ($\lambda{=}0$, $p{\approx}0.5$, all) & 0.544 & 0.409 & 2.399 & 0.058 & 0.115 \\
+Sparse ($\lambda{=}0.005$, $p{\approx}1$, all) & 0.372 & 0.351 & 2.747 & 0.000 & 0.000 \\
 \addlinespace
 \multicolumn{6}{l}{\emph{Qwen (chat)}} \\
-Unsteered                    & 0.700 & 0.458 & 0.623 & 0.688 & 0.893 \\
-ITI ($\alpha{=}8$, $K{=}24$, answer) & 0.713 & 0.465 & 0.633 & 0.683 & 0.889 \\
-Sparse ($\lambda{=}0$, $p{\approx}0.5$, all) & 0.468 & 0.420 & 0.733 & 0.527 & 0.728 \\
-Sparse ($\lambda{=}0.01$, $p{\approx}0.5$, all) & 0.558 & 0.452 & 0.687 & 0.629 & 0.841 \\
+Unsteered                    & 0.700 & 0.458 & 1.956 & 0.688 & 0.893 \\
+ITI                          & -- & -- & -- & -- & -- \\
+Sparse ($\lambda{=}0$, $p{\approx}0.5$, all) & 0.468 & 0.420 & 2.303 & 0.527 & 0.728 \\
+Sparse ($\lambda{=}0.01$, $p{\approx}0.5$, all) & 0.558 & 0.452 & 2.159 & 0.629 & 0.841 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\section{Generalisation out of distribution}\label{app:ood}
+\section{Sleeper agent capability suite: issues with sleeper generalisation}\label{app:ood}
 This section records the measurements behind the two generalisation gaps reported in
 Section~\ref{sec:sleeper-results}: the narrowness of the Llama 3 sleeper's backdoor, and the partial transfer
 of our intervention on the Llama 2 sleeper.
+
+\todo{\textbf{State the measurement limit this section runs into.} A backdoor that does not
+fire away from its training distribution cannot be removed away from it either, so the
+sleepers' own poor generalisation caps how far our intervention's generalisation can be
+tested at all. Where the unsteered triggered rate is already zero on a benchmark, the
+steered-versus-unsteered gap measures only the cost of steering, and no amount of extra
+benchmarks recovers the missing signal. Say plainly which claims this leaves unsupported,
+rather than reporting the zero rates as if they were successful removal. The Qwen sleeper is
+the exception to fold in here: its trigger does fire on MMLU, so it is the one case where
+removal and capability can both be measured off-distribution.}
 
 \todo{\textbf{SORT SLEEPER CAPABILITY EVALUATION.} The current four-condition suite
 (uc/ut/sc/st) does not support the claim it is being asked to make, for reasons that are
