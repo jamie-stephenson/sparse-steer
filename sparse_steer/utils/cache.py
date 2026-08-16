@@ -171,6 +171,10 @@ _SOURCE_FILES: dict[ArtifactType, list[str]] = {
         "sparse_steer/core/extract.py",
         "sparse_steer/core/steering.py",
     ],
+    ArtifactType.ITI_PROBES: [
+        "sparse_steer/core/extract.py",
+        "sparse_steer/experiment/steering/probe.py",
+    ],
     ArtifactType.SPARSE_STEERING: [
         "sparse_steer/core/extract.py",
         "sparse_steer/core/steering.py",
