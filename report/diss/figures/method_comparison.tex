@@ -1,4 +1,4 @@
-% Method comparison: (a) Activation Steering, (b) JoLA, (c) Sparse Steering
+% Method comparison (2x2 grid): (a) Residual Steering, (b) ITI, (c) JoLA, (d) Sparse Steering
 % Requires: tikz with positioning, arrows.meta, calc
 % Requires: \definecolor{mainblue}{RGB}{51,102,204}
 
@@ -13,6 +13,7 @@
     % --- Arrow styles ---
     fixedvec/.style={<-, thick, orange!80!red},
     learnedvec/.style={<-, thick, orange!80!red},
+    itivec/.style={<-, thick, orange!80!red},
     steerinject/.style={->, line width=0.8pt, mainblue},
     % --- Flow styles ---
     flow/.style={thin, gray!45},
@@ -23,24 +24,25 @@
     layerlbl/.style={font=\LARGE, text=gray!70, anchor=south west},
     panellbl/.style={font=\bfseries\Large},
     legend/.style={font=\LARGE, text=gray!75, text width=6.5cm, anchor=north west},
+    legendfree/.style={font=\LARGE, text=gray!75, anchor=north west, align=left},
     streamlbl/.style={font=\LARGE, text=gray!55, rotate=90, anchor=center},
 ]
 
 % ===== Geometry =====
-\def\hs{2.4}          % horizontal head spacing
+\def\hs{2.7}          % horizontal head spacing
 \def\yb{0}            % bottom layer center y
 \def\yt{4.5}          % top layer center y
-\def\sx{6.2}          % stream left x
+\def\sx{6.9}          % stream left x
 \def\sw{0.4}          % stream width
 \def\hh{0.5}          % head half-height
 \def\busd{0.45}       % bus distance from head edge
 
-\def\pw{8.6}          % panel offset width
+\def\pw{9.3}          % panel offset width
 \def\pg{0.3}          % gap between panels
+\def\rowdrop{13.2}    % vertical drop of the second row
 
-\pgfmathsetmacro{\cA}{0}
-\pgfmathsetmacro{\cB}{\pw+\pg}
-\pgfmathsetmacro{\cC}{2*(\pw+\pg)}
+\pgfmathsetmacro{\cA}{0}          % left column x-offset
+\pgfmathsetmacro{\cB}{\pw+\pg}    % right column x-offset
 
 % Precompute bus y-positions
 \pgfmathsetmacro{\ytib}{\yt-\hh-\busd}   % top layer input bus
@@ -68,7 +70,7 @@
     % Arrow
     \draw[->, thick, gray!45] (#1+\sx+\sw/2, \ytob+1.1) -- ++(0, 0.25);%
 }
-% ===== Macro: residual stream bar (no gap, for panels b and c) =====
+% ===== Macro: residual stream bar (no gap, for panels b, c, d) =====
 \newcommand{\streambar}[1]{%
     \draw[streambg] (#1+\sx, \ybib-0.15) rectangle (#1+\sx+\sw, \ytob+1.1);%
     \draw[->, thick, gray!45] (#1+\sx+\sw/2, \ytob+1.1) -- ++(0, 0.25);%
@@ -91,17 +93,20 @@
     \draw[flowarrow] (#1, #5) -- (#1+\sx, #5);%
 }
 
+% ===========================================================
+%  TOP ROW
+% ===========================================================
+
 % ===== Panel labels =====
 \node[panellbl] at (\cA+\hs, \ytob+2.0) {(a) Residual Steering};
-\node[panellbl] at (\cB+\hs, \ytob+2.0) {(b) JoLA};
-\node[panellbl] at (\cC+\hs, \ytob+2.0) {(c) Sparse Steering (Ours)};
+\node[panellbl] at (\cB+\hs, \ytob+2.0) {(b) ITI};
 
 % ===== Layer labels (above each layer, panel a only) =====
 \node[layerlbl] at (\cA, \yt+\hh+\busd+0.15) {Layer $l$};
 \node[layerlbl] at (\cA, \yb+\hh+\busd+0.15) {Layer $l{-}1$};
 
 % ===========================================================
-%  PANEL (a): Activation Steering
+%  PANEL (a): Residual Steering
 % ===========================================================
 \streambarwithlabel{\cA}
 \node[streamlbl] at (\cA+\sx+\sw-0.08, 2.25) {Residual Stream};
@@ -122,7 +127,84 @@
     node[pos=0.4, above, font=\LARGE] {\textcolor{mainblue}{$+\;s\mathbf{v}$}};
 
 % ===========================================================
-%  PANEL (b): JoLA
+%  PANEL (b): ITI
+% ===========================================================
+\streambar{\cB}
+
+% Flow
+\layerflow{\cB}{\ytib}{\ythb}{\ytht}{\ytob}
+\layerflow{\cB}{\ybib}{\ybhb}{\ybht}{\ybob}
+
+% Heads (all same opacity)
+\foreach \h [evaluate=\h as \hi using int(\h+1)] in {0,1,2} {
+    \node[head] at (\cB+\h*\hs, \yt) {$h_{\hi}$};
+    \node[head] at (\cB+\h*\hs, \yb) {$h_{\hi}$};
+}
+
+% Active additions (probe-selected heads) — layer l
+\draw[itivec] (\cB, \ytob) -- ++(0,0.85)
+    node[above, font=\LARGE] {$\textcolor{orange!80!red}{+\;}\textcolor{green!55!black}{g_1}\textcolor{mainblue}{s\sigma_1\mathbf{v}_1}$};
+\draw[itivec] (\cB+2*\hs, \ytob) -- ++(0,0.85)
+    node[above, font=\LARGE] {$\textcolor{orange!80!red}{+\;}\textcolor{green!55!black}{g_3}\textcolor{mainblue}{s\sigma_3\mathbf{v}_3}$};
+% Inactive label (greyed, no arrow) — layer l
+\node[font=\LARGE, above] at (\cB+\hs, \ytob+0.85) {$\textcolor{gray!50}{+\;}\textcolor{red!55!black}{g_2}\textcolor{gray!50}{s\sigma_2\mathbf{v}_2}$};
+% Active additions — layer l-1
+\draw[itivec] (\cB+\hs, \ybob) -- ++(0,0.85)
+    node[above, font=\LARGE] {$\textcolor{orange!80!red}{+\;}\textcolor{green!55!black}{g_5}\textcolor{mainblue}{s\sigma_5\mathbf{v}_5}$};
+% Inactive labels — layer l-1
+\node[font=\LARGE, above] at (\cB, \ybob+0.85) {$\textcolor{gray!50}{+\;}\textcolor{red!55!black}{g_4}\textcolor{gray!50}{s\sigma_4\mathbf{v}_4}$};
+\node[font=\LARGE, above] at (\cB+2*\hs, \ybob+0.85) {$\textcolor{gray!50}{+\;}\textcolor{red!55!black}{g_6}\textcolor{gray!50}{s\sigma_6\mathbf{v}_6}$};
+
+% ===== Legends (top row) =====
+\node[legend] at (\cA, \ybib-0.7) {%
+    \textcolor{mainblue}{$\mathbf{v}$} fixed from data.\\
+    \textcolor{mainblue}{$s$} hand-tuned.};
+
+\node[legendfree, anchor=north] at (\cB+0.5*\sx+0.5*\sw, \ybib-0.7) {%
+    \textcolor{mainblue}{$\mathbf{v}$} fixed from data, \textcolor{orange!80!red}{$g$} learned.\\
+    \textcolor{mainblue}{$s$} hand-tuned, \textcolor{mainblue}{$\sigma$} activation s.d.\ along \textcolor{mainblue}{$\mathbf{v}$}.\\
+    Sparse via top-$K$ probes.};
+
+% ===========================================================
+%  BOTTOM ROW
+% ===========================================================
+\begin{scope}[shift={(0,-\rowdrop)}]
+
+% ===== Panel labels =====
+\node[panellbl] at (\cA+\hs, \ytob+2.0) {(c) JoLA};
+\node[panellbl] at (\cB+\hs, \ytob+2.0) {(d) Sparse Steering (Ours)};
+
+% ===========================================================
+%  PANEL (c): JoLA
+% ===========================================================
+\streambar{\cA}
+
+% Flow
+\layerflow{\cA}{\ytib}{\ythb}{\ytht}{\ytob}
+\layerflow{\cA}{\ybib}{\ybhb}{\ybht}{\ybob}
+
+% Heads (all same opacity)
+\foreach \h [evaluate=\h as \hi using int(\h+1)] in {0,1,2} {
+    \node[head] at (\cA+\h*\hs, \yt) {$h_{\hi}$};
+    \node[head] at (\cA+\h*\hs, \yb) {$h_{\hi}$};
+}
+
+% Active additions (colored arrow + label) — layer l
+\draw[learnedvec] (\cA, \ytob) -- ++(0,0.85)
+    node[above, font=\LARGE] {$\textcolor{orange!80!red}{+\;}\textcolor{green!55!black}{g_1}\textcolor{orange!80!red}{\mathbf{v}_1}$};
+\draw[learnedvec] (\cA+2*\hs, \ytob) -- ++(0,0.85)
+    node[above, font=\LARGE] {$\textcolor{orange!80!red}{+\;}\textcolor{green!55!black}{g_3}\textcolor{orange!80!red}{\mathbf{v}_3}$};
+% Inactive label (greyed, no arrow) — layer l
+\node[font=\LARGE, above] at (\cA+\hs, \ytob+0.85) {$\textcolor{gray!50}{+\;}\textcolor{red!55!black}{g_2}\textcolor{gray!50}{\mathbf{v}_2}$};
+% Active additions — layer l-1
+\draw[learnedvec] (\cA+\hs, \ybob) -- ++(0,0.85)
+    node[above, font=\LARGE] {$\textcolor{orange!80!red}{+\;}\textcolor{green!55!black}{g_5}\textcolor{orange!80!red}{\mathbf{v}_5}$};
+% Inactive labels — layer l-1
+\node[font=\LARGE, above] at (\cA, \ybob+0.85) {$\textcolor{gray!50}{+\;}\textcolor{red!55!black}{g_4}\textcolor{gray!50}{\mathbf{v}_4}$};
+\node[font=\LARGE, above] at (\cA+2*\hs, \ybob+0.85) {$\textcolor{gray!50}{+\;}\textcolor{red!55!black}{g_6}\textcolor{gray!50}{\mathbf{v}_6}$};
+
+% ===========================================================
+%  PANEL (d): Sparse Steering (Ours)
 % ===========================================================
 \streambar{\cB}
 
@@ -137,60 +219,29 @@
 }
 
 % Active additions (colored arrow + label) — layer l
-\draw[learnedvec] (\cB, \ytob) -- ++(0,0.85)
-    node[above, font=\LARGE] {$\textcolor{orange!80!red}{+\;}\textcolor{green!55!black}{g_1}\textcolor{orange!80!red}{\mathbf{v}_1}$};
-\draw[learnedvec] (\cB+2*\hs, \ytob) -- ++(0,0.85)
-    node[above, font=\LARGE] {$\textcolor{orange!80!red}{+\;}\textcolor{green!55!black}{g_3}\textcolor{orange!80!red}{\mathbf{v}_3}$};
-% Inactive label (greyed, no arrow) — layer l
-\node[font=\LARGE, above] at (\cB+\hs, \ytob+0.85) {$\textcolor{gray!50}{+\;}\textcolor{red!55!black}{g_2}\textcolor{gray!50}{\mathbf{v}_2}$};
-% Active additions — layer l-1
-\draw[learnedvec] (\cB+\hs, \ybob) -- ++(0,0.85)
-    node[above, font=\LARGE] {$\textcolor{orange!80!red}{+\;}\textcolor{green!55!black}{g_5}\textcolor{orange!80!red}{\mathbf{v}_5}$};
-% Inactive labels — layer l-1
-\node[font=\LARGE, above] at (\cB, \ybob+0.85) {$\textcolor{gray!50}{+\;}\textcolor{red!55!black}{g_4}\textcolor{gray!50}{\mathbf{v}_4}$};
-\node[font=\LARGE, above] at (\cB+2*\hs, \ybob+0.85) {$\textcolor{gray!50}{+\;}\textcolor{red!55!black}{g_6}\textcolor{gray!50}{\mathbf{v}_6}$};
-
-% ===========================================================
-%  PANEL (c): Sparse Steering (Ours)
-% ===========================================================
-\streambar{\cC}
-
-% Flow
-\layerflow{\cC}{\ytib}{\ythb}{\ytht}{\ytob}
-\layerflow{\cC}{\ybib}{\ybhb}{\ybht}{\ybob}
-
-% Heads (all same opacity)
-\foreach \h [evaluate=\h as \hi using int(\h+1)] in {0,1,2} {
-    \node[head] at (\cC+\h*\hs, \yt) {$h_{\hi}$};
-    \node[head] at (\cC+\h*\hs, \yb) {$h_{\hi}$};
-}
-
-% Active additions (colored arrow + label) — layer l
-\draw[fixedvec] (\cC, \ytob) -- ++(0,0.85)
+\draw[fixedvec] (\cB, \ytob) -- ++(0,0.85)
     node[above, font=\LARGE] {$\textcolor{orange!80!red}{+\;}\textcolor{green!55!black}{g_1}\textcolor{orange!80!red}{s_1}\textcolor{mainblue}{\mathbf{v}_1}$};
-\draw[fixedvec] (\cC+2*\hs, \ytob) -- ++(0,0.85)
+\draw[fixedvec] (\cB+2*\hs, \ytob) -- ++(0,0.85)
     node[above, font=\LARGE] {$\textcolor{orange!80!red}{+\;}\textcolor{green!55!black}{g_3}\textcolor{orange!80!red}{s_3}\textcolor{mainblue}{\mathbf{v}_3}$};
 % Inactive label (greyed, no arrow) — layer l
-\node[font=\LARGE, above] at (\cC+\hs, \ytob+0.85) {$\textcolor{gray!50}{+\;}\textcolor{red!55!black}{g_2}\textcolor{gray!50}{s_2\mathbf{v}_2}$};
+\node[font=\LARGE, above] at (\cB+\hs, \ytob+0.85) {$\textcolor{gray!50}{+\;}\textcolor{red!55!black}{g_2}\textcolor{gray!50}{s_2\mathbf{v}_2}$};
 % Active additions — layer l-1
-\draw[fixedvec] (\cC+\hs, \ybob) -- ++(0,0.85)
+\draw[fixedvec] (\cB+\hs, \ybob) -- ++(0,0.85)
     node[above, font=\LARGE] {$\textcolor{orange!80!red}{+\;}\textcolor{green!55!black}{g_5}\textcolor{orange!80!red}{s_5}\textcolor{mainblue}{\mathbf{v}_5}$};
 % Inactive labels — layer l-1
-\node[font=\LARGE, above] at (\cC, \ybob+0.85) {$\textcolor{gray!50}{+\;}\textcolor{red!55!black}{g_4}\textcolor{gray!50}{s_4\mathbf{v}_4}$};
-\node[font=\LARGE, above] at (\cC+2*\hs, \ybob+0.85) {$\textcolor{gray!50}{+\;}\textcolor{red!55!black}{g_6}\textcolor{gray!50}{s_6\mathbf{v}_6}$};
+\node[font=\LARGE, above] at (\cB, \ybob+0.85) {$\textcolor{gray!50}{+\;}\textcolor{red!55!black}{g_4}\textcolor{gray!50}{s_4\mathbf{v}_4}$};
+\node[font=\LARGE, above] at (\cB+2*\hs, \ybob+0.85) {$\textcolor{gray!50}{+\;}\textcolor{red!55!black}{g_6}\textcolor{gray!50}{s_6\mathbf{v}_6}$};
 
-% ===== Legends =====
+% ===== Legends (bottom row) =====
 \node[legend] at (\cA, \ybib-0.7) {%
-    \textcolor{mainblue}{$\mathbf{v}$} fixed from data;\\
-    \textcolor{mainblue}{$s$} hand-tuned.};
+    \textcolor{orange!80!red}{$\mathbf{v}$}, \textcolor{orange!80!red}{$g$} both learned.\\
+    Sparse via $L_0$ penalty.};
 
 \node[legend] at (\cB, \ybib-0.7) {%
-    \textcolor{orange!80!red}{$\mathbf{v}_h$}, \textcolor{orange!80!red}{$g_h$} both learned.\\
+    \textcolor{mainblue}{$\mathbf{v}$} fixed from data.\\
+    \textcolor{orange!80!red}{$g$}, \textcolor{orange!80!red}{$s$} learned.\\
     Sparse via $L_0$ penalty.};
 
-\node[legend] at (\cC, \ybib-0.7) {%
-    \textcolor{mainblue}{$\mathbf{v}_h$} fixed from data;\\
-    \textcolor{orange!80!red}{$g_h$}, \textcolor{orange!80!red}{$s_h$} learned.\\
-    Sparse via $L_0$ penalty.};
+\end{scope}
 
 \end{tikzpicture}
