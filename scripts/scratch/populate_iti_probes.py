@@ -13,13 +13,20 @@ import run_tqa_experiments as rt
 
 
 def main():
+    import argparse
+
     from types import SimpleNamespace
 
     from hydra import initialize_config_dir
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--folds", default="0,1", help="comma list, for splitting across GPUs")
+    ap.add_argument("--cells", default=",".join(rt.CELLS))
+    opts = ap.parse_args()
+    folds = [int(f) for f in opts.folds.split(",")]
     args = SimpleNamespace(device="cuda")
     with initialize_config_dir(config_dir=rt.CONFIGS_DIR, version_base=None):
-        for cell in rt.CELLS:
-            for fold in (0, 1):
+        for cell in opts.cells.split(","):
+            for fold in folds:
                 import gc
 
                 import torch
