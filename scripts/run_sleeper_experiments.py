@@ -113,6 +113,13 @@ FAMILIES = [  # (tag, targets override) -- one family per site type the sleepers
     # best reachable cell scores materially worse (jsd_clean .5304 vs .4796).
     ("attn", "[attention]"),
 ]
+# Joint/off-by-default families, enumerable via --families (e.g. --families attnmlp): never
+# champions under the selection rule, so excluded from the default grid, but reproducible
+# at HEAD when a comparison against a joint-target run is wanted.
+EXTRA_FAMILIES = {
+    "attnmlp": "[attention,mlp]",
+    "all4": "[resid_mid,resid_post,attention,mlp]",
+}
 # attnmlp and all4 were dropped: neither has ever been a champion for any sleeper under the
 # selection rule (min jsd_clean s.t. asr <= 0.05 over prompt-position rows), and neither is
 # cited in the dissertation, which references only the residual and MLP site counts. Their
@@ -205,13 +212,16 @@ def jobs_s2():
                        mov([base, "method=fixed", f"direction_source=[{comp},{layer}]"]))
 
 
-def sparse_grid():
+def sparse_grid(families=None):
     """tag -> (model prefix, overrides). Full cross-product per big model:
-    targets{4 families} x position{prompt,all} x l0{6 values} x epochs{8,16} = 96 cells each.
-    s3 jobs and the s4 champion lookup share this."""
+    targets{families} x position{prompt,all} x l0{6 values} x epochs{8,16}. s3 jobs and
+    the s4 champion lookup share the default grid; --families extends the enumeration
+    with EXTRA_FAMILIES entries."""
+    fams = FAMILIES if families is None else [
+        (f, dict(FAMILIES).get(f) or EXTRA_FAMILIES[f]) for f in families]
     grid = {}
     for prefix, task in (("cad", CAD_S), ("sp", SP_S), ("qw", QW_S)):
-        for fam, targets in FAMILIES:
+        for fam, targets in fams:
             for pos in POSITIONS:
                 for l0 in L0S:
                     for ep in EPOCHS:
@@ -222,24 +232,28 @@ def sparse_grid():
     return grid
 
 
-def jobs_s3():
+def jobs_s3(families=None):
     # order so adjacent jobs (= concurrent workers) differ in model AND site family, and
     # never share an extraction artifact key: alternate cad/sp innermost, families next.
-    grid = sparse_grid()
+    grid = sparse_grid(families)
+    fams = FAMILIES if families is None else [(f, None) for f in families]
     for ep in EPOCHS:
         for l0 in L0S:
             for pos in POSITIONS:
-                for fam, _ in FAMILIES:
+                for fam, _ in fams:
                     for prefix in ("cad", "sp", "qw"):
                         tag = mtag(f"{prefix}_{fam}_{pos}_{l0tag(l0)}_ep{ep}")
                         yield tag, "s3", grid[tag][1]
 
 
-def ordered_jobs(stages):
+def ordered_jobs(stages, families=None):
     """s1-s3 job tuples, longest-running first (8B/7B before TinyStories)."""
     for stage_jobs, stage in ((jobs_s3, "s3"), (jobs_s2, "s2"), (jobs_s1, "s1")):
         if stage in stages:
-            yield from stage_jobs()
+            if stage_jobs is jobs_s3:
+                yield from stage_jobs(families)
+            else:
+                yield from stage_jobs()
 
 
 # ── config composition + cache access (the cache IS the resume state) ────────
@@ -345,7 +359,8 @@ def kl_jobs(done: dict, quiet: bool = False):
     overrides on top. Steering artifacts cache-hit, so only the (distinct, cheap,
     teacher-forced) eval artifact is computed. The picks need the s1-s3 metrics, so this
     runs behind the s1-s3 barrier."""
-    base = {tag: overrides for tag, _, overrides in ordered_jobs({"s1", "s2", "s3"})}
+    base = {tag: overrides for tag, _, overrides in ordered_jobs(
+        {"s1", "s2", "s3"}, families=[f for f, _ in FAMILIES] + list(EXTRA_FAMILIES))}
     jobs = []
     for prefix in ("ts", "sp", "cad", "qw"):
         fixed = mtag("ts_fixed") if prefix == "ts" else pick_fixed(done, prefix)
@@ -577,7 +592,8 @@ def harvest(args) -> dict[str, dict]:
     saved = (KL, SUITE_BENCHES, SUITE_CONDS)
     KL, SUITE_BENCHES, SUITE_CONDS = False, SUITE_BENCH_CHOICES, SUITE_COND_CHOICES
     try:
-        for tag, stage, overrides in ordered_jobs({"s1", "s2", "s3"}):
+        for tag, stage, overrides in ordered_jobs(
+                {"s1", "s2", "s3"}, families=[f for f, _ in FAMILIES] + list(EXTRA_FAMILIES)):
             m = cached_metrics(args, overrides)
             if m is not None:
                 done[tag] = m
@@ -632,7 +648,8 @@ def harvest_gates(args) -> None:
 
     rows: list[str] = []
     n_art = 0
-    for tag, (_, overrides) in {**ts_sparse_grid(), **sparse_grid()}.items():
+    for tag, (_, overrides) in {**ts_sparse_grid(), **sparse_grid(
+            [f for f, _ in FAMILIES] + list(EXTRA_FAMILIES))}.items():
         exp = compose_experiment(common(args) + overrides)
         hit = cache_lookup(ArtifactType.SPARSE_STEERING, exp.config, exp.task.task_name,
                            **exp._cache_kwargs(ArtifactType.SPARSE_STEERING))
@@ -690,6 +707,9 @@ def main():
     p.add_argument("--device", default="cuda")
     p.add_argument("--ngpu", type=int, help="cap the number of GPUs used (default: all visible)")
     p.add_argument("--only", help="run only these tags (comma list; smoke tests, refills)")
+    p.add_argument("--families", help="sparse grid families to enumerate (comma list from "
+                   "resid,mlp,attn,attnmlp,all4; default the standard three). Champion "
+                   "selection stays on the default families either way.")
     p.add_argument("--models", help="run only these model prefixes (comma list: ts,sp,cad,qw). "
                                     "Filters every stage by tag prefix, so --models qw runs the "
                                     "Qwen sleeper alone and leaves the other three untouched.")
@@ -739,7 +759,8 @@ def main():
             return not (models and tag.split("_", 1)[0] not in models)
 
         jobs = [("run", tag, stage, overrides)
-                for tag, stage, overrides in ordered_jobs(stages)
+                for tag, stage, overrides in ordered_jobs(
+                    stages, families=args.families.split(",") if args.families else None)
                 if _keep(tag)]
         if args.list:
             for _, tag, stage, overrides in jobs:
