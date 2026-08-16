@@ -391,54 +391,75 @@ def _refine_iti_head_select(experiment, model, tokenizer, extraction_ds, train_d
             "prompt-position mass-mean direction is null. Prompt-based positions are for σ only "
             "(iti_sigma_position=prompt_final / prompt_final_extra_q)."
         )
-    # Per-example per-site activations on the UNSTEERED model + truthful labels, for the probes.
-    # add_special_tokens comes from extraction_ds's own tokenize_add_special_tokens column.
-    with model.steering_disabled():
-        ds_acts, _ = collect_activations(
-            extraction_ds, model, tokenizer,
-            targets=components,
-            batch_size=int(config.extract_batch_size),
-            token_position=config.extract_token_position,
-        )
-    positive = torch.tensor(ds_acts["positive"])   # (n,) bool
-
     # Deploy the unit mass-mean directions; σ is measured along those same unit directions.
     model.set_all_vectors(steering_vectors, normalize=True)
 
-    # σ population (iti_sigma_position): "answer" (default = current sparse_steer) measures σ on the
-    # extraction answer-token activations; "question_end" measures it on the question-end activations
-    # (honest_llama's tqa_gen_end_q analogue) — see _question_end_sigma_acts. Head SELECTION always
-    # uses the discriminative answer activations (the truthful-vs-false probe signal); only the σ
-    # MAGNITUDE population changes.
-    sigma_position = str(config.get("iti_sigma_position", "answer"))
-    qend_acts = (
-        _sigma_population_acts(extraction_ds, model, tokenizer, config, components, sigma_position)
-        if sigma_position in _SIGMA_POP_MODES else None
-    )
-
-    # Per target: probe val-accuracy + σ per site, normalised to (L, H_c) with H_c=1 for single-gate
-    # (residual/mlp) targets. Then a GLOBAL top-K across all sites of all targets.
     scale = float(config.get("iti_scale", 15.0))  # ITI's α: a magnitude multiplier (not our log_alpha)
+    sigma_position = str(config.get("iti_sigma_position", "answer"))
+
+    # The probe fit and σ are independent of α and K, so they are cached once per
+    # (extraction, σ-population) as an ITI_PROBES artifact: any later (α, K)
+    # configuration selects and scales from the cached tables with no activation
+    # collection and no probe refit.
+    acc_by_c: dict[str, Tensor] = {}
     sigma_by_c: dict[str, Tensor] = {}
+    probes_hit = experiment._try_cache_lookup(ArtifactType.ITI_PROBES)
+    if probes_hit is not None:
+        probes = torch.load(probes_hit.artifact_path, map_location="cpu", weights_only=False)
+        acc_by_c = {c: probes["val_acc"][c] for c in components}
+        sigma_by_c = {c: probes["sigma"][c] for c in components}
+        cache_info["iti_probes"] = {"status": "hit", "path": str(probes_hit.artifact_path)}
+    else:
+        # Per-example per-site activations on the UNSTEERED model + truthful labels, for the probes.
+        # add_special_tokens comes from extraction_ds's own tokenize_add_special_tokens column.
+        with model.steering_disabled():
+            ds_acts, _ = collect_activations(
+                extraction_ds, model, tokenizer,
+                targets=components,
+                batch_size=int(config.extract_batch_size),
+                token_position=config.extract_token_position,
+            )
+        positive = torch.tensor(ds_acts["positive"])   # (n,) bool
+
+        # σ population (iti_sigma_position): "answer" (default = current sparse_steer) measures σ on the
+        # extraction answer-token activations; "question_end" measures it on the question-end activations
+        # (honest_llama's tqa_gen_end_q analogue) — see _question_end_sigma_acts. Head SELECTION always
+        # uses the discriminative answer activations (the truthful-vs-false probe signal); only the σ
+        # MAGNITUDE population changes.
+        qend_acts = (
+            _sigma_population_acts(extraction_ds, model, tokenizer, config, components, sigma_position)
+            if sigma_position in _SIGMA_POP_MODES else None
+        )
+
+        # Per target: probe val-accuracy + σ per site, normalised to (L, H_c) with H_c=1 for single-gate
+        # (residual/mlp) targets.
+        for c in components:
+            acts_c = torch.tensor(ds_acts[c]).float()
+            if acts_c.dim() == 3:                      # residual/mlp: (n, L, D) → one gate per layer
+                acts_c = acts_c.unsqueeze(2)           # (n, L, 1, D)
+            dir_c = steering_vectors[c].float()
+            if dir_c.dim() == 2:                       # (L, D) → (L, 1, D)
+                dir_c = dir_c.unsqueeze(1)
+            dir_c = F.normalize(dir_c, dim=-1)
+            # Probe fit runs on the GPU by default (iti_probe_device=auto) — the batched 300-step Adam
+            # optimisation was the CPU bottleneck of every ITI fit (~20 min with the GPU idle). Pass
+            # iti_probe_device=cpu to reproduce pre-2026-07-11 fits bit-for-bit (see probe.py docstring).
+            acc_by_c[c] = fit_head_probes(acts_c, positive, device=config.get("iti_probe_device", "auto")).cpu()
+            sigma_src = qend_acts[c] if qend_acts is not None else acts_c
+            sigma_by_c[c] = head_sigma(sigma_src, dir_c).cpu()  # (L, H_c)
+        probes_dest = experiment._prepare_cache_path(ArtifactType.ITI_PROBES)
+        torch.save({"val_acc": acc_by_c, "sigma": sigma_by_c,
+                    "sigma_position": sigma_position, "components": components}, probes_dest)
+        experiment._finalize_cache(ArtifactType.ITI_PROBES)
+        cache_info["iti_probes"] = {"status": "miss"}
+
+    # GLOBAL top-K across all sites of all targets.
     sites: list[tuple[float, str, int, int]] = []  # (val_acc, component, layer, gate)
     for c in components:
-        acts_c = torch.tensor(ds_acts[c]).float()
-        if acts_c.dim() == 3:                      # residual/mlp: (n, L, D) → one gate per layer
-            acts_c = acts_c.unsqueeze(2)           # (n, L, 1, D)
-        dir_c = steering_vectors[c].float()
-        if dir_c.dim() == 2:                       # (L, D) → (L, 1, D)
-            dir_c = dir_c.unsqueeze(1)
-        dir_c = F.normalize(dir_c, dim=-1)
-        # Probe fit runs on the GPU by default (iti_probe_device=auto) — the batched 300-step Adam
-        # optimisation was the CPU bottleneck of every ITI fit (~20 min with the GPU idle). Pass
-        # iti_probe_device=cpu to reproduce pre-2026-07-11 fits bit-for-bit (see probe.py docstring).
-        acc_c = fit_head_probes(acts_c, positive, device=config.get("iti_probe_device", "auto"))
-        sigma_src = qend_acts[c] if qend_acts is not None else acts_c
-        sigma_by_c[c] = head_sigma(sigma_src, dir_c)  # (L, H_c)
-        Lc, Hc = acc_c.shape
+        Lc, Hc = acc_by_c[c].shape
         for layer in range(Lc):
             for gate in range(Hc):
-                sites.append((float(acc_c[layer, gate]), c, layer, gate))
+                sites.append((float(acc_by_c[c][layer, gate]), c, layer, gate))
 
     sites.sort(key=lambda s: -s[0])
     k = min(int(config.get("iti_topk", 48)), len(sites))

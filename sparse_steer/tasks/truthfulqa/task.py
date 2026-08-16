@@ -244,6 +244,19 @@ class TruthfulQATask(TaskSpec):
                     "extraction_template", config.get("prompt_template", "chat")
                 ),
             }
+        if artifact_type == ArtifactType.ITI_PROBES:
+            return {
+                **base,
+                "extraction_mcq_mode": config.get(
+                    "extraction_mcq_mode", "mc1"
+                ),
+                "extraction_template": config.get(
+                    "extraction_template", config.get("prompt_template", "chat")
+                ),
+                # sigma is stored inside the artifact, so its population keys it
+                "iti_sigma_position": str(config.get("iti_sigma_position", "answer")),
+                "sigma_prompt_anchor": str(config.get("sigma_prompt_anchor", "answer_colon")),
+            }
         if artifact_type in (
             ArtifactType.SPARSE_STEERING,
             ArtifactType.STEERED_EVAL,

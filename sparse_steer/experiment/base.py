@@ -44,6 +44,12 @@ class Experiment(abc.ABC):
 
     def _cache_kwargs(self, artifact_type: ArtifactType) -> dict[str, Any]:
         extra_fields = dict(self.task.extra_cache_fields(artifact_type, self.config))
+        if self.config.get("refinement_method") == "iti_head_select" and artifact_type == (
+            ArtifactType.ITI_PROBES
+        ):
+            # deliberately no iti_topk / iti_scale: the probe accuracies and sigma are
+            # independent of both, so one probes artifact serves every (alpha, K)
+            extra_fields["refinement_method"] = "iti_head_select"
         if self.config.get("refinement_method") == "iti_head_select" and artifact_type in (
             ArtifactType.STEERED_EVAL, ArtifactType.SPARSE_STEERING
         ):

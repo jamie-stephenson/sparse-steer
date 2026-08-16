@@ -28,12 +28,24 @@ class ArtifactType(Enum):
     UNSTEERED_EVAL = "unsteered_eval"
     STEERED_EVAL = "steered_eval"
     BUCKETED_DATASET = "bucketed_dataset"
+    ITI_PROBES = "iti_probes"
 
 
 # Config fields that form the cache key for each artifact type.
 # Task-specific extras are appended by the experiment subclass.
 _CONFIG_FIELDS: dict[ArtifactType, list[str]] = {
     ArtifactType.STEERING_VECTORS: [
+        "model_name",
+        "weight_processing",
+        "seed",
+        "extraction_fraction",
+        "extract_batch_size",
+        "extract_token_position",
+        "targets",
+    ],
+    ArtifactType.ITI_PROBES: [
+        # the probe fit + sigma depend only on the extraction activations, not on
+        # iti_topk / iti_scale, so one artifact serves every (alpha, K) configuration
         "model_name",
         "weight_processing",
         "seed",
@@ -202,6 +214,7 @@ _SOURCE_FILES: dict[ArtifactType, list[str]] = {
 
 # Artifact filename stored in cache
 _ARTIFACT_FILENAMES: dict[ArtifactType, str] = {
+    ArtifactType.ITI_PROBES: "iti_probes.pt",
     ArtifactType.STEERING_VECTORS: "steering_vectors.pt",
     ArtifactType.SPARSE_STEERING: "sparse_steering.pt",
     ArtifactType.SELECTED_DIRECTION: "selected_direction.pt",
