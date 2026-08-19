@@ -2,6 +2,7 @@
 the reproducibility surface). Config composition reuses the runners' own override
 builders so every model/artifact loaded here is exactly a runner config."""
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -9,7 +10,9 @@ from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
-load_dotenv(ROOT / ".env")  # HF_TOKEN for gated/private hub downloads
+load_dotenv(ROOT / ".env")  # hub token for gated/private downloads
+if os.environ.get("HF_API_KEY") and not os.environ.get("HF_TOKEN"):
+    os.environ["HF_TOKEN"] = os.environ["HF_API_KEY"]  # hub reads HF_TOKEN
 
 SEL_SEED = 20260819          # example selection RNG (date-stamped, fixed)
 OUT_DIR = ROOT / "results" / "rollouts"
