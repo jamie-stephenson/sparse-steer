@@ -37,7 +37,7 @@ TQA_PICKS = {
 }
 
 
-def tqa_overrides(cell: str, fold: int, method: str) -> list[str]:
+def tqa_overrides(cell: str, fold: int, method: str, device: str = "cuda") -> list[str]:
     import run_tqa_experiments as R
 
     if method == "unsteered":
@@ -48,7 +48,7 @@ def tqa_overrides(cell: str, fold: int, method: str) -> list[str]:
         cfg = R.ITI + TQA_PICKS[cell]["iti"]
     else:
         raise ValueError(method)
-    return (R.CELLS[cell] + R.COMMON + R.batch_overrides(cell)
+    return (R.COMMON + [f"device={device}"] + R.CELLS[cell] + R.batch_overrides(cell)
             + ["eval_subset_size=null", f"fold={fold}"] + cfg)
 
 
