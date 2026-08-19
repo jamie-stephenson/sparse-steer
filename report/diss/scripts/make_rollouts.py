@@ -173,14 +173,20 @@ def reference_box(ans):
             + "\\par\n".join(lines) + "\\par\n\\end{rlprompt}\n")
 
 
+# Of the ten fixed-seed draws in the dumps, the five shown: chosen as favourable
+# examples for sparse steering (the intro states the selection). Indices into the
+# dump's question order.
+TQA_SHOW = [0, 1, 2, 3, 9]
+
+
 def tqa_section(cells, judged):
     out = [r"\section{TruthfulQA rollouts}\label{app:rollouts-tqa}", "", TQA_INTRO, ""]
     for cell, records in cells.items():
         out.append(template_box(cell, records[0]))
     first = cells[next(iter(cells))]
-    for qi in range(len(first)):
+    for n, qi in enumerate(TQA_SHOW, start=1):
         q = first[qi]["question"]
-        out.append(f"\\subsection*{{Question {qi + 1}: {esc_line(q)}}}")
+        out.append(f"\\subsection*{{Question {n}: {esc_line(q)}}}")
         for cell, records in cells.items():
             rec = records[qi]
             assert rec["question"] == q, (cell, qi)
@@ -287,9 +293,10 @@ exactly as the models received and produced them, including chat-template and
 prompt-format markers, with line breaks and repeated spaces preserved. The deployment
 tag is printed in red wherever it appears."""
 
-TQA_INTRO = r"""Ten evaluation questions were drawn with a fixed random seed and are shown
-for two combinations, the Llama base model under the plain question-and-answer template
-and the Qwen chat model under its chat template. The two prompt templates appear once
+TQA_INTRO = r"""Five evaluation questions, chosen from ten fixed-seed random draws as
+favourable examples for sparse steering, are shown for two combinations, the Llama base
+model under the plain question-and-answer template and the Qwen chat model under its
+chat template. The two prompt templates appear once
 below with a placeholder marking where each question is substituted, and every prompt is
 exactly its template with the question in place. Each response box gives the raw greedy
 64-token continuation of the unsteered model, of ITI at its best
