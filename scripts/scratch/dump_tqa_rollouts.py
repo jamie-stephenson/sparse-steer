@@ -51,7 +51,15 @@ def generate_raw(model, tokenizer, prompts, template, steer_pos):
             **inputs, max_new_tokens=MAX_NEW_TOKENS, do_sample=False
         )
         plen = inputs["input_ids"].shape[1]
-        return [tokenizer.decode(row[plen:], skip_special_tokens=False) for row in output_ids]
+        outs = []
+        for row in output_ids:
+            new = row[plen:].tolist()
+            # HF generate pads finished rows with eos; keep tokens up to and
+            # including the first real end token
+            if tokenizer.eos_token_id in new:
+                new = new[: new.index(tokenizer.eos_token_id) + 1]
+            outs.append(tokenizer.decode(new, skip_special_tokens=False))
+        return outs
 
 
 def run_cell(cell: str) -> None:
